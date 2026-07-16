@@ -1,0 +1,10 @@
+- [x] Create config.json with configuration settings for testing and production scaling
+- [x] Create pipeline package with __init__.py
+- [x] Implement pipeline/extractor.py (PDF text extraction, SQLite storage, Tesseract OCR fallback)
+- [x] Implement pipeline/analyzer.py (Ollama client, Topic extraction, Q&A SFT generation, DPO pair generation, Turkish translation fallback)
+- [x] Implement pipeline/vector_store.py (Chunking, Ollama embeddings, local Qdrant Vector DB)
+- [x] Implement pipeline/dataset_builder.py (Exporting SFT/DPO datasets to JSONL)
+- [x] Implement run.py (Unified CLI orchestrator)
+- [x] Create tests and verify the code using pytest
+- [x] Run sample test run (5 articles) to end-to-end verify the pipeline
+- [x] Create walkthrough.md summarizing the accomplishment

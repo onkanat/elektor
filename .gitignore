@@ -1,0 +1,26 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Databases (Local State)
+elektor_archive.db
+elektor_archive.db-journal
+elektor_archive.db-wal
+qdrant_db/
+
+# Exported training datasets
+exports/
+
+# Scratch files
+inspect_metadata.py
+test_ocr.py
+test_ollama_call.py
+test_ollama_no_json.py
+test_article_call.py
+usb_inventory_report.json
+
+# OS files
+.DS_Store

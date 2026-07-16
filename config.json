@@ -1,0 +1,12 @@
+{
+  "usb_path": "/Volumes/USB DISK",
+  "db_path": "elektor_archive.db",
+  "qdrant_db_path": "qdrant_db",
+  "ollama_url": "http://localhost:11434",
+  "model_embedding": "nomic-embed-text:latest",
+  "model_analyzer": "qwen3.5:2b",
+  "chunk_size": 800,
+  "chunk_overlap": 150,
+  "ocr_threshold_chars": 100,
+  "tesseract_cmd": "/opt/homebrew/bin/tesseract"
+}
