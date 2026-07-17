@@ -41,21 +41,26 @@ class DatasetBuilder:
             if sft_qa_json:
                 try:
                     sft_qa = json.loads(sft_qa_json)
-                    for item in sft_qa:
-                        q = item.get("question", "").strip()
-                        a = item.get("answer", "").strip()
-                        if q and a:
-                            sft_records.append({
-                                "instruction": q,
-                                "input": f"Context: Elektor Magazine ({year}) article '{title}'",
-                                "output": a
-                            })
-                            chat_records.append({
-                                "messages": [
-                                    {"role": "user", "content": q},
-                                    {"role": "assistant", "content": a}
-                                ]
-                            })
+                    if isinstance(sft_qa, dict):
+                        sft_qa = [sft_qa]
+                    if isinstance(sft_qa, list):
+                        for item in sft_qa:
+                            if not isinstance(item, dict):
+                                continue
+                            q = item.get("question", "").strip()
+                            a = item.get("answer", "").strip()
+                            if q and a:
+                                sft_records.append({
+                                    "instruction": q,
+                                    "input": f"Context: Elektor Magazine ({year}) article '{title}'",
+                                    "output": a
+                                })
+                                chat_records.append({
+                                    "messages": [
+                                        {"role": "user", "content": q},
+                                        {"role": "assistant", "content": a}
+                                    ]
+                                })
                 except Exception as e:
                     print(f"Error parsing SFT QA for article '{title}': {e}")
                     
@@ -63,16 +68,21 @@ class DatasetBuilder:
             if dpo_pairs_json:
                 try:
                     dpo_pairs = json.loads(dpo_pairs_json)
-                    for item in dpo_pairs:
-                        q = item.get("question", "").strip()
-                        chosen = item.get("chosen", "").strip()
-                        rej = item.get("rejected", "").strip()
-                        if q and chosen and rej:
-                            dpo_records.append({
-                                "prompt": q,
-                                "chosen": chosen,
-                                "rejected": rej
-                            })
+                    if isinstance(dpo_pairs, dict):
+                        dpo_pairs = [dpo_pairs]
+                    if isinstance(dpo_pairs, list):
+                        for item in dpo_pairs:
+                            if not isinstance(item, dict):
+                                continue
+                            q = item.get("question", "").strip()
+                            chosen = item.get("chosen", "").strip()
+                            rej = item.get("rejected", "").strip()
+                            if q and chosen and rej:
+                                dpo_records.append({
+                                    "prompt": q,
+                                    "chosen": chosen,
+                                    "rejected": rej
+                                })
                 except Exception as e:
                     print(f"Error parsing DPO pairs for article '{title}': {e}")
                     
