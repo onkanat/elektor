@@ -21,24 +21,30 @@ We have successfully updated the Elektor processing pipeline to decoupled models
 - The pipeline deterministically slices the exact same subset of active articles based on their sorted index across all stages (Extraction, English analysis, Turkish translation, and embedding). This ensures 100% alignment between pipeline phases during chunked range runs.
 
 ### 4. Database-Driven Embedding Checkpointing
-- Added an `is_embedded` column to the `articles` database schema, with automatic backwards compatibility migrations.
+- Added an `is_embedded` column to the `articles` database schema, with automatic migrations.
 - When `vector_store` processes articles, it queries only non-embedded articles (`is_embedded = 0`). Once successfully embedded and uploaded to Qdrant, it marks `is_embedded = 1` in SQLite.
-- This ensures that if the embedding process is interrupted (e.g. server down or timeout), it resumes exactly where it left off, avoiding duplicate embedding generations.
+- This ensures that if the embedding process is interrupted, it resumes exactly where it left off, avoiding duplicate embedding generations.
 
-### 5. Dataset Quality Optimizations
+### 5. Automated Data Reset (`--reset` Parameter)
+- Added an optional `--reset` boolean flag to the `run.py pipeline` CLI.
+- When `--reset` is passed, the script cleanly deletes the SQLite database file, removes the local Qdrant database directory, and unlinks all training datasets from the `exports/` folder before launching the pipeline.
+- Database recreate logic is fully self-healing and handles re-initialization cleanly.
+
+### 6. Dataset Quality Optimizations
 - **OCR Text Sanitization**: Added a comprehensive `clean_ocr_text` method in `extractor.py` to fix character substitutions and spacing in scanned PDF text.
 - **LaTeX Math Support**: Enforced LaTeX equation formatting (e.g. `\(p = \frac{n \cdot n_{cyl}}{60 \cdot a}\)`) for mathematical relationships.
-- **DPO Context Alignment**: Added the `input` field containing the source document metadata context to DPO records.
-- **Turkish SFT Template Diversification**: Expanded the Turkish instruction template to a randomized selection of **7 distinct phrasing patterns** to improve model generalization.
+- **DPO Context Alignment**: Added the `input` field containing the source document context to DPO records.
+- **Turkish SFT Template Diversification**: Expanded the Turkish SFT prompt template to a randomized selection of **7 distinct phrasing patterns** to improve model generalization.
 
 ---
 
 ## 📊 Pipeline Range Test Run Results
 
-We ran `python3.11 run.py pipeline --limit 17:19` end-to-end:
-- **Extraction**: Sliced range `[17:19]` (2 files). Skipped already extracted files.
-- **Pass 1**: Detected that those 2 articles were already enriched in English, so it correctly skipped Pass 1.
-- **Pass 2**: Detected both articles were awaiting translation and successfully translated both using TranslateGemma.
-- **Embedding**: Skipped embedding generation since they were already marked as `is_embedded = 1`.
-- **Dataset Compilation**: Compiled SFT, DPO, and Chat dataset JSONL files cleanly, increasing Turkish SFT samples from 15 to 17.
+We ran `python3.11 run.py pipeline --limit 2 --reset` end-to-end:
+- **Reset**: Successfully wiped SQLite DB, dropped the Qdrant DB directory, and cleared the exports folder.
+- **Extraction**: Sliced range `[0:2]`. Correctly re-extracted the first 2 PDFs.
+- **Pass 1**: Successfully analyzed both articles in English using Qwen.
+- **Pass 2**: Successfully translated both summaries and titles into Turkish using TranslateGemma.
+- **Embedding**: Automatically re-created the `elektor_articles` collection, generated embeddings, uploaded 11 vectors, and marked `is_embedded = 1` for both articles in SQLite.
+- **Dataset Compilation**: Compiled SFT, DPO, and Chat dataset JSONL files cleanly.
 - **Validation**: All unit tests passed successfully.

@@ -9,3 +9,4 @@
 - [x] Create `walkthrough.md` to document the completed execution
 - [x] Implement range-limit support (`start:end`) across all pipeline commands
 - [x] Implement vector embedding checkpointing (`is_embedded` tracking in SQLite)
+- [x] Implement `--reset` clean wipe parameter in `run.py pipeline` CLI

@@ -68,6 +68,7 @@ Examples:
     # Pipeline subcommand
     pipeline_parser = subparsers.add_parser("pipeline", help="Run extract, enrich, embed, and export in a single run")
     pipeline_parser.add_argument("--limit", type=parse_limit, default="5", help="Limit the number of sample articles to process (supports range 'start:end')")
+    pipeline_parser.add_argument("--reset", action="store_true", help="Reset all databases and exported datasets before running the pipeline")
     
     args = parser.parse_args()
     
@@ -116,6 +117,47 @@ Examples:
     elif args.command == "pipeline":
         print("=== RUNNING FULL PIPELINE ===")
         limit = args.limit
+        
+        if args.reset:
+            print("\n--- Resetting pipeline data (clean wipe) ---")
+            import os
+            from pathlib import Path
+            import json
+            
+            config_path = "config.json"
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+                
+            # 1. Delete SQLite Database file
+            db_file = Path(config["db_path"])
+            if db_file.exists():
+                print(f"Deleting SQLite database: {db_file}")
+                try:
+                    db_file.unlink()
+                except Exception as e:
+                    print(f"Warning: Could not delete SQLite database: {e}")
+                    
+            # 2. Delete Qdrant Database folder
+            import shutil
+            qdrant_dir = Path(config["qdrant_db_path"])
+            if qdrant_dir.exists():
+                print(f"Deleting Qdrant database folder: {qdrant_dir}")
+                try:
+                    shutil.rmtree(qdrant_dir)
+                except Exception as e:
+                    print(f"Warning: Could not delete Qdrant folder: {e}")
+                
+            # 3. Clear Export JSONL files
+            export_dir = Path("exports")
+            if export_dir.exists():
+                print("Clearing exports directory...")
+                for file in export_dir.glob("*.jsonl"):
+                    try:
+                        file.unlink()
+                    except Exception as e:
+                        print(f"Warning: Could not delete export file {file.name}: {e}")
+            print("Reset completed successfully. Starting pipeline from clean state.\n")
+            
         print(f"Processing sample limit: {limit} articles...\n")
         
         # 1. Extract
