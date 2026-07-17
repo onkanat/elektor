@@ -98,7 +98,8 @@ class ArchiveAnalyzer:
             "}\n\n"
             "Guidelines:\n"
             "1. In the DPO pair, the rejected answer must contain a realistic engineering mistake (e.g. swapping TX/RX, omitting pullups, missing decoupling capacitors, wrong pin definitions) related to the article.\n"
-            "2. Return ONLY the JSON object. Do not include markdown code block formatting."
+            "2. Format any mathematical equations or formulas using standard LaTeX notation, for example: \\(p = \\frac{n \\cdot n_{cyl}}{60 \\cdot a}\\) instead of plain text.\n"
+            "3. Return ONLY the JSON object. Do not include markdown code block formatting."
         )
         
         result = self.call_ollama_json(system_prompt, user_prompt, model=self.model_name)

@@ -20,6 +20,13 @@ We have successfully updated the Elektor processing pipeline to decoupled models
 - Pointed the pipeline to the remote Ollama server at `http://192.168.1.14:11434`.
 - **404 Recovery**: During testing, the embedding model `nomic-embed-text:latest` was missing on the server. We remotely pulled it (`curl -d '{"name": "nomic-embed-text:latest"}' http://192.168.1.14:11434/api/pull`) to resolve the error and enable successful embedding uploads to local Qdrant.
 
+### 4. Dataset Quality Optimizations
+We implemented the following quality optimizations based on the 10-article dataset evaluation:
+- **OCR Text Sanitization**: Added a comprehensive `clean_ocr_text` method in `extractor.py` to target character substitutions and broken spacing in scanned PDF text from the first 10 years (e.g. `sw1ng1ng` -> `swinging`, `c1rcu1t` -> `circuit`, `l0nF` -> `10nF`, `oparnp` -> `op-amp`).
+- **LaTeX Math Support**: Updated Qwen analyzer prompt rules to enforce standard LaTeX equation formatting (e.g. `\(p = \frac{n \cdot n_{cyl}}{60 \cdot a}\)`) for mathematical relationships.
+- **DPO Context Alignment**: Added the `input` field containing the source document metadata context to DPO records, bringing parity to the SFT training structure.
+- **Turkish SFT Template Diversification**: Expanded the Turkish instruction template to a randomized selection of **7 distinct phrasing patterns** to improve model generalization and prevent overfitting.
+
 ---
 
 ## 📊 Pipeline Test Run Results

@@ -80,6 +80,7 @@ class DatasetBuilder:
                             if q and chosen and rej:
                                 dpo_records.append({
                                     "prompt": q,
+                                    "input": f"Context: Elektor Magazine ({year}) article '{title}'",
                                     "chosen": chosen,
                                     "rejected": rej
                                 })
@@ -88,8 +89,19 @@ class DatasetBuilder:
                     
             # Turkish SFT dataset (Summary and Title QA)
             if tr_title and tr_summary:
+                import random
+                tr_templates = [
+                    "Elektor dergisinde {year} yılında yayınlanan '{title}' makalesi ne hakkındadır? Kısaca özetler misiniz?",
+                    "Lütfen {year} yılına ait '{title}' başlıklı Elektor makalesinin özetini Türkçe olarak yazın.",
+                    "Elektor dergisindeki '{title}' ({year}) çalışmasının ana konusunu ve teknik içeriğini özetleyebilir misiniz?",
+                    "{year} basımı Elektor dergisi içeriğindeki '{title}' yazısı hangi teknik konuları ele alıyor ve neyi özetliyor?",
+                    "'{title}' ({year}) isimli Elektor makalesinin Türkçe özetini ve hedeflenen konuları paylaşır mısınız?",
+                    "Elektor bünyesinde {year} yılında çıkan '{title}' makalesi hakkında bilgi verip kısaca özetler misiniz?",
+                    "'{title}' ({year}) başlıklı teknik Elektor makalesinin içeriğini Türkçe olarak özetleyiniz."
+                ]
+                tr_prompt = random.choice(tr_templates).format(year=year, title=tr_title)
                 tr_sft_records.append({
-                    "instruction": f"Elektor dergisinde {year} yılında yayınlanan '{tr_title}' makalesi ne hakkındadır? Kısaca özetler misiniz?",
+                    "instruction": tr_prompt,
                     "input": "",
                     "output": tr_summary.strip()
                 })

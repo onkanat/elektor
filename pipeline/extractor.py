@@ -105,6 +105,64 @@ class ArchiveExtractor:
             print(f"  Error rendering/OCRing {pdf_path}: {e}")
             return "", False
 
+    def clean_ocr_text(self, text):
+        """Sanitizes text by replacing common OCR character recognition mistakes"""
+        if not text:
+            return text
+            
+        # 1. Spaced words or broken hyphenations
+        text = text.replace("circu it", "circuit")
+        text = text.replace("circu its", "circuits")
+        text = text.replace("transi stor", "transistor")
+        text = text.replace("transi stors", "transistors")
+        text = text.replace("resis tor", "resistor")
+        text = text.replace("resis tors", "resistors")
+        text = text.replace("capaci tor", "capacitor")
+        text = text.replace("capaci tors", "capacitors")
+        text = text.replace("op- arnp", "op-amp")
+        text = text.replace("op arnp", "op-amp")
+        
+        # 2. Specific word replacements with word boundaries
+        import re
+        replacements = {
+            r"\bsw1ng1ng\b": "swinging",
+            r"\bc1rcu1t\b": "circuit",
+            r"\bc1rcu1ts\b": "circuits",
+            r"\bd1stortion\b": "distortion",
+            r"\bd1g1tal\b": "digital",
+            r"\bl1kew1se\b": "likewise",
+            r"\bampl1f1er\b": "amplifier",
+            r"\bampl1f1ers\b": "amplifiers",
+            r"\btrans1stor\b": "transistor",
+            r"\btrans1stors\b": "transistors",
+            r"\bres1stor\b": "resistor",
+            r"\bres1stors\b": "resistors",
+            r"\bcapac1tor\b": "capacitor",
+            r"\bcapac1tors\b": "capacitors",
+            r"\b74I0\b": "7410",
+            r"\b1C11\b": "IC11",
+            r"\boparnp\b": "op-amp",
+            r"\barnp\b": "amp",
+            r"\barnps\b": "amps",
+            r"\brnicro\b": "micro",
+            r"\bcligital\b": "digital",
+            r"\banaclog\b": "analogue",
+            r"\bF1gute\b": "Figure",
+            r"\bf1gure\b": "figure",
+            r"\bf1gures\b": "figures",
+            r"\bF1g\b": "Figure",
+            r"\bf1g\b": "figure",
+            r"\bl0nF\b": "10nF",
+            r"\bl00nF\b": "100nF",
+            r"\blµF\b": "1µF",
+            r"\bl0µF\b": "10µF",
+        }
+        
+        for pattern, replacement in replacements.items():
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+            
+        return text
+
     def extract_text_from_pdf(self, pdf_path):
         """Attempts to extract digital text. If too short, falls back to OCR."""
         text_parts = []
@@ -191,6 +249,8 @@ class ArchiveExtractor:
                 
             # Extract text
             extracted_text, is_ocr = self.extract_text_from_pdf(pdf_path)
+            extracted_text = self.clean_ocr_text(extracted_text)
+            title = self.clean_ocr_text(title)
             
             # Save or Update SQLite
             processed_at = datetime.now().isoformat()
