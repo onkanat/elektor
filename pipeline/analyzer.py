@@ -166,23 +166,38 @@ class ArchiveAnalyzer:
         """Enriches extracted articles in SQLite DB using a two-pass batch optimization"""
         cursor = self.conn.cursor()
         
+        # Parse range limit if range format
+        start, end = 0, None
+        if isinstance(limit, tuple):
+            start, end = limit
+        elif isinstance(limit, int):
+            start, end = 0, limit
+            
+        # Get active IDs based on entire articles set to align passes deterministically
+        cursor.execute("SELECT id FROM articles ORDER BY id")
+        all_ids = [r[0] for r in cursor.fetchall()]
+        active_ids = all_ids[start:end] if end is not None else all_ids[start:]
+        
+        if not active_ids:
+            print("No active articles in the specified range.")
+            return
+            
+        placeholders = ",".join(["?"] * len(active_ids))
+        
         # --- PASS 1: English Technical Analysis (Qwen Model) ---
-        cursor.execute("""
+        cursor.execute(f"""
             SELECT a.id, a.title, a.extracted_text 
             FROM articles a
             LEFT JOIN enrichments e ON a.id = e.article_id
             WHERE e.id IS NULL AND a.extracted_text IS NOT NULL AND a.extracted_text != ''
-        """)
+            AND a.id IN ({placeholders})
+        """, active_ids)
         pass1_rows = cursor.fetchall()
         
         if pass1_rows:
-            print(f"Pass 1: Found {len(pass1_rows)} articles awaiting English enrichment.")
+            print(f"Pass 1: Found {len(pass1_rows)} articles awaiting English enrichment in range [{start}:{end if end is not None else len(all_ids)}].")
             count1 = 0
             for row in pass1_rows:
-                if limit and count1 >= limit:
-                    print(f"Reached English enrichment limit of {limit} articles.")
-                    break
-                    
                 article_id, title, text = row
                 try:
                     eng_data = self.analyze_article_english(article_id, title, text)
@@ -217,25 +232,22 @@ class ArchiveAnalyzer:
             except Exception as e:
                 print(f"Warning: Failed to unload main model: {e}")
         else:
-            print("Pass 1: No articles require English enrichment.")
+            print("Pass 1: No articles require English enrichment in the specified range.")
             
         # --- PASS 2: Turkish Translation (TranslateGemma Model) ---
-        cursor.execute("""
+        cursor.execute(f"""
             SELECT e.article_id, a.title, e.summary 
             FROM enrichments e
             JOIN articles a ON e.article_id = a.id
-            WHERE e.turkish_summary IS NULL OR e.turkish_summary = ''
-        """)
+            WHERE (e.turkish_summary IS NULL OR e.turkish_summary = '')
+            AND e.article_id IN ({placeholders})
+        """, active_ids)
         pass2_rows = cursor.fetchall()
         
         if pass2_rows:
-            print(f"\nPass 2: Found {len(pass2_rows)} articles awaiting Turkish translation.")
+            print(f"\nPass 2: Found {len(pass2_rows)} articles awaiting Turkish translation in range [{start}:{end if end is not None else len(all_ids)}].")
             count2 = 0
             for row in pass2_rows:
-                if limit and count2 >= limit:
-                    print(f"Reached Turkish translation limit of {limit} articles.")
-                    break
-                    
                 article_id, title, summary = row
                 if not summary or summary == "Summary unavailable.":
                     continue

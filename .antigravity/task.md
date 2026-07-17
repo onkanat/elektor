@@ -7,3 +7,5 @@
 - [x] Execute a 2-sample pipeline run `python3.11 run.py pipeline --limit 2` to end-to-end verify the changes
 - [x] Verify database entries contain both English Q&A/DPO pairs and TranslateGemma Turkish translations
 - [x] Create `walkthrough.md` to document the completed execution
+- [x] Implement range-limit support (`start:end`) across all pipeline commands
+- [x] Implement vector embedding checkpointing (`is_embedded` tracking in SQLite)

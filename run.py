@@ -5,6 +5,27 @@ from pipeline.analyzer import ArchiveAnalyzer
 from pipeline.vector_store import ArchiveVectorStore
 from pipeline.dataset_builder import DatasetBuilder
 
+def parse_limit(limit_str):
+    """Parses limit parameter. Supports integer (e.g. 5) or range (e.g. '1000:2000')."""
+    if limit_str is None:
+        return None
+    limit_str = str(limit_str).strip()
+    if not limit_str:
+        return None
+    if ":" in limit_str:
+        parts = limit_str.split(":")
+        try:
+            start = int(parts[0]) if parts[0] else 0
+            end = int(parts[1]) if parts[1] else None
+            return (start, end)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"Invalid range format: {limit_str}. Use 'start:end' with integers.")
+    else:
+        try:
+            return int(limit_str)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"Invalid limit: {limit_str}. Must be an integer or range like 'start:end'.")
+
 def main():
     parser = argparse.ArgumentParser(
         description="Elektor Magazine Archive Processing Pipeline CLI",
@@ -12,11 +33,13 @@ def main():
         epilog="""
 Examples:
   python run.py extract --limit 5
+  python run.py extract --limit 1000:2000
   python run.py enrich --limit 5
   python run.py embed --limit 5
   python run.py query "ESP32 bluetooth low energy"
   python run.py export
   python run.py pipeline --limit 5
+  python run.py pipeline --limit 1000:2000
 """
     )
     
@@ -24,15 +47,15 @@ Examples:
     
     # Extract subcommand
     extract_parser = subparsers.add_parser("extract", help="Extract text and metadata from PDFs")
-    extract_parser.add_argument("--limit", type=int, default=None, help="Limit the number of files to process")
+    extract_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit the number of files to process (supports range 'start:end')")
     
     # Enrich subcommand
     enrich_parser = subparsers.add_parser("enrich", help="Enrich text using local Ollama model (Summary, Q&A, DPO, Turkish)")
-    enrich_parser.add_argument("--limit", type=int, default=None, help="Limit the number of articles to enrich")
+    enrich_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit the number of articles to enrich (supports range 'start:end')")
     
     # Embed subcommand
     embed_parser = subparsers.add_parser("embed", help="Chunk text, generate embeddings, and load to local Qdrant Vector DB")
-    embed_parser.add_argument("--limit", type=int, default=None, help="Limit the number of articles to embed")
+    embed_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit the number of articles to embed (supports range 'start:end')")
     
     # Query subcommand
     query_parser = subparsers.add_parser("query", help="Query the local Qdrant Vector DB (RAG search)")
@@ -44,7 +67,7 @@ Examples:
     
     # Pipeline subcommand
     pipeline_parser = subparsers.add_parser("pipeline", help="Run extract, enrich, embed, and export in a single run")
-    pipeline_parser.add_argument("--limit", type=int, default=5, help="Limit the number of sample articles to process")
+    pipeline_parser.add_argument("--limit", type=parse_limit, default="5", help="Limit the number of sample articles to process (supports range 'start:end')")
     
     args = parser.parse_args()
     

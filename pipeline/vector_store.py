@@ -87,23 +87,35 @@ class ArchiveVectorStore:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Get articles that have text
-        cursor.execute("SELECT id, title, year, filename, extracted_text FROM articles WHERE extracted_text IS NOT NULL AND extracted_text != ''")
+        # Parse range limit if range format
+        start, end = 0, None
+        if isinstance(limit, tuple):
+            start, end = limit
+        elif isinstance(limit, int):
+            start, end = 0, limit
+            
+        # Get articles that have text and are not yet embedded
+        cursor.execute("SELECT id, title, year, filename, extracted_text FROM articles WHERE extracted_text IS NOT NULL AND extracted_text != '' AND is_embedded = 0")
         rows = cursor.fetchall()
         
-        print(f"Loading {len(rows)} articles into Vector DB...")
+        if not rows:
+            print("No new articles to embed.")
+            conn.close()
+            return
+            
+        sliced_rows = rows[start:end] if end is not None else rows[start:]
+        print(f"Loading {len(rows)} non-embedded articles. Processing range [{start}:{end if end is not None else len(rows)}] ({len(sliced_rows)} articles) into Vector DB...")
         
         count = 0
         points_to_upload = []
+        embedded_article_ids = []
         
-        for row in rows:
-            if limit and count >= limit:
-                break
-                
+        for row in sliced_rows:
             article_id, title, year, filename, text = row
             print(f"Embedding article [{article_id}]: {title}...")
             
             chunks = self.chunk_text(text)
+            article_success = True
             for chunk_idx, chunk in enumerate(chunks):
                 try:
                     # Get embedding vector
@@ -128,7 +140,10 @@ class ArchiveVectorStore:
                     ))
                 except Exception as e:
                     print(f"  Failed to embed chunk {chunk_idx} of article {article_id}: {e}")
+                    article_success = False
             
+            if article_success:
+                embedded_article_ids.append(article_id)
             count += 1
             
         # Upload all points to Qdrant
@@ -139,6 +154,11 @@ class ArchiveVectorStore:
                 points=points_to_upload
             )
             print("Upload completed.")
+            
+            # Mark successfully uploaded articles as embedded in SQLite
+            for art_id in embedded_article_ids:
+                cursor.execute("UPDATE articles SET is_embedded = 1 WHERE id = ?", (art_id,))
+            conn.commit()
             
         conn.close()
 

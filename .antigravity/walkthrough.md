@@ -1,6 +1,6 @@
-# Elektor Pipeline Decoupled Batch Model Update Walkthrough
+# Elektor Pipeline Update & Range Limit Walkthrough
 
-We have successfully updated the Elektor processing pipeline to decoupled models using a high-efficiency **Two-Pass Batch** architecture. This avoids loading and unloading models for every single article, cutting model load time down to a single instance per pipeline execution.
+We have successfully updated the Elektor processing pipeline to decoupled models using a high-efficiency **Two-Pass Batch** architecture and implemented robust checkpointing and range-based batch execution.
 
 ---
 
@@ -8,41 +8,37 @@ We have successfully updated the Elektor processing pipeline to decoupled models
 
 ### 1. Dedicated Translation Model Integration
 - Integrated Google's **`translategemma:12b-it-q4_K_M`** for dedicated English-to-Turkish translation of titles and summaries.
-- Configured **`qwen3.6:35b-a3b-mtp-q4_K_M`** (which runs at 70.08 t/s) as the primary generation model for English summarization, topic extraction, Q&A (SFT), and DPO pair generation.
+- Configured **`qwen3.6:35b-a3b-mtp-q4_K_M`** as the primary generation model for English summarization, topic extraction, Q&A (SFT), and DPO pair generation.
 
 ### 2. Two-Pass Batch Architecture
 - Split the analyzer step into two separate loop passes over the article set:
-  - **Pass 1 (English Technical Analysis)**: Loops through all un-enriched articles using `qwen3.6:35b-a3b-mtp-q4_K_M`. The model remains warm in memory throughout the loop and is unloaded immediately when the loop completes.
-  - **Pass 2 (Turkish Translation)**: Loops through successfully enriched articles using `translategemma:12b-it-q4_K_M` to translate the English outputs. The model is kept warm in memory and unloaded immediately when the translation loop completes.
+  - **Pass 1 (English Technical Analysis)**: Loops through all un-enriched articles using Qwen. The model remains warm in memory throughout the loop and is unloaded immediately when the loop completes.
+  - **Pass 2 (Turkish Translation)**: Loops through successfully enriched articles using TranslateGemma. The model is kept warm in memory and unloaded immediately when the translation loop completes.
 - This decoupled batch design **completely eliminates** the 3.5-minute model reload overhead per article, reducing it to a single reload cost per run!
 
-### 3. Remote Server Settings & Recovery
-- Pointed the pipeline to the remote Ollama server at `http://192.168.1.14:11434`.
-- **404 Recovery**: During testing, the embedding model `nomic-embed-text:latest` was missing on the server. We remotely pulled it (`curl -d '{"name": "nomic-embed-text:latest"}' http://192.168.1.14:11434/api/pull`) to resolve the error and enable successful embedding uploads to local Qdrant.
+### 3. Aligned Range Limit (`start:end` format)
+- Updated `--limit` parameter across all CLI subcommands to support range slices (e.g. `--limit 1000:2000` or `--limit 0:10`).
+- The pipeline deterministically slices the exact same subset of active articles based on their sorted index across all stages (Extraction, English analysis, Turkish translation, and embedding). This ensures 100% alignment between pipeline phases during chunked range runs.
 
-### 4. Dataset Quality Optimizations
-We implemented the following quality optimizations based on the 10-article dataset evaluation:
-- **OCR Text Sanitization**: Added a comprehensive `clean_ocr_text` method in `extractor.py` to target character substitutions and broken spacing in scanned PDF text from the first 10 years (e.g. `sw1ng1ng` -> `swinging`, `c1rcu1t` -> `circuit`, `l0nF` -> `10nF`, `oparnp` -> `op-amp`).
-- **LaTeX Math Support**: Updated Qwen analyzer prompt rules to enforce standard LaTeX equation formatting (e.g. `\(p = \frac{n \cdot n_{cyl}}{60 \cdot a}\)`) for mathematical relationships.
-- **DPO Context Alignment**: Added the `input` field containing the source document metadata context to DPO records, bringing parity to the SFT training structure.
-- **Turkish SFT Template Diversification**: Expanded the Turkish instruction template to a randomized selection of **7 distinct phrasing patterns** to improve model generalization and prevent overfitting.
+### 4. Database-Driven Embedding Checkpointing
+- Added an `is_embedded` column to the `articles` database schema, with automatic backwards compatibility migrations.
+- When `vector_store` processes articles, it queries only non-embedded articles (`is_embedded = 0`). Once successfully embedded and uploaded to Qdrant, it marks `is_embedded = 1` in SQLite.
+- This ensures that if the embedding process is interrupted (e.g. server down or timeout), it resumes exactly where it left off, avoiding duplicate embedding generations.
 
----
-
-## 📊 Pipeline Test Run Results
-
-We ran `python3.11 run.py pipeline --limit 2` end-to-end:
-- **Pass 1**: Successfully generated summaries, topics, Q&A, and DPO pairs using Qwen 35B. Qwen model unloaded successfully.
-- **Pass 2**: Successfully translated the title and English summary into Turkish using TranslateGemma. TranslateGemma model unloaded successfully.
-- **Embedding Generation**: Loaded 19 articles, successfully embedded all chunks using the freshly pulled remote `nomic-embed-text:latest` model, and uploaded 11 vectors to local Qdrant.
-- **Training Datasets**: Exported SFT, DPO, and Chat dataset JSONL files successfully.
+### 5. Dataset Quality Optimizations
+- **OCR Text Sanitization**: Added a comprehensive `clean_ocr_text` method in `extractor.py` to fix character substitutions and spacing in scanned PDF text.
+- **LaTeX Math Support**: Enforced LaTeX equation formatting (e.g. `\(p = \frac{n \cdot n_{cyl}}{60 \cdot a}\)`) for mathematical relationships.
+- **DPO Context Alignment**: Added the `input` field containing the source document metadata context to DPO records.
+- **Turkish SFT Template Diversification**: Expanded the Turkish instruction template to a randomized selection of **7 distinct phrasing patterns** to improve model generalization.
 
 ---
 
-## 🔍 Database Inspection (Sample Entry)
+## 📊 Pipeline Range Test Run Results
 
-The database shows the stellar translation quality of the dedicated TranslateGemma model:
-- **English Summary (Qwen 35B)**:
-  > "This text introduces the first English edition of Elektor magazine, highlighting its history in Dutch and German markets and its commitment to practical electronics design..."
-- **Turkish Summary (TranslateGemma 12B)**:
-  > "Bu metin, Elektron dergisinin ilk İngilizce baskısını tanıtmakta olup, derginin Hollanda ve Almanya pazarlarındaki tarihine ve modern entegre devreleri kullanarak pratik elektronik tasarımına olan bağlılığına vurgu yapmaktadır..."
+We ran `python3.11 run.py pipeline --limit 17:19` end-to-end:
+- **Extraction**: Sliced range `[17:19]` (2 files). Skipped already extracted files.
+- **Pass 1**: Detected that those 2 articles were already enriched in English, so it correctly skipped Pass 1.
+- **Pass 2**: Detected both articles were awaiting translation and successfully translated both using TranslateGemma.
+- **Embedding**: Skipped embedding generation since they were already marked as `is_embedded = 1`.
+- **Dataset Compilation**: Compiled SFT, DPO, and Chat dataset JSONL files cleanly, increasing Turkish SFT samples from 15 to 17.
+- **Validation**: All unit tests passed successfully.

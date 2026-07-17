@@ -37,10 +37,18 @@ class ArchiveExtractor:
                 zoom_snippet TEXT,
                 extracted_text TEXT,
                 is_ocr INTEGER,
+                is_embedded INTEGER DEFAULT 0,
                 processed_at TEXT
             )
         """)
         self.conn.commit()
+        
+        # Backward compatibility migration for is_embedded column
+        try:
+            cursor.execute("SELECT is_embedded FROM articles LIMIT 1")
+        except sqlite3.OperationalError:
+            cursor.execute("ALTER TABLE articles ADD COLUMN is_embedded INTEGER DEFAULT 0")
+            self.conn.commit()
 
     def load_zoom_metadata(self):
         """Reads zoom_pageinfo.csv and builds a mapping of filename -> zoom snippet & title"""
@@ -196,6 +204,13 @@ class ArchiveExtractor:
             print(f"Error: Articles directory not found at {self.articles_dir}")
             return
             
+        # Parse range limit if range format
+        start, end = 0, None
+        if isinstance(limit, tuple):
+            start, end = limit
+        elif isinstance(limit, int):
+            start, end = 0, limit
+            
         zoom_metadata = self.load_zoom_metadata()
         cursor = self.conn.cursor()
         
@@ -209,12 +224,12 @@ class ArchiveExtractor:
         print(f"Found {len(pdf_paths)} total PDFs in {self.articles_dir}")
         pdf_paths = sorted(pdf_paths)
         
+        # Apply slice based on range
+        sliced_paths = pdf_paths[start:end] if end is not None else pdf_paths[start:]
+        print(f"Processing range [{start}:{end if end is not None else len(pdf_paths)}] ({len(sliced_paths)} files)...")
+        
         count = 0
-        for pdf_path in pdf_paths:
-            if limit and count >= limit:
-                print(f"Reached extraction limit of {limit} files.")
-                break
-                
+        for pdf_path in sliced_paths:
             # Get path relative to the usb articles dir
             rel_path = str(pdf_path.relative_to(self.articles_dir.parent))
             filename = pdf_path.name
