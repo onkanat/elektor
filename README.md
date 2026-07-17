@@ -7,22 +7,21 @@ An end-to-end Python pipeline designed to extract, enrich, embed, and query the 
 ## 🚀 Features
 
 1. **PDF Text Extraction**: Extracts digital text from PDFs and falls back to **Tesseract OCR** (via `pypdfium2` rendering at 300 DPI) for scanned articles.
-2. **Local AI Enrichment (Ollama)**: Uses local LLMs (e.g. `qwen3.5:2b`) to generate:
-   - Summaries and topics (English).
-   - SFT (Supervised Fine-Tuning) Q&A pairs (English).
-   - DPO (Direct Preference Optimization) pairs (English) with realistic hardware design errors in rejected responses.
-   - Turkish title and summary translations.
+2. **Local AI Enrichment (Ollama)**: Uses decoupled models in a **Two-Pass Batch** architecture:
+   - **Pass 1 (English Technical Analysis)**: Uses `qwen3.6:35b-a3b-mtp-q4_K_M` to generate summaries, topics, SFT Q&A pairs, and DPO pairs (with realistic hardware errors).
+   - **Pass 2 (Turkish Translation)**: Uses `translategemma:12b-it-q4_K_M` to translate the generated title and summary into high-quality Turkish.
 3. **Local Vector Database (RAG)**: Chunks article text based on word boundaries and indexes them in a local **Qdrant DB** using Ollama's `nomic-embed-text:latest` embedding model.
 4. **Dataset Export**: Compiles enriched articles into training datasets (`sft_dataset.jsonl`, `dpo_dataset.jsonl`, `chat_dataset.jsonl`, and `tr_sft_dataset.jsonl`).
 
 ---
 
-## 🛠️ Optimizations for Local Hardware
+## 🛠️ Performance & Memory Optimizations
 
-To support running on standard laptop hardware (e.g. Apple Silicon M2 CPU/iGPU) during development, the following optimizations are implemented:
-- **Single-Call AI completion**: Instead of 4 separate calls, all enrichments (Summary, Topics, Q&A, DPO, Turkish translation) are requested in **one combined JSON completions request**.
+To support high-capacity batch runs without memory leakage or excessive model reload overhead:
+- **Two-Pass Batch Architecture**: The enrichment step executes in two distinct passes. First, it processes all articles using the Qwen analyzer model, then unloads it. Next, it processes the batch translation using the TranslateGemma model. This completely eliminates model reload overhead per article.
+- **VRAM Voids (`keep_alive=0`)**: Explicitly unloads each model from memory at the end of its respective pass, preventing memory leakage and freeing VRAM.
 - **Prompt Truncation**: Truncates article text to the first 4000 characters to reduce prompt ingestion time and RAM usage.
-- **Suppressed Reasoning (`think=False`)**: Forces the reasoning model (like Qwen 3.5 Instruct) to completely skip the internal thought process output, generating content directly to prevent timeouts and token limit cutoffs.
+- **Suppressed Reasoning (`think=False`)**: Forces reasoning models to skip internal thought processes, generating output directly to prevent timeouts.
 
 ---
 
@@ -74,9 +73,10 @@ Adjust parameters in the `config.json` file:
   "usb_path": "/Volumes/USB DISK",
   "db_path": "elektor_archive.db",
   "qdrant_db_path": "qdrant_db",
-  "ollama_url": "http://localhost:11434",
+  "ollama_url": "http://192.168.1.14:11434",
   "model_embedding": "nomic-embed-text:latest",
-  "model_analyzer": "qwen3.5:2b",
+  "model_analyzer": "qwen3.6:35b-a3b-mtp-q4_K_M",
+  "model_translator": "translategemma:12b-it-q4_K_M",
   "chunk_size": 800,
   "chunk_overlap": 150,
   "ocr_threshold_chars": 100,
@@ -132,8 +132,8 @@ python3.11 run.py export
 
 When migrating from local testing to a high-capacity production server:
 1. Update `"usb_path"` in `config.json` if directories have changed.
-2. Update `"ollama_url"` to point to the remote/local network Ollama server.
-3. Change `"model_analyzer"` to a larger model (e.g. `qwen2.5:72b` or `llama3.3:70b`).
+2. Update `"ollama_url"` to point to the production Ollama network server (e.g., `http://192.168.1.14:11434`).
+3. Set the target `"model_analyzer"` (e.g. `qwen3.6:35b-a3b-mtp-q4_K_M`) and `"model_translator"` (e.g. `translategemma:12b-it-q4_K_M`).
 4. Run without limit parameters to ingest the complete archive:
    ```bash
    python3.11 run.py pipeline
