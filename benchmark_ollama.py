@@ -7,7 +7,7 @@ import ollama
 def benchmark_models(host, prompt):
     print(f"Connecting to Ollama server at: {host}...")
     try:
-        client = ollama.Client(host=host)
+        client = ollama.Client(host=host, timeout=180.0)
         models_list = client.list().models
     except Exception as e:
         print(f"Error connecting to Ollama server: {e}")

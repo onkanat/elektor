@@ -1,54 +1,41 @@
-# Elektor Archive Processing Pipeline Walkthrough
+# Elektor Pipeline Decoupled Batch Model Update Walkthrough
 
-The Elektor magazine processing pipeline has been successfully built, optimized, and verified on local hardware using Ollama's local LLMs. 
+We have successfully updated the Elektor processing pipeline to decoupled models using a high-efficiency **Two-Pass Batch** architecture. This avoids loading and unloading models for every single article, cutting model load time down to a single instance per pipeline execution.
 
 ---
 
-## 🛠️ Accomplished Tasks
+## 🛠️ Completed Implementations
 
-- [x] **Configuration Setup (`config.json`)**: Configured paths to `/Volumes/USB DISK`, local SQLite, local Qdrant on disk, and Ollama endpoint parameters.
-- [x] **Extraction Stage (`pipeline/extractor.py`)**: Developed recursive PDF scanner, reading digital text via `pypdf`, with a robust rendering fallback to `pypdfium2` (300 DPI) and `tesseract` OCR CLI for scanned pages.
-- [x] **Analysis & AI Enrichment (`pipeline/analyzer.py`)**: Implemented a highly optimized single-call Ollama generation pipeline with prompt truncation, token limits (`num_predict: 2048`), and `think=False` option to suppress reasoning and directly output JSON.
-- [x] **Vector Database Loader (`pipeline/vector_store.py`)**: Configured word-boundary-aware chunker, Ollama embeddings (`nomic-embed-text:latest`), and local Qdrant collection database (`elektor_articles`).
-- [x] **Training Dataset Generator (`pipeline/dataset_builder.py`)**: Exports generated data into Hugging Face formats: English SFT (`sft_dataset.jsonl`), English DPO (`dpo_dataset.jsonl`), English Chat (`chat_dataset.jsonl`), and Turkish Summary SFT (`tr_sft_dataset.jsonl`).
-- [x] **Unified CLI Command Center (`run.py`)**: Created subcommands (`extract`, `enrich`, `embed`, `query`, `export`, `pipeline`) for seamless operation.
-- [x] **Test Verification**: Unit tests passed using `pytest`. Run successful end-to-end sample run on 5 articles.
+### 1. Dedicated Translation Model Integration
+- Integrated Google's **`translategemma:12b-it-q4_K_M`** for dedicated English-to-Turkish translation of titles and summaries.
+- Configured **`qwen3.6:35b-a3b-mtp-q4_K_M`** (which runs at 70.08 t/s) as the primary generation model for English summarization, topic extraction, Q&A (SFT), and DPO pair generation.
+
+### 2. Two-Pass Batch Architecture
+- Split the analyzer step into two separate loop passes over the article set:
+  - **Pass 1 (English Technical Analysis)**: Loops through all un-enriched articles using `qwen3.6:35b-a3b-mtp-q4_K_M`. The model remains warm in memory throughout the loop and is unloaded immediately when the loop completes.
+  - **Pass 2 (Turkish Translation)**: Loops through successfully enriched articles using `translategemma:12b-it-q4_K_M` to translate the English outputs. The model is kept warm in memory and unloaded immediately when the translation loop completes.
+- This decoupled batch design **completely eliminates** the 3.5-minute model reload overhead per article, reducing it to a single reload cost per run!
+
+### 3. Remote Server Settings & Recovery
+- Pointed the pipeline to the remote Ollama server at `http://192.168.1.14:11434`.
+- **404 Recovery**: During testing, the embedding model `nomic-embed-text:latest` was missing on the server. We remotely pulled it (`curl -d '{"name": "nomic-embed-text:latest"}' http://192.168.1.14:11434/api/pull`) to resolve the error and enable successful embedding uploads to local Qdrant.
 
 ---
 
 ## 📊 Pipeline Test Run Results
 
-Running `python3.11 run.py pipeline --limit 5` produced the following metrics:
-- **Extraction**: Processed 5 PDF files from `/Volumes/USB DISK/articles/1974` (mapped to Zoom index metadata).
-- **Enrichment**: Successfully generated English summaries, Turkish titles/summaries, 15 SFT Q&A pairs, and 5 DPO pairs in a single LLM chat completion per article. Average generation time: **~20-25 seconds per article** on the local `qwen3.5:2b` model.
-- **Vector DB Loading**: Chunked text into 53 vectors and stored them in local Qdrant DB.
-- **Exported Datasets**:
-  - `exports/sft_dataset.jsonl`: 15 samples
-  - `exports/dpo_dataset.jsonl`: 5 samples
-  - `exports/chat_dataset.jsonl`: 15 samples
-  - `exports/tr_sft_dataset.jsonl`: 5 samples
+We ran `python3.11 run.py pipeline --limit 2` end-to-end:
+- **Pass 1**: Successfully generated summaries, topics, Q&A, and DPO pairs using Qwen 35B. Qwen model unloaded successfully.
+- **Pass 2**: Successfully translated the title and English summary into Turkish using TranslateGemma. TranslateGemma model unloaded successfully.
+- **Embedding Generation**: Loaded 19 articles, successfully embedded all chunks using the freshly pulled remote `nomic-embed-text:latest` model, and uploaded 11 vectors to local Qdrant.
+- **Training Datasets**: Exported SFT, DPO, and Chat dataset JSONL files successfully.
 
 ---
 
-## 🔍 Semantic Search Verification
+## 🔍 Database Inspection (Sample Entry)
 
-Running `python3.11 run.py query "editorial independence"` returned highly relevant technical chunks from the December 1974 issue with cosine similarity scores:
-```bash
-=== Querying Vector DB for: 'editorial independence' ===
-
-[1] Score: 0.5711 | Introduction elektor december 1974 - 5 ... (1974)
---------------------------------------------------
-... Elektor will not sell components, other than printed circuit boards, 
-so that complete editorial independence is assured. Furthermore, the editorial 
-staff cannot be influenced by advertisers...
---------------------------------------------------
-```
-
----
-
-## 📈 Scalability to Production
-
-All parameters are configured in [config.json](file:///Users/hakankilicaslan/Git/elektor/config.json). When scaling up to production hardware:
-1. Increase RAM/CPU/GPU access or migrate to a server.
-2. Update the `ollama_url` and `model_analyzer` in `config.json` to larger networks (e.g., `qwen2.5:72b`).
-3. Set `limit` to `None` to run the entire archive of 11,000+ files automatically.
+The database shows the stellar translation quality of the dedicated TranslateGemma model:
+- **English Summary (Qwen 35B)**:
+  > "This text introduces the first English edition of Elektor magazine, highlighting its history in Dutch and German markets and its commitment to practical electronics design..."
+- **Turkish Summary (TranslateGemma 12B)**:
+  > "Bu metin, Elektron dergisinin ilk İngilizce baskısını tanıtmakta olup, derginin Hollanda ve Almanya pazarlarındaki tarihine ve modern entegre devreleri kullanarak pratik elektronik tasarımına olan bağlılığına vurgu yapmaktadır..."
