@@ -22,5 +22,10 @@ test_ollama_no_json.py
 test_article_call.py
 usb_inventory_report.json
 
+# Environments & Upload Temp
+.venv/
+hf_upload_temp/
+
 # OS files
 .DS_Store
+
