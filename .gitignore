@@ -6,10 +6,10 @@ __pycache__/
 .pytest_cache/
 
 # Databases (Local State)
-elektor_archive.db
-elektor_archive.db-journal
-elektor_archive.db-wal
-qdrant_db/
+*.db
+*.db-journal
+*.db-wal
+qdrant_*/
 
 # Exported training datasets
 exports/
