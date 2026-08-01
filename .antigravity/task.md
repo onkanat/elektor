@@ -1,12 +1,13 @@
-- [x] Update `config.json` with remote Ollama URL and model configuration settings
-- [x] Refactor `pipeline/analyzer.py` call methods to support custom models and keep_alive settings
-- [x] Implement `analyze_article_english` in `pipeline/analyzer.py` for Pass 1 (Qwen batch analysis)
-- [x] Implement `translate_to_turkish` in `pipeline/analyzer.py` for Pass 2 (TranslateGemma batch translation)
-- [x] Refactor `enrich_all` in `pipeline/analyzer.py` to coordinate Pass 1 and Pass 2 sequentially
-- [x] Run unit tests using pytest to confirm no regressions are introduced
-- [x] Execute a 2-sample pipeline run `python3.11 run.py pipeline --limit 2` to end-to-end verify the changes
-- [x] Verify database entries contain both English Q&A/DPO pairs and TranslateGemma Turkish translations
-- [x] Create `walkthrough.md` to document the completed execution
-- [x] Implement range-limit support (`start:end`) across all pipeline commands
-- [x] Implement vector embedding checkpointing (`is_embedded` tracking in SQLite)
-- [x] Implement `--reset` clean wipe parameter in `run.py pipeline` CLI
+- [x] Expand `config.json` with universal mode, path, and prompt metadata settings.
+- [x] Refactor `pipeline/extractor.py` to support outline bookmarks parsing and chapter page range extraction.
+- [x] Refactor `pipeline/analyzer.py` to inject dynamic expertise persona prompts.
+- [x] Restructure `pipeline/dataset_builder.py` to compile datasets into exports/<db_basename>/ subdirectories.
+- [x] Clean and update `.gitignore` to use wildcards for database and temp upload folders.
+- [x] Run unit tests verifying book mode extraction and dynamic exports.
+- [x] Run the extraction phase on `/Users/hakankilicaslan/Documents/SDR4Engineers.pdf` creating 160 chapters.
+- [x] Run batch AI enrichment (Qwen 27B) and translation (TranslateGemma 12B) on 160 segments.
+- [x] Embed 1,278 text chunks into the local Qdrant collection `"sdr_articles"` in `qdrant_sdr/`.
+- [x] Compile SFT, DPO, and Chat dataset files in exports/sdr_engineers/.
+- [x] Create a new Hugging Face dataset repository and publish SDR v1.0 dataset splits.
+- [x] Eliminate all hardcoded "Elektor" strings from code and output templates.
+- [x] Update all instructions and walkthroughs in `.antigravity/` to match the universal pipeline.
