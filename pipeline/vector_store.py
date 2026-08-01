@@ -19,7 +19,7 @@ class ArchiveVectorStore:
         self.collection_name = "elektor_articles"
         
         # Connect to Ollama
-        self.ollama_client = ollama.Client(host=self.ollama_url)
+        self.ollama_client = ollama.Client(host=self.ollama_url, timeout=180.0)
         
         # Connect to local Qdrant Vector DB on disk
         self.qdrant_client = QdrantClient(path=self.qdrant_db_path)

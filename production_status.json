@@ -1,0 +1,10 @@
+{
+  "last_batch_start": 11750,
+  "last_batch_end": 11773,
+  "timestamp": "2026-07-31T13:02:31Z",
+  "stats": {
+    "total_articles": 11773,
+    "enriched_english": 11741,
+    "translated_turkish": 9990
+  }
+}

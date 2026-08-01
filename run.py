@@ -6,11 +6,11 @@ from pipeline.vector_store import ArchiveVectorStore
 from pipeline.dataset_builder import DatasetBuilder
 
 def parse_limit(limit_str):
-    """Parses limit parameter. Supports integer (e.g. 5) or range (e.g. '1000:2000')."""
+    """Parses limit parameter. Supports integer (e.g. 5), range (e.g. '1000:2000'), or 'all'/'none' for no limit."""
     if limit_str is None:
         return None
     limit_str = str(limit_str).strip()
-    if not limit_str:
+    if not limit_str or limit_str.lower() in ("none", "all", "0"):
         return None
     if ":" in limit_str:
         parts = limit_str.split(":")
@@ -22,9 +22,10 @@ def parse_limit(limit_str):
             raise argparse.ArgumentTypeError(f"Invalid range format: {limit_str}. Use 'start:end' with integers.")
     else:
         try:
-            return int(limit_str)
+            val = int(limit_str)
+            return None if val <= 0 else val
         except ValueError:
-            raise argparse.ArgumentTypeError(f"Invalid limit: {limit_str}. Must be an integer or range like 'start:end'.")
+            raise argparse.ArgumentTypeError(f"Invalid limit: {limit_str}. Must be an integer, range 'start:end', or 'all'.")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -67,7 +68,7 @@ Examples:
     
     # Pipeline subcommand
     pipeline_parser = subparsers.add_parser("pipeline", help="Run extract, enrich, embed, and export in a single run")
-    pipeline_parser.add_argument("--limit", type=parse_limit, default="5", help="Limit the number of sample articles to process (supports range 'start:end')")
+    pipeline_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit the number of sample articles to process (default: all articles, supports range 'start:end' or integer)")
     pipeline_parser.add_argument("--reset", action="store_true", help="Reset all databases and exported datasets before running the pipeline")
     
     args = parser.parse_args()
