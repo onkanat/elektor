@@ -9,7 +9,8 @@ from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Body
 from starlette.background import BackgroundTask
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 import pydantic
 import ollama
 
@@ -398,6 +399,24 @@ def chat_with_analyzer(payload: Dict[str, Any] = Body(...)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ollama chat error: {str(e)}")
+
+# Mount React frontend static build
+FRONTEND_DIST = Path("frontend/dist")
+if FRONTEND_DIST.exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="static_assets")
+
+    @app.get("/")
+    def serve_spa():
+        return FileResponse(FRONTEND_DIST / "index.html")
+
+    @app.get("/{full_path:path}")
+    def serve_spa_paths(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+        file_path = FRONTEND_DIST / full_path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(FRONTEND_DIST / "index.html")
 
 if __name__ == "__main__":
     import uvicorn
