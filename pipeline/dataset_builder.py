@@ -9,8 +9,9 @@ class DatasetBuilder:
             self.config = json.load(f)
             
         self.db_path = self.config["db_path"]
-        self.export_dir = Path("exports")
-        self.export_dir.mkdir(exist_ok=True)
+        db_name = Path(self.db_path).stem
+        self.export_dir = Path("exports") / db_name
+        self.export_dir.mkdir(parents=True, exist_ok=True)
         
     def export_datasets(self):
         """Compiles enriched SQLite data and exports SFT, DPO, and Chat datasets (English and Turkish)"""

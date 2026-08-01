@@ -24,7 +24,7 @@ usb_inventory_report.json
 
 # Environments & Upload Temp
 .venv/
-hf_upload_temp/
+hf_upload_temp*/
 
 # OS files
 .DS_Store

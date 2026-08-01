@@ -149,9 +149,12 @@ Examples:
                     print(f"Warning: Could not delete Qdrant folder: {e}")
                 
             # 3. Clear Export JSONL files
-            export_dir = Path("exports")
+            with open("config.json", "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            db_name = Path(cfg.get("db_path", "elektor_archive.db")).stem
+            export_dir = Path("exports") / db_name
             if export_dir.exists():
-                print("Clearing exports directory...")
+                print(f"Clearing exports/{db_name} directory...")
                 for file in export_dir.glob("*.jsonl"):
                     try:
                         file.unlink()
