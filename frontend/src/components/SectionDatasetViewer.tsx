@@ -1,14 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { DatasetItem, SQLiteTableInfo, QdrantInfo } from '../types';
 
 interface SectionDatasetViewerProps {
   activeProjectId?: string;
   activeProjectName?: string;
+  activeDatasetName?: string;
 }
 
 export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
   activeProjectId = 'sdr_engineers',
   activeProjectName,
+  activeDatasetName = 'rp2040_datasheet',
 }) => {
   const [subTab, setSubTab] = useState<'jsonl' | 'sqlite' | 'qdrant'>('jsonl');
 
@@ -39,6 +41,29 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
   const [qdrantResults, setQdrantResults] = useState<any[]>([]);
   const [isSearchingQdrant, setIsSearchingQdrant] = useState<boolean>(false);
 
+  // Robust project matching logic
+  const isProjectMatch = (relativePath: string): boolean => {
+    const folder = relativePath.split('/')[0].toLowerCase();
+    const pid = (activeProjectId || '').toLowerCase();
+    const dname = (activeDatasetName || '').toLowerCase();
+
+    if (!folder) return false;
+    if (folder === pid || folder === dname) return true;
+
+    // Extract core tokens (e.g., "rp2040" from "test_rp2040" or "rp2040_datasheet")
+    const cleanFolder = folder.replace(/^test_|_datasheet$|_project$/g, '');
+    const cleanPid = pid.replace(/^test_|_datasheet$|_project$/g, '');
+    const cleanDname = dname.replace(/^test_|_datasheet$|_project$/g, '');
+
+    if (cleanFolder.length >= 3 && cleanPid.length >= 3 && (cleanPid.includes(cleanFolder) || cleanFolder.includes(cleanPid))) {
+      return true;
+    }
+    if (cleanFolder.length >= 3 && cleanDname.length >= 3 && (cleanDname.includes(cleanFolder) || cleanFolder.includes(cleanDname))) {
+      return true;
+    }
+    return false;
+  };
+
   // Fetch JSONL dataset list on mount
   useEffect(() => {
     fetch('/api/datasets')
@@ -46,38 +71,44 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
       .then((data) => {
         if (data.datasets && data.datasets.length > 0) {
           setDatasets(data.datasets);
+          // Initial auto-select
+          const activeList = data.datasets.filter((d: DatasetItem) => isProjectMatch(d.relative_path));
+          if (activeList.length > 0) {
+            setSelectedFile(activeList[0].relative_path);
+          } else {
+            setSelectedFile(data.datasets[0].relative_path);
+          }
         }
       })
       .catch((err) => console.error('Error fetching datasets:', err));
-  }, []);
+  }, [activeProjectId, activeDatasetName]);
 
   // Filter datasets based on projectFilterMode
-  const filteredDatasets = datasets.filter((d) => {
-    if (projectFilterMode === 'all') return true;
-    // Check if relative_path starts with activeProjectId
-    const projPrefix = activeProjectId.toLowerCase();
-    return d.relative_path.toLowerCase().startsWith(projPrefix);
-  });
+  const filteredDatasets = useMemo(() => {
+    return datasets.filter((d) => {
+      if (projectFilterMode === 'all') return true;
+      return isProjectMatch(d.relative_path);
+    });
+  }, [datasets, projectFilterMode, activeProjectId, activeDatasetName]);
 
-  // Auto-select first available dataset when filtered list changes
-  useEffect(() => {
-    if (filteredDatasets.length > 0) {
-      // If current selectedFile is not in filtered list, select the first one
-      const exists = filteredDatasets.some((d) => d.relative_path === selectedFile);
-      if (!exists) {
-        setSelectedFile(filteredDatasets[0].relative_path);
-        setJsonlPage(1);
+  // Handle switching filter modes
+  const handleSwitchFilterMode = (mode: 'active' | 'all') => {
+    setProjectFilterMode(mode);
+    setJsonlPage(1);
+    if (mode === 'active') {
+      const activeList = datasets.filter((d) => isProjectMatch(d.relative_path));
+      if (activeList.length > 0) {
+        setSelectedFile(activeList[0].relative_path);
       }
-    } else if (datasets.length > 0 && projectFilterMode === 'active') {
-      // If no active project datasets exist yet, fallback to first overall dataset
-      const exists = datasets.some((d) => d.relative_path === selectedFile);
+    } else if (mode === 'all' && datasets.length > 0) {
+      const exists = filteredDatasets.some((d) => d.relative_path === selectedFile);
       if (!exists) {
         setSelectedFile(datasets[0].relative_path);
       }
     }
-  }, [projectFilterMode, activeProjectId, datasets]);
+  };
 
-  // Fetch JSONL records
+  // Fetch JSONL records when selectedFile, page, or search changes
   useEffect(() => {
     if (!selectedFile) return;
     setIsLoadingJsonl(true);
@@ -156,6 +187,8 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
     }
   };
 
+  const selectedFolder = selectedFile ? selectedFile.split('/')[0] : '';
+
   return (
     <div className="card">
       <div className="card-title" style={{ justifyContent: 'space-between' }}>
@@ -193,21 +226,21 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
               <button
                 className={`tab-btn ${projectFilterMode === 'active' ? 'active' : ''}`}
                 style={{ padding: '0.25rem 0.75rem', fontSize: '0.78rem' }}
-                onClick={() => setProjectFilterMode('active')}
+                onClick={() => handleSwitchFilterMode('active')}
               >
                 📌 Aktif Proje ({activeProjectName || activeProjectId})
               </button>
               <button
                 className={`tab-btn ${projectFilterMode === 'all' ? 'active' : ''}`}
                 style={{ padding: '0.25rem 0.75rem', fontSize: '0.78rem' }}
-                onClick={() => setProjectFilterMode('all')}
+                onClick={() => handleSwitchFilterMode('all')}
               >
                 🌐 Tüm Projeler ({datasets.length} Dosya)
               </button>
             </div>
 
             <div className="badge online" style={{ fontSize: '0.75rem' }}>
-              Klasör: exports/<code>{selectedFile.split('/')[0] || ''}</code>
+              Klasör: exports/<code>{selectedFolder || 'seçilmedi'}</code>
             </div>
           </div>
 
@@ -222,15 +255,19 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
                   setJsonlPage(1);
                 }}
               >
-                {filteredDatasets.map((d: DatasetItem) => {
-                  const projFolder = d.relative_path.split('/')[0];
-                  const isCurrentProj = projFolder.toLowerCase() === activeProjectId.toLowerCase();
-                  return (
-                    <option key={d.relative_path} value={d.relative_path}>
-                      {isCurrentProj ? '★' : '📂'} [{projFolder}] ➔ {d.filename} ({d.sample_count} örnek, {(d.size_bytes / 1024).toFixed(1)} KB)
-                    </option>
-                  );
-                })}
+                {filteredDatasets.length === 0 ? (
+                  <option value="">(Bu filtre için veri seti dosyası bulunamadı)</option>
+                ) : (
+                  filteredDatasets.map((d: DatasetItem) => {
+                    const projFolder = d.relative_path.split('/')[0];
+                    const isCurrentProj = isProjectMatch(d.relative_path);
+                    return (
+                      <option key={d.relative_path} value={d.relative_path}>
+                        {isCurrentProj ? '★' : '📂'} [{projFolder}] ➔ {d.filename} ({d.sample_count} örnek, {(d.size_bytes / 1024).toFixed(1)} KB)
+                      </option>
+                    );
+                  })
+                )}
               </select>
             </div>
 
@@ -276,7 +313,7 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
             <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Yükleniyor...</div>
           ) : datasetRecords.length === 0 ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>
-              Seçilen filtre için veri seti kaydı bulunamadı.
+              Seçilen filtre veya dosya için veri seti kaydı bulunamadı.
             </div>
           ) : (
             <div>

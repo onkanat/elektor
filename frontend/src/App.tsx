@@ -186,6 +186,7 @@ export const App: React.FC = () => {
               <SectionDatasetViewer
                 activeProjectId={activeProjectId}
                 activeProjectName={activeProjectObj?.project_name || config?.dataset_name}
+                activeDatasetName={config?.dataset_name}
               />
             )}
 
