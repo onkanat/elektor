@@ -2,6 +2,7 @@ import sqlite3
 import json
 import uuid
 import ollama
+from pathlib import Path
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 
