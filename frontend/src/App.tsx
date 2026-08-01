@@ -182,7 +182,12 @@ export const App: React.FC = () => {
               />
             )}
 
-            {activeTab === 'dataset' && <SectionDatasetViewer />}
+            {activeTab === 'dataset' && (
+              <SectionDatasetViewer
+                activeProjectId={activeProjectId}
+                activeProjectName={activeProjectObj?.project_name || config?.dataset_name}
+              />
+            )}
 
             {activeTab === 'chat' && (
               <SectionModelChat

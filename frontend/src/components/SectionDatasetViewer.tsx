@@ -1,8 +1,19 @@
 import { useState, useEffect } from 'react';
 import type { DatasetItem, SQLiteTableInfo, QdrantInfo } from '../types';
 
-export const SectionDatasetViewer: React.FC = () => {
+interface SectionDatasetViewerProps {
+  activeProjectId?: string;
+  activeProjectName?: string;
+}
+
+export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
+  activeProjectId = 'sdr_engineers',
+  activeProjectName,
+}) => {
   const [subTab, setSubTab] = useState<'jsonl' | 'sqlite' | 'qdrant'>('jsonl');
+
+  // Filter Mode: 'active' (show active project files) vs 'all' (show all projects)
+  const [projectFilterMode, setProjectFilterMode] = useState<'active' | 'all'>('active');
 
   // JSONL Dataset State
   const [datasets, setDatasets] = useState<DatasetItem[]>([]);
@@ -35,11 +46,36 @@ export const SectionDatasetViewer: React.FC = () => {
       .then((data) => {
         if (data.datasets && data.datasets.length > 0) {
           setDatasets(data.datasets);
-          setSelectedFile(data.datasets[0].relative_path);
         }
       })
       .catch((err) => console.error('Error fetching datasets:', err));
   }, []);
+
+  // Filter datasets based on projectFilterMode
+  const filteredDatasets = datasets.filter((d) => {
+    if (projectFilterMode === 'all') return true;
+    // Check if relative_path starts with activeProjectId
+    const projPrefix = activeProjectId.toLowerCase();
+    return d.relative_path.toLowerCase().startsWith(projPrefix);
+  });
+
+  // Auto-select first available dataset when filtered list changes
+  useEffect(() => {
+    if (filteredDatasets.length > 0) {
+      // If current selectedFile is not in filtered list, select the first one
+      const exists = filteredDatasets.some((d) => d.relative_path === selectedFile);
+      if (!exists) {
+        setSelectedFile(filteredDatasets[0].relative_path);
+        setJsonlPage(1);
+      }
+    } else if (datasets.length > 0 && projectFilterMode === 'active') {
+      // If no active project datasets exist yet, fallback to first overall dataset
+      const exists = datasets.some((d) => d.relative_path === selectedFile);
+      if (!exists) {
+        setSelectedFile(datasets[0].relative_path);
+      }
+    }
+  }, [projectFilterMode, activeProjectId, datasets]);
 
   // Fetch JSONL records
   useEffect(() => {
@@ -150,8 +186,33 @@ export const SectionDatasetViewer: React.FC = () => {
       {/* TAB 1: JSONL DATASETS */}
       {subTab === 'jsonl' && (
         <div>
+          {/* Proje Filtre Barı & İndikatör */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-primary)', padding: '0.6rem 1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Proje Filtresi:</span>
+              <button
+                className={`tab-btn ${projectFilterMode === 'active' ? 'active' : ''}`}
+                style={{ padding: '0.25rem 0.75rem', fontSize: '0.78rem' }}
+                onClick={() => setProjectFilterMode('active')}
+              >
+                📌 Aktif Proje ({activeProjectName || activeProjectId})
+              </button>
+              <button
+                className={`tab-btn ${projectFilterMode === 'all' ? 'active' : ''}`}
+                style={{ padding: '0.25rem 0.75rem', fontSize: '0.78rem' }}
+                onClick={() => setProjectFilterMode('all')}
+              >
+                🌐 Tüm Projeler ({datasets.length} Dosya)
+              </button>
+            </div>
+
+            <div className="badge online" style={{ fontSize: '0.75rem' }}>
+              Klasör: exports/<code>{selectedFile.split('/')[0] || ''}</code>
+            </div>
+          </div>
+
           <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.25rem', alignItems: 'center' }}>
-            <div style={{ flex: 1 }}>
+            <div style={{ flex: 1.5 }}>
               <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Veri Seti Dosyası Seçin</label>
               <select
                 className="form-control"
@@ -161,11 +222,15 @@ export const SectionDatasetViewer: React.FC = () => {
                   setJsonlPage(1);
                 }}
               >
-                {datasets.map((d: DatasetItem) => (
-                  <option key={d.relative_path} value={d.relative_path}>
-                    {d.filename} ({d.sample_count} örnek, {(d.size_bytes / 1024).toFixed(1)} KB)
-                  </option>
-                ))}
+                {filteredDatasets.map((d: DatasetItem) => {
+                  const projFolder = d.relative_path.split('/')[0];
+                  const isCurrentProj = projFolder.toLowerCase() === activeProjectId.toLowerCase();
+                  return (
+                    <option key={d.relative_path} value={d.relative_path}>
+                      {isCurrentProj ? '★' : '📂'} [{projFolder}] ➔ {d.filename} ({d.sample_count} örnek, {(d.size_bytes / 1024).toFixed(1)} KB)
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
@@ -210,7 +275,9 @@ export const SectionDatasetViewer: React.FC = () => {
           {isLoadingJsonl ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Yükleniyor...</div>
           ) : datasetRecords.length === 0 ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Kayıt bulunamadı.</div>
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>
+              Seçilen filtre için veri seti kaydı bulunamadı.
+            </div>
           ) : (
             <div>
               {datasetRecords.map((item: any, idx: number) => (
