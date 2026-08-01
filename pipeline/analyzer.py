@@ -12,7 +12,9 @@ class ArchiveAnalyzer:
         self.ollama_url = self.config["ollama_url"]
         self.model_name = self.config["model_analyzer"]
         self.translator_model = self.config.get("model_translator", "translategemma:12b-it-q4_K_M")
-        self.qa_count = self.config.get("qa_count_per_article", 10)
+        self.qa_count = self.config.get("sft_qa_count", self.config.get("qa_count_per_article", 10))
+        self.llm_persona = self.config.get("llm_persona", "You are an expert embedded systems engineer, technical writer, and AI trainer.")
+        self.llm_subject = self.config.get("llm_subject", "analog and digital circuit design, microcontrollers, embedded systems, RF communication, power electronics, and test equipment.")
         
         # Connect to Ollama
         self.client = ollama.Client(host=self.ollama_url, timeout=180.0)
@@ -86,8 +88,8 @@ class ArchiveAnalyzer:
         truncated_text = text[:4000] if len(text) > 4000 else text
         
         system_prompt = (
-            "You are an expert embedded systems engineer, technical writer, and AI trainer. "
-            "Analyze the technical article text and output a single JSON object. Follow the requested structure strictly."
+            f"{self.llm_persona} "
+            "Analyze the technical text and output a single JSON object. Follow the requested structure strictly."
         )
         
         user_prompt = (
@@ -160,7 +162,7 @@ class ArchiveAnalyzer:
         full_text = "\n\n".join(text_block)
         
         system_prompt = (
-            "You are a professional technical translator specializing in electrical engineering, embedded systems, and computer science.\n"
+            f"You are a professional technical translator specializing in {self.llm_subject}.\n"
             "Translate the technical text block provided by the user into natural, high-quality Turkish.\n\n"
             "CRITICAL TERMINOLOGY RULES:\n"
             "1. PRESERVE ALL TECHNICAL TERMS IN THEIR ORIGINAL STANDARD FORM (e.g. ESP32, SPI, I2C, MOSFET, ADC, DAC, PWM, microcontroller, op-amp, decoupling capacitor, pull-up, baud rate, duty cycle, flip-flop, PCB, RAM, ROM, GPIO, UART, DMA, breadboard, SMD, transceiver, etc.).\n"

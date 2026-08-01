@@ -14,9 +14,20 @@ class ArchiveExtractor:
         with open(config_path, "r", encoding="utf-8") as f:
             self.config = json.load(f)
             
-        self.usb_path = Path(self.config["usb_path"])
-        self.articles_dir = self.usb_path / "articles"
-        self.csv_path = self.usb_path / "lib" / "zoom_pageinfo.csv"
+        self.input_mode = self.config.get("input_mode", "folder")
+        if "input_path" in self.config:
+            self.input_path = Path(self.config["input_path"])
+        else:
+            usb_path = Path(self.config.get("usb_path", "/Volumes/USB DISK"))
+            self.input_path = usb_path / "articles"
+            
+        self.articles_dir = self.input_path
+        
+        if "usb_path" in self.config:
+            self.csv_path = Path(self.config["usb_path"]) / "lib" / "zoom_pageinfo.csv"
+        else:
+            self.csv_path = Path("lib/zoom_pageinfo.csv")
+            
         self.db_path = self.config["db_path"]
         self.ocr_threshold = self.config.get("ocr_threshold_chars", 100)
         self.tesseract_cmd = self.config.get("tesseract_cmd", "tesseract")
@@ -198,10 +209,97 @@ class ArchiveExtractor:
             ocr_text, ocr_success = self.ocr_pdf(pdf_path)
             return ocr_text, ocr_success
 
+    def parse_outline_nodes(self, reader, outline, parent_title=""):
+        """Recursively parses outline nodes into a list of (title, page_num) dicts"""
+        nodes = []
+        if not outline:
+            return nodes
+            
+        for item in outline:
+            if isinstance(item, list):
+                nodes.extend(self.parse_outline_nodes(reader, item, parent_title))
+            else:
+                title = item.get("/Title", "")
+                page_num = None
+                try:
+                    page_num = reader.get_destination_page_number(item)
+                except Exception:
+                    pass
+                    
+                if page_num is not None:
+                    full_title = f"{parent_title} - {title}" if parent_title else title
+                    nodes.append({"title": full_title, "page": page_num})
+        return nodes
+
+    def extract_pages_range(self, pdf_path, start_page, end_page):
+        """Extracts text from a specific page range (0-indexed, inclusive). Falls back to OCR if needed."""
+        text_parts = []
+        is_ocr = False
+        try:
+            reader = pypdf.PdfReader(pdf_path)
+            for page_idx in range(start_page, min(end_page + 1, len(reader.pages))):
+                page_text = reader.pages[page_idx].extract_text()
+                if page_text:
+                    text_parts.append(page_text.strip())
+                    
+            extracted_text = "\n\n".join(text_parts).strip()
+            
+            # If text is too short, run OCR on these pages
+            if len(extracted_text) < self.ocr_threshold:
+                ocr_text, ocr_success = self.ocr_pdf_pages(pdf_path, start_page, end_page)
+                if ocr_success:
+                    extracted_text = ocr_text
+                    is_ocr = True
+                    
+            return extracted_text, is_ocr
+        except Exception as e:
+            print(f"Error extracting range {start_page}-{end_page} from {pdf_path}: {e}")
+            return "", False
+
+    def ocr_pdf_pages(self, pdf_path, start_page, end_page):
+        """Renders specific pages of a PDF and runs OCR on them"""
+        print(f"Running OCR on range {start_page}-{end_page} of {pdf_path.name}...")
+        ocr_text_parts = []
+        try:
+            doc = pdfium.PdfDocument(pdf_path)
+            for page_idx in range(start_page, min(end_page + 1, len(doc))):
+                page = doc[page_idx]
+                bitmap = page.render(scale=300/72)
+                pil_img = bitmap.to_pil()
+                
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
+                    tmp_img_path = tmp_img.name
+                    pil_img.save(tmp_img_path)
+                    
+                with tempfile.NamedTemporaryFile(suffix="", delete=False) as tmp_out:
+                    tmp_out_path = tmp_out.name
+                    
+                try:
+                    cmd = [self.tesseract_cmd, tmp_img_path, tmp_out_path]
+                    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    if result.returncode != 0:
+                        print(f"  Page {page_idx+1} OCR failed: {result.stderr}")
+                        continue
+                        
+                    txt_path = Path(f"{tmp_out_path}.txt")
+                    if txt_path.exists():
+                        page_text = txt_path.read_text(encoding='utf-8')
+                        txt_path.unlink()
+                        ocr_text_parts.append(f"--- Page {page_idx+1} ---\n{page_text.strip()}")
+                finally:
+                    if os.path.exists(tmp_img_path):
+                        os.unlink(tmp_img_path)
+                    if os.path.exists(tmp_out_path):
+                        os.unlink(tmp_out_path)
+            return "\n\n".join(ocr_text_parts), True
+        except Exception as e:
+            print(f"Error OCRing pages {start_page}-{end_page} for {pdf_path}: {e}")
+            return "", False
+
     def process_all_articles(self, limit=None):
-        """Walks the article directory, extracts text, and updates SQLite DB"""
+        """Walks the article directory or splits a single PDF book, extracts text, and updates SQLite DB"""
         if not self.articles_dir.exists():
-            print(f"Error: Articles directory not found at {self.articles_dir}")
+            print(f"Error: Articles directory or book path not found at {self.articles_dir}")
             return
             
         # Parse range limit if range format
@@ -211,80 +309,175 @@ class ArchiveExtractor:
         elif isinstance(limit, int):
             start, end = 0, limit
             
-        zoom_metadata = self.load_zoom_metadata()
         cursor = self.conn.cursor()
-        
-        # Get list of all PDFs under articles folder
-        pdf_paths = []
-        for root, dirs, files in os.walk(self.articles_dir):
-            for file in files:
-                if file.lower().endswith('.pdf'):
-                    pdf_paths.append(Path(root) / file)
-                    
-        print(f"Found {len(pdf_paths)} total PDFs in {self.articles_dir}")
-        pdf_paths = sorted(pdf_paths)
-        
-        # Apply slice based on range
-        sliced_paths = pdf_paths[start:end] if end is not None else pdf_paths[start:]
-        print(f"Processing range [{start}:{end if end is not None else len(pdf_paths)}] ({len(sliced_paths)} files)...")
-        
-        count = 0
-        for pdf_path in sliced_paths:
-            # Get path relative to the usb articles dir
-            rel_path = str(pdf_path.relative_to(self.articles_dir.parent))
-            filename = pdf_path.name
-            
-            # Check if already processed
-            cursor.execute("SELECT id, extracted_text FROM articles WHERE file_path = ?", (rel_path,))
-            row = cursor.fetchone()
-            if row and row[1]:
-                # Already processed and has text, skip
-                continue
+
+        if self.input_mode == "book":
+            pdf_path = self.input_path
+            if not pdf_path.is_file():
+                print(f"Error: Book mode requires a single PDF file, but path is a directory: {pdf_path}")
+                return
                 
-            print(f"[{count+1}] Processing: {rel_path}...")
+            print(f"=== Running in Book Mode on: {pdf_path.name} ===")
+            reader = pypdf.PdfReader(pdf_path)
+            total_pages = len(reader.pages)
+            print(f"Total pages in book: {total_pages}")
             
-            # Extract Year from path
-            # Path is like .../articles/YYYY/...
-            year = None
-            for p in pdf_path.parts:
-                if p.isdigit() and len(p) == 4:
-                    year = int(p)
-                    break
+            # 1. Parse bookmarks/outline
+            outline = reader.outline
+            nodes = self.parse_outline_nodes(reader, outline)
+            
+            # Sort bookmarks by page number to create contiguous ranges
+            nodes = sorted(nodes, key=lambda x: x["page"])
+            
+            # Deduplicate outline items targeting same page
+            unique_nodes = []
+            seen_pages = set()
+            for n in nodes:
+                if n["page"] not in seen_pages:
+                    seen_pages.add(n["page"])
+                    unique_nodes.append(n)
+            
+            segments = []
+            if unique_nodes:
+                print(f"Found {len(unique_nodes)} bookmarks/chapters in book outline.")
+                # Add a dummy node at the end of the document
+                unique_nodes.append({"title": "Appendix / Index", "page": total_pages})
+                for i in range(len(unique_nodes) - 1):
+                    ch_title = unique_nodes[i]["title"]
+                    start_p = unique_nodes[i]["page"]
+                    end_p = unique_nodes[i+1]["page"] - 1
                     
-            # Get Zoom snippet & title
-            zoom_snippet = zoom_metadata.get(filename, "")
-            title = ""
-            if zoom_snippet:
-                # Title is usually the first line or first part of snippet
-                title = zoom_snippet.split("By")[0].replace("project ", "").replace("PROJECT ", "").strip()
-                if not title:
+                    # Prevent empty page ranges
+                    if start_p <= end_p:
+                        segments.append((ch_title, start_p, end_p))
+            else:
+                print("No bookmarks/outline found in PDF. Splitting book into default 10-page segments.")
+                # Fallback: Split every 10 pages
+                segment_size = 10
+                for start_p in range(0, total_pages, segment_size):
+                    end_p = min(start_p + segment_size - 1, total_pages - 1)
+                    segments.append((f"Section starting page {start_p + 1}", start_p, end_p))
+            
+            # Apply slice limit
+            sliced_segments = segments[start:end] if end is not None else segments[start:]
+            print(f"Processing range [{start}:{end if end is not None else len(segments)}] ({len(sliced_segments)} segments)...")
+            
+            count = 0
+            for ch_title, start_p, end_p in sliced_segments:
+                rel_path = f"{pdf_path.name}::range::{start_p}_{end_p}"
+                filename = pdf_path.name
+                
+                # Check if already processed
+                cursor.execute("SELECT id, extracted_text FROM articles WHERE file_path = ?", (rel_path,))
+                row = cursor.fetchone()
+                if row and row[1]:
+                    continue
+                    
+                print(f"[{count+1}] Extracting Chapter: '{ch_title}' (Pages {start_p+1} to {end_p+1})...")
+                extracted_text, is_ocr = self.extract_pages_range(pdf_path, start_p, end_p)
+                extracted_text = self.clean_ocr_text(extracted_text)
+                ch_title = self.clean_ocr_text(ch_title)
+                
+                # Attempt to extract year from metadata or filename, or default to current year
+                year = None
+                try:
+                    meta = reader.metadata
+                    if meta and meta.creation_date:
+                        val = meta.creation_date.year
+                        if isinstance(val, int):
+                            year = val
+                except Exception:
+                    pass
+                if not year:
+                    year = datetime.now().year
+                    
+                processed_at = datetime.now().isoformat()
+                zoom_snippet = f"Chapter segment from pages {start_p+1} to {end_p+1}."
+                
+                if row:
+                    cursor.execute("""
+                        UPDATE articles 
+                        SET extracted_text = ?, is_ocr = ?, processed_at = ?, title = ?, year = ?, zoom_snippet = ?
+                        WHERE file_path = ?
+                    """, (extracted_text, 1 if is_ocr else 0, processed_at, ch_title, year, zoom_snippet, rel_path))
+                else:
+                    cursor.execute("""
+                        INSERT INTO articles (file_path, filename, title, year, zoom_snippet, extracted_text, is_ocr, processed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (rel_path, filename, ch_title, year, zoom_snippet, extracted_text, 1 if is_ocr else 0, processed_at))
+                    
+                self.conn.commit()
+                count += 1
+                
+            print(f"Extraction step completed. Processed {count} new chapters.")
+            
+        else:
+            # Mode: Folder (Recursive walking, backward compatible with Elektor)
+            zoom_metadata = self.load_zoom_metadata()
+            pdf_paths = []
+            for root, dirs, files in os.walk(self.articles_dir):
+                for file in files:
+                    if file.lower().endswith('.pdf'):
+                        pdf_paths.append(Path(root) / file)
+                        
+            print(f"Found {len(pdf_paths)} total PDFs in {self.articles_dir}")
+            pdf_paths = sorted(pdf_paths)
+            
+            # Apply slice based on range
+            sliced_paths = pdf_paths[start:end] if end is not None else pdf_paths[start:]
+            print(f"Processing range [{start}:{end if end is not None else len(pdf_paths)}] ({len(sliced_paths)} files)...")
+            
+            count = 0
+            for pdf_path in sliced_paths:
+                # Get path relative to the articles dir
+                rel_path = str(pdf_path.relative_to(self.articles_dir.parent))
+                filename = pdf_path.name
+                
+                # Check if already processed
+                cursor.execute("SELECT id, extracted_text FROM articles WHERE file_path = ?", (rel_path,))
+                row = cursor.fetchone()
+                if row and row[1]:
+                    continue
+                    
+                print(f"[{count+1}] Processing: {rel_path}...")
+                
+                # Extract Year from path
+                year = None
+                for p in pdf_path.parts:
+                    if p.isdigit() and len(p) == 4:
+                        year = int(p)
+                        break
+                        
+                zoom_snippet = zoom_metadata.get(filename, "")
+                title = ""
+                if zoom_snippet:
+                    title = zoom_snippet.split("By")[0].replace("project ", "").replace("PROJECT ", "").strip()
+                    if not title:
+                        title = filename
+                else:
                     title = filename
-            else:
-                title = filename
+                    
+                extracted_text, is_ocr = self.extract_text_from_pdf(pdf_path)
+                extracted_text = self.clean_ocr_text(extracted_text)
+                title = self.clean_ocr_text(title)
                 
-            # Extract text
-            extracted_text, is_ocr = self.extract_text_from_pdf(pdf_path)
-            extracted_text = self.clean_ocr_text(extracted_text)
-            title = self.clean_ocr_text(title)
-            
-            # Save or Update SQLite
-            processed_at = datetime.now().isoformat()
-            if row:
-                cursor.execute("""
-                    UPDATE articles 
-                    SET extracted_text = ?, is_ocr = ?, processed_at = ?, title = ?, year = ?, zoom_snippet = ?
-                    WHERE file_path = ?
-                """, (extracted_text, 1 if is_ocr else 0, processed_at, title, year, zoom_snippet, rel_path))
-            else:
-                cursor.execute("""
-                    INSERT INTO articles (file_path, filename, title, year, zoom_snippet, extracted_text, is_ocr, processed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (rel_path, filename, title, year, zoom_snippet, extracted_text, 1 if is_ocr else 0, processed_at))
+                processed_at = datetime.now().isoformat()
+                if row:
+                    cursor.execute("""
+                        UPDATE articles 
+                        SET extracted_text = ?, is_ocr = ?, processed_at = ?, title = ?, year = ?, zoom_snippet = ?
+                        WHERE file_path = ?
+                    """, (extracted_text, 1 if is_ocr else 0, processed_at, title, year, zoom_snippet, rel_path))
+                else:
+                    cursor.execute("""
+                        INSERT INTO articles (file_path, filename, title, year, zoom_snippet, extracted_text, is_ocr, processed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (rel_path, filename, title, year, zoom_snippet, extracted_text, 1 if is_ocr else 0, processed_at))
+                    
+                self.conn.commit()
+                count += 1
                 
-            self.conn.commit()
-            count += 1
-            
-        print(f"Extraction step completed. Processed {count} new files.")
+            print(f"Extraction step completed. Processed {count} new files.")
 
     def close(self):
         self.conn.close()
