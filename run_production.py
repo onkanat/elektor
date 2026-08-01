@@ -8,11 +8,11 @@ import os
 STATUS_FILE = "production_status.json"
 
 def get_db_stats():
-    db_path = "elektor_archive.db"
+    db_path = "database/elektor_archive.db"
     if os.path.exists("config.json"):
         try:
             with open("config.json", "r", encoding="utf-8") as f:
-                db_path = json.load(f).get("db_path", "elektor_archive.db")
+                db_path = json.load(f).get("db_path", "database/elektor_archive.db")
         except Exception:
             pass
         
@@ -70,11 +70,11 @@ def run_command(cmd_args):
     return process.returncode
 
 def main():
-    db_path = "elektor_archive.db"
+    db_path = "database/elektor_archive.db"
     if os.path.exists("config.json"):
         try:
             with open("config.json", "r", encoding="utf-8") as f:
-                db_path = json.load(f).get("db_path", "elektor_archive.db")
+                db_path = json.load(f).get("db_path", "database/elektor_archive.db")
         except Exception:
             pass
 

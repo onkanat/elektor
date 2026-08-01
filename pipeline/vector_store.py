@@ -11,6 +11,10 @@ class ArchiveVectorStore:
             self.config = json.load(f)
             
         self.db_path = self.config["db_path"]
+        db_path_obj = Path(self.db_path)
+        if len(db_path_obj.parts) == 1:
+            self.db_path = str(Path("database") / self.db_path)
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self.qdrant_db_path = self.config["qdrant_db_path"]
         self.ollama_url = self.config["ollama_url"]
         self.model_embedding = self.config["model_embedding"]

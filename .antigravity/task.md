@@ -11,3 +11,7 @@
 - [x] Create a new Hugging Face dataset repository and publish SDR v1.0 dataset splits.
 - [x] Eliminate all hardcoded "Elektor" strings from code and output templates.
 - [x] Update all instructions and walkthroughs in `.antigravity/` to match the universal pipeline.
+- [x] Switch to `release/backend-api` branch to prepare mature backend code.
+- [x] Create dedicated `database/` folder and move SQLite databases from root to `database/`.
+- [x] Update python imports/configurations to automatically resolve databases inside `database/` subdirectory.
+- [x] Document usage scenarios and API contract in `.antigravity/backend_gateway_docs.md`.

@@ -151,7 +151,7 @@ Examples:
             # 3. Clear Export JSONL files
             with open("config.json", "r", encoding="utf-8") as f:
                 cfg = json.load(f)
-            db_name = Path(cfg.get("db_path", "elektor_archive.db")).stem
+            db_name = Path(cfg.get("db_path", "database/elektor_archive.db")).stem
             export_dir = Path("exports") / db_name
             if export_dir.exists():
                 print(f"Clearing exports/{db_name} directory...")

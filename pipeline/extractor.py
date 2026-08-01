@@ -29,6 +29,10 @@ class ArchiveExtractor:
             self.csv_path = Path("lib/zoom_pageinfo.csv")
             
         self.db_path = self.config["db_path"]
+        db_path_obj = Path(self.db_path)
+        if len(db_path_obj.parts) == 1:
+            self.db_path = str(Path("database") / self.db_path)
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self.ocr_threshold = self.config.get("ocr_threshold_chars", 100)
         self.tesseract_cmd = self.config.get("tesseract_cmd", "tesseract")
         

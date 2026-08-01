@@ -9,6 +9,10 @@ class DatasetBuilder:
             self.config = json.load(f)
             
         self.db_path = self.config["db_path"]
+        db_path_obj = Path(self.db_path)
+        if len(db_path_obj.parts) == 1:
+            self.db_path = str(Path("database") / self.db_path)
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         db_name = Path(self.db_path).stem
         self.export_dir = Path("exports") / db_name
         self.export_dir.mkdir(parents=True, exist_ok=True)

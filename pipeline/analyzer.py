@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import ollama
+from pathlib import Path
 from datetime import datetime
 
 class ArchiveAnalyzer:
@@ -9,6 +10,10 @@ class ArchiveAnalyzer:
             self.config = json.load(f)
             
         self.db_path = self.config["db_path"]
+        db_path_obj = Path(self.db_path)
+        if len(db_path_obj.parts) == 1:
+            self.db_path = str(Path("database") / self.db_path)
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self.ollama_url = self.config["ollama_url"]
         self.model_name = self.config["model_analyzer"]
         self.translator_model = self.config.get("model_translator", "translategemma:12b-it-q4_K_M")
