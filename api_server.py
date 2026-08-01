@@ -26,6 +26,7 @@ app.add_middleware(
 )
 
 CONFIG_PATH = Path("config.json")
+PROJECTS_REGISTRY_PATH = Path("projects_index.json")
 
 # Global pipeline execution state
 pipeline_state: Dict[str, Any] = {
@@ -37,6 +38,33 @@ pipeline_state: Dict[str, Any] = {
     "logs": []
 }
 pipeline_lock = threading.Lock()
+
+def get_projects_registry() -> Dict[str, Any]:
+    if not PROJECTS_REGISTRY_PATH.exists():
+        default_registry = {
+            "active_project_id": "sdr_engineers",
+            "projects": {
+                "sdr_engineers": {
+                    "project_id": "sdr_engineers",
+                    "project_name": "Software-Defined Radio for Engineers",
+                    "config_file": "config.json",
+                    "created_at": time.time(),
+                    "last_accessed": time.time()
+                }
+            }
+        }
+        with open(PROJECTS_REGISTRY_PATH, "w", encoding="utf-8") as f:
+            json.dump(default_registry, f, indent=2, ensure_ascii=False)
+        return default_registry
+    try:
+        with open(PROJECTS_REGISTRY_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"active_project_id": "sdr_engineers", "projects": {}}
+
+def save_projects_registry(registry: Dict[str, Any]):
+    with open(PROJECTS_REGISTRY_PATH, "w", encoding="utf-8") as f:
+        json.dump(registry, f, indent=2, ensure_ascii=False)
 
 def get_config() -> Dict[str, Any]:
     if not CONFIG_PATH.exists():
@@ -53,6 +81,104 @@ def save_config(data: Dict[str, Any]):
             json.dump(data, f, indent=2, ensure_ascii=False)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error writing config.json: {str(e)}")
+
+@app.get("/api/projects")
+def list_projects():
+    registry = get_projects_registry()
+    active_id = registry.get("active_project_id", "sdr_engineers")
+    projects_list = list(registry.get("projects", {}).values())
+    
+    # Sort projects by last_accessed descending
+    projects_list.sort(key=lambda x: x.get("last_accessed", 0), reverse=True)
+
+    return {
+        "active_project_id": active_id,
+        "projects": projects_list
+    }
+
+@app.post("/api/projects/select")
+def select_project(payload: Dict[str, Any] = Body(...)):
+    project_id = payload.get("project_id")
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id required")
+        
+    registry = get_projects_registry()
+    projects = registry.get("projects", {})
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+
+    # Update active project and timestamp
+    registry["active_project_id"] = project_id
+    projects[project_id]["last_accessed"] = time.time()
+    save_projects_registry(registry)
+
+    # Load project's specific config if saved under projects/<project_id>.json
+    proj_config_path = Path(f"projects_{project_id}.json")
+    if proj_config_path.exists():
+        try:
+            with open(proj_config_path, "r", encoding="utf-8") as f:
+                proj_config = json.load(f)
+                save_config(proj_config)
+        except Exception:
+            pass
+
+    current_config = get_config()
+    current_config["project_id"] = project_id
+    current_config["dataset_name"] = projects[project_id].get("project_name", current_config.get("dataset_name"))
+    save_config(current_config)
+
+    return {"status": "success", "active_project_id": project_id, "config": current_config}
+
+@app.post("/api/projects/create")
+def create_project(payload: Dict[str, Any] = Body(...)):
+    project_id = payload.get("project_id", "").strip().lower().replace(" ", "_")
+    project_name = payload.get("project_name", "").strip()
+    
+    if not project_id or not project_name:
+        raise HTTPException(status_code=400, detail="project_id and project_name are required")
+
+    registry = get_projects_registry()
+    projects = registry.setdefault("projects", {})
+
+    if project_id in projects:
+        raise HTTPException(status_code=400, detail=f"Project ID '{project_id}' already exists")
+
+    # Create new project config from existing config or defaults
+    current_config = get_config()
+    new_config = dict(current_config)
+    new_config["project_id"] = project_id
+    new_config["dataset_name"] = project_name
+    new_config["dataset_name_tr"] = payload.get("project_name_tr", project_name)
+    new_config["input_mode"] = payload.get("input_mode", "book")
+    new_config["input_path"] = payload.get("input_path", "")
+    new_config["db_path"] = f"database/{project_id}.db"
+    new_config["qdrant_db_path"] = f"qdrant_{project_id}"
+    new_config["qdrant_collection_name"] = f"{project_id}_articles"
+    if "llm_persona" in payload:
+        new_config["llm_persona"] = payload["llm_persona"]
+    if "llm_subject" in payload:
+        new_config["llm_subject"] = payload["llm_subject"]
+
+    # Save project specific config file
+    proj_config_path = Path(f"projects_{project_id}.json")
+    with open(proj_config_path, "w", encoding="utf-8") as f:
+        json.dump(new_config, f, indent=2, ensure_ascii=False)
+
+    # Register in projects_index.json
+    projects[project_id] = {
+        "project_id": project_id,
+        "project_name": project_name,
+        "config_file": str(proj_config_path),
+        "created_at": time.time(),
+        "last_accessed": time.time()
+    }
+    registry["active_project_id"] = project_id
+    save_projects_registry(registry)
+    
+    # Set as active config
+    save_config(new_config)
+
+    return {"status": "created", "project_id": project_id, "config": new_config}
 
 @app.get("/api/health")
 def health_check():
@@ -156,6 +282,13 @@ def trigger_pipeline(payload: Dict[str, Any] = Body(...)):
     cmd = payload.get("command", "pipeline")
     limit = payload.get("limit")
     reset = payload.get("reset", False)
+    confirm_reset = payload.get("confirm_reset", False)
+
+    if reset and not confirm_reset:
+        raise HTTPException(
+            status_code=400,
+            detail="GÜVENLİK UYARISI: Veritabanı ve veri setlerinin sıfırlanması için confirm_reset=True onayı zorunludur."
+        )
 
     thread = threading.Thread(target=run_pipeline_process, args=(cmd, limit, reset))
     thread.daemon = True

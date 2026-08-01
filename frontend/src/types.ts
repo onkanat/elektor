@@ -1,4 +1,6 @@
 export interface PipelineConfig {
+  project_id?: string;
+  project_name?: string;
   input_mode: 'folder' | 'book';
   input_path: string;
   db_path: string;

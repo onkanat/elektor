@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import type { PipelineConfig, PipelineState } from '../types';
+import { ResetConfirmModal } from './ResetConfirmModal';
 
 interface SectionConfigProps {
   config: PipelineConfig;
   onUpdateConfig: (newConfig: Partial<PipelineConfig>) => Promise<void>;
   pipelineState: PipelineState;
-  onRunPipeline: (command: string, limit?: string, reset?: boolean) => void;
+  onRunPipeline: (command: string, limit?: string, reset?: boolean, confirmReset?: boolean) => void;
 }
 
 export const SectionConfig: React.FC<SectionConfigProps> = ({
@@ -20,6 +21,8 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
   const [jsonText, setJsonText] = useState<string>(JSON.stringify(config, null, 2));
   const [isEditingJson, setIsEditingJson] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+  const [showResetModal, setShowResetModal] = useState<boolean>(false);
+  const [pendingCommand, setPendingCommand] = useState<{ cmd: string; limit?: string }>({ cmd: 'pipeline', limit: '5' });
 
   const terminalRef = useRef<HTMLDivElement>(null);
 
@@ -61,10 +64,30 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
     }
   };
 
+  const handleTrigger = (cmd: string, limit?: string) => {
+    if (resetInput) {
+      setPendingCommand({ cmd, limit });
+      setShowResetModal(true);
+    } else {
+      onRunPipeline(cmd, limit, false, false);
+    }
+  };
+
   const isRunning = pipelineState.status === 'running';
 
   return (
     <div className="grid-2">
+      <ResetConfirmModal
+        isOpen={showResetModal}
+        projectName={formData.dataset_name || formData.project_id || 'sdr_engineers'}
+        projectId={formData.project_id || 'sdr_engineers'}
+        onCancel={() => setShowResetModal(false)}
+        onConfirm={() => {
+          onRunPipeline(pendingCommand.cmd, pendingCommand.limit, true, true);
+          setShowResetModal(false);
+        }}
+      />
+
       {/* Sol Kart: Döküman & Yapılandırma Parametreleri */}
       <div className="card">
         <div className="card-title">
@@ -215,7 +238,7 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
           <button
             className={`btn btn-emerald ${isRunning ? 'btn-disabled' : ''}`}
             disabled={isRunning}
-            onClick={() => onRunPipeline('pipeline', limitInput, resetInput)}
+            onClick={() => handleTrigger('pipeline', limitInput)}
           >
             ⚡ Hızlı Test Çalıştır (Limit: {limitInput})
           </button>
@@ -223,7 +246,7 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
           <button
             className={`btn btn-primary ${isRunning ? 'btn-disabled' : ''}`}
             disabled={isRunning}
-            onClick={() => onRunPipeline('pipeline', 'all', resetInput)}
+            onClick={() => handleTrigger('pipeline', 'all')}
           >
             🔥 Tüm Dökümanı İşle (Full Pipeline)
           </button>

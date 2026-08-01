@@ -3,12 +3,18 @@ import { Header } from './components/Header';
 import { SectionConfig } from './components/SectionConfig';
 import { SectionDatasetViewer } from './components/SectionDatasetViewer';
 import { SectionModelChat } from './components/SectionModelChat';
+import { ProjectExplorer } from './components/ProjectExplorer';
+import type { ProjectItem } from './components/ProjectExplorer';
 import type { HealthInfo, PipelineConfig, PipelineState } from './types';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'config' | 'dataset' | 'chat'>('config');
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [config, setConfig] = useState<PipelineConfig | null>(null);
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string>('sdr_engineers');
+  const [showProjectExplorer, setShowProjectExplorer] = useState<boolean>(false);
+
   const [pipelineState, setPipelineState] = useState<PipelineState>({
     status: 'idle',
     command: null,
@@ -31,6 +37,19 @@ export const App: React.FC = () => {
     }
   };
 
+  const fetchProjects = async () => {
+    try {
+      const res = await fetch('/api/projects');
+      if (res.ok) {
+        const data = await res.json();
+        setProjects(data.projects || []);
+        setActiveProjectId(data.active_project_id || 'sdr_engineers');
+      }
+    } catch (e) {
+      console.error('Fetch projects error:', e);
+    }
+  };
+
   const fetchPipelineStatus = async () => {
     try {
       const res = await fetch('/api/pipeline/status');
@@ -45,15 +64,51 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     fetchHealth();
+    fetchProjects();
     fetchPipelineStatus();
 
-    // Poll pipeline status every 2 seconds
     const interval = setInterval(() => {
       fetchPipelineStatus();
     }, 2000);
 
     return () => clearInterval(interval);
   }, []);
+
+  const handleSelectProject = async (projectId: string) => {
+    try {
+      const res = await fetch('/api/projects/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setActiveProjectId(data.active_project_id);
+        setConfig(data.config);
+        fetchProjects();
+        fetchHealth();
+      }
+    } catch (e) {
+      console.error('Select project error:', e);
+    }
+  };
+
+  const handleCreateProject = async (payload: any) => {
+    const res = await fetch('/api/projects/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const errData = await res.json();
+      throw new Error(errData.detail || 'Proje oluşturulamadı');
+    }
+    const data = await res.json();
+    setActiveProjectId(data.project_id);
+    setConfig(data.config);
+    fetchProjects();
+    fetchHealth();
+  };
 
   const handleUpdateConfig = async (newConfig: Partial<PipelineConfig>) => {
     try {
@@ -71,12 +126,22 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleRunPipeline = async (command: string, limit?: string, reset?: boolean) => {
+  const handleRunPipeline = async (
+    command: string,
+    limit?: string,
+    reset?: boolean,
+    confirmReset?: boolean
+  ) => {
     try {
       await fetch('/api/pipeline/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command, limit, reset }),
+        body: JSON.stringify({
+          command,
+          limit,
+          reset,
+          confirm_reset: confirmReset,
+        }),
       });
       fetchPipelineStatus();
     } catch (e) {
@@ -84,9 +149,26 @@ export const App: React.FC = () => {
     }
   };
 
+  const activeProjectObj = projects.find((p) => p.project_id === activeProjectId);
+
   return (
     <div className="app-container">
-      <Header health={health} activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Header
+        health={health}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        activeProjectName={activeProjectObj?.project_name || config?.dataset_name}
+        onOpenProjectExplorer={() => setShowProjectExplorer(true)}
+      />
+
+      <ProjectExplorer
+        isOpen={showProjectExplorer}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onSelectProject={handleSelectProject}
+        onCreateProject={handleCreateProject}
+        onClose={() => setShowProjectExplorer(false)}
+      />
 
       <main className="main-content">
         {config ? (

@@ -4,9 +4,17 @@ interface HeaderProps {
   health: HealthInfo | null;
   activeTab: 'config' | 'dataset' | 'chat';
   setActiveTab: (tab: 'config' | 'dataset' | 'chat') => void;
+  activeProjectName?: string;
+  onOpenProjectExplorer: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ health, activeTab, setActiveTab }) => {
+export const Header: React.FC<HeaderProps> = ({
+  health,
+  activeTab,
+  setActiveTab,
+  activeProjectName,
+  onOpenProjectExplorer,
+}) => {
   const isOllamaOnline = health?.ollama_status === 'online';
 
   return (
@@ -41,10 +49,20 @@ export const Header: React.FC<HeaderProps> = ({ health, activeTab, setActiveTab 
       </nav>
 
       <div className="header-badges">
+        {/* Proje Gezgini Launcher Button */}
+        <button
+          className="btn btn-secondary"
+          style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', borderColor: 'var(--accent-blue)' }}
+          onClick={onOpenProjectExplorer}
+        >
+          🗂️ Proje: <strong>{activeProjectName || health?.config?.dataset_name || 'sdr_engineers'}</strong>
+        </button>
+
         <div className={`badge ${isOllamaOnline ? 'online' : 'offline'}`}>
           <span className="dot"></span>
           Ollama: {isOllamaOnline ? 'Aktif' : 'Çevrimdışı'}
         </div>
+
         <div className="badge online">
           <span className="dot"></span>
           Port: 3456
