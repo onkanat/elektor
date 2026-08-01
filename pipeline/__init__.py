@@ -1,1 +1,1 @@
-# Elektor Archive Processing Pipeline package
+# Universal PDF Archive Processing Pipeline package

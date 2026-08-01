@@ -11,7 +11,7 @@ class TestTRPipeline(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         tmp_path = Path(self.tmpdir.name)
-        self.db_file = tmp_path / "test_elektor_tr.db"
+        self.db_file = tmp_path / "test_universal_tr.db"
         
         self.config = {
             "usb_path": str(tmp_path / "usb"),

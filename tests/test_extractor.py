@@ -10,7 +10,7 @@ class TestExtractor(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         tmp_path = Path(self.tmpdir.name)
-        self.db_file = tmp_path / "test_elektor.db"
+        self.db_file = tmp_path / "test_universal.db"
         usb_dir = tmp_path / "mock_usb"
         articles_dir = usb_dir / "articles"
         articles_dir.mkdir(parents=True)

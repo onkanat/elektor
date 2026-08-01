@@ -12,6 +12,8 @@ class DatasetBuilder:
         db_name = Path(self.db_path).stem
         self.export_dir = Path("exports") / db_name
         self.export_dir.mkdir(parents=True, exist_ok=True)
+        self.dataset_name = self.config.get("dataset_name", "Document")
+        self.dataset_name_tr = self.config.get("dataset_name_tr", "Döküman")
         
     def export_datasets(self):
         """Compiles enriched SQLite data and exports SFT, DPO, and Chat datasets (English and Turkish)"""
@@ -69,7 +71,7 @@ class DatasetBuilder:
                             if q and a:
                                 sft_records.append({
                                     "instruction": q,
-                                    "input": f"Context: Elektor Magazine ({year}) article '{title}'",
+                                    "input": f"Context: {self.dataset_name} ({year}) article '{title}'",
                                     "output": a
                                 })
                                 chat_records.append({
@@ -97,7 +99,7 @@ class DatasetBuilder:
                             if q and chosen and rej:
                                 dpo_records.append({
                                     "prompt": q,
-                                    "input": f"Context: Elektor Magazine ({year}) article '{title}'",
+                                    "input": f"Context: {self.dataset_name} ({year}) article '{title}'",
                                     "chosen": chosen,
                                     "rejected": rej
                                 })
@@ -119,7 +121,7 @@ class DatasetBuilder:
                             if q and a:
                                 tr_sft_records.append({
                                     "instruction": q,
-                                    "input": f"Bağlam: Elektor Dergisi ({year}) '{display_tr_title}' makalesi",
+                                    "input": f"Bağlam: {self.dataset_name_tr} ({year}) '{display_tr_title}' makalesi",
                                     "output": a
                                 })
                                 tr_chat_records.append({
@@ -146,7 +148,7 @@ class DatasetBuilder:
                             if q and chosen and rej:
                                 tr_dpo_records.append({
                                     "prompt": q,
-                                    "input": f"Bağlam: Elektor Dergisi ({year}) '{display_tr_title}' makalesi",
+                                    "input": f"Bağlam: {self.dataset_name_tr} ({year}) '{display_tr_title}' makalesi",
                                     "chosen": chosen,
                                     "rejected": rej
                                 })
@@ -157,15 +159,15 @@ class DatasetBuilder:
             if display_tr_title and tr_summary:
                 import random
                 tr_templates = [
-                    "Elektor dergisinde {year} yılında yayınlanan '{title}' makalesi ne hakkındadır? Kısaca özetler misiniz?",
-                    "Lütfen {year} yılına ait '{title}' başlıklı Elektor makalesinin özetini Türkçe olarak yazın.",
-                    "Elektor dergisindeki '{title}' ({year}) çalışmasının ana konusunu ve teknik içeriğini özetleyebilir misiniz?",
-                    "{year} basımı Elektor dergisi içeriğindeki '{title}' yazısı hangi teknik konuları ele alıyor ve neyi özetliyor?",
-                    "'{title}' ({year}) isimli Elektor makalesinin Türkçe özetini ve hedeflenen konuları paylaşır mısınız?",
-                    "Elektor bünyesinde {year} yılında çıkan '{title}' makalesi hakkında bilgi verip kısaca özetler misiniz?",
-                    "'{title}' ({year}) başlıklı teknik Elektor makalesinin içeriğini Türkçe olarak özetleyiniz."
+                    "{dataset} bünyesinde {year} yılında yayınlanan '{title}' makalesi ne hakkındadır? Kısaca özetler misiniz?",
+                    "Lütfen {year} yılına ait '{title}' başlıklı {dataset} makalesinin özetini Türkçe olarak yazın.",
+                    "{dataset} içeriğindeki '{title}' ({year}) çalışmasının ana konusunu ve teknik içeriğini özetleyebilir misiniz?",
+                    "{year} basımı {dataset} içeriğindeki '{title}' yazısı hangi teknik konuları ele alıyor ve neyi özetliyor?",
+                    "'{title}' ({year}) isimli {dataset} makalesinin Türkçe özetini ve hedeflenen konuları paylaşır mısınız?",
+                    "{dataset} bünyesinde {year} yılında çıkan '{title}' makalesi hakkında bilgi verip kısaca özetler misiniz?",
+                    "'{title}' ({year}) başlıklı teknik {dataset} makalesinin içeriğini Türkçe olarak özetleyiniz."
                 ]
-                tr_prompt = random.choice(tr_templates).format(year=year, title=display_tr_title)
+                tr_prompt = random.choice(tr_templates).format(dataset=self.dataset_name_tr, year=year, title=display_tr_title)
                 tr_sft_records.append({
                     "instruction": tr_prompt,
                     "input": "",

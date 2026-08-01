@@ -29,7 +29,7 @@ def parse_limit(limit_str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Elektor Magazine Archive Processing Pipeline CLI",
+        description="Universal PDF & RAG Dataset Processing Pipeline CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

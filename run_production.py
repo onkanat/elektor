@@ -9,6 +9,13 @@ STATUS_FILE = "production_status.json"
 
 def get_db_stats():
     db_path = "elektor_archive.db"
+    if os.path.exists("config.json"):
+        try:
+            with open("config.json", "r", encoding="utf-8") as f:
+                db_path = json.load(f).get("db_path", "elektor_archive.db")
+        except Exception:
+            pass
+        
     if not os.path.exists(db_path):
         return {"total_articles": 0, "enriched_english": 0, "translated_turkish": 0}
         
@@ -63,7 +70,25 @@ def run_command(cmd_args):
     return process.returncode
 
 def main():
-    total_articles = 11773
+    db_path = "elektor_archive.db"
+    if os.path.exists("config.json"):
+        try:
+            with open("config.json", "r", encoding="utf-8") as f:
+                db_path = json.load(f).get("db_path", "elektor_archive.db")
+        except Exception:
+            pass
+
+    total_articles = 0
+    if os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM articles")
+            total_articles = cur.fetchone()[0]
+            conn.close()
+        except Exception:
+            pass
+
     batch_size = 50
     
     # Load status if exists to resume
@@ -81,9 +106,9 @@ def main():
         print("All articles already processed according to status file. Resetting to 0 to verify.")
         start_index = 0
 
-    print("=== STARTING ELEKTOR PRODUCTION RUN ===")
-    print(f"Total archive size: {total_articles} articles")
-    print(f"Batch size: {batch_size} articles")
+    print("=== STARTING BATCH PRODUCTION RUN ===")
+    print(f"Total archive size: {total_articles} segments")
+    print(f"Batch size: {batch_size} segments")
     
     for start in range(start_index, total_articles, batch_size):
         end = min(start + batch_size, total_articles)

@@ -16,7 +16,7 @@ class ArchiveVectorStore:
         self.model_embedding = self.config["model_embedding"]
         self.chunk_size = self.config.get("chunk_size", 800)
         self.chunk_overlap = self.config.get("chunk_overlap", 150)
-        self.collection_name = "elektor_articles"
+        self.collection_name = self.config.get("qdrant_collection_name", "elektor_articles")
         
         # Connect to Ollama
         self.ollama_client = ollama.Client(host=self.ollama_url, timeout=180.0)
