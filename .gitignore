@@ -29,3 +29,7 @@ hf_upload_temp*/
 # OS files
 .DS_Store
 
+# Frontend Node build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/.tmp/
