@@ -102,21 +102,24 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
             value={formData.input_mode}
             onChange={handleChange}
           >
-            <option value="book">Book Mode (Tek Kitap/PDF Bölümleme)</option>
-            <option value="folder">Folder Mode (Özyinelemeli PDF Klasörü)</option>
+            <option value="book">Book Mode (Tek veya Çoklu PDF Kitap Bölümleme)</option>
+            <option value="folder">Folder Mode (Özyinelemeli Klasör + Akıllı Çoklu Kitap Bölümleme)</option>
           </select>
         </div>
 
         <div className="form-group">
-          <label>Döküman / Dosya Yolu (Input Path)</label>
+          <label>Döküman / Klasör / Çoklu Dosya Yolu (Input Path)</label>
           <input
             type="text"
             name="input_path"
             className="form-control"
             value={formData.input_path}
             onChange={handleChange}
-            placeholder="/Users/.../SDR4Engineers.pdf"
+            placeholder="/Users/.../cilt1.pdf, /Users/.../cilt2.pdf veya Klasör Yolu"
           />
+          <span style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem', display: 'block' }}>
+            💡 <strong>Klasör Modu:</strong> Klasördeki tüm çok sayfalı PDF ciltleri otomatik bölümlere/içindekilere ayrılır. <strong>Kitap Modu:</strong> Virgül (,) ile birden fazla PDF yolu verilebilir.
+          </span>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>

@@ -405,185 +405,169 @@ class ArchiveExtractor:
             
         cursor = self.conn.cursor()
 
-        if self.input_mode == "book":
-            pdf_path = self.input_path
-            if not pdf_path.is_file():
-                print(f"Error: Book mode requires a single PDF file, but path is a directory: {pdf_path}")
-                return
-                
-            print(f"=== Running in Book Mode on: {pdf_path.name} ===")
-            reader = pypdf.PdfReader(pdf_path)
-            total_pages = len(reader.pages)
-            print(f"Total pages in book: {total_pages}")
-            
-            # 1. Parse bookmarks/outline
-            outline = reader.outline
-            nodes = self.parse_outline_nodes(reader, outline)
-            
-            # Sort bookmarks by page number to create contiguous ranges
-            nodes = sorted(nodes, key=lambda x: x["page"])
-            
-            # Deduplicate outline items targeting same page
-            unique_nodes = []
-            seen_pages = set()
-            for n in nodes:
-                if n["page"] not in seen_pages:
-                    seen_pages.add(n["page"])
-                    unique_nodes.append(n)
-            
-            segments = []
-            if unique_nodes:
-                print(f"Found {len(unique_nodes)} bookmarks/chapters in digital book outline.")
-                # Add a dummy node at the end of the document
-                unique_nodes.append({"title": "Appendix / Index", "page": total_pages})
-                for i in range(len(unique_nodes) - 1):
-                    ch_title = unique_nodes[i]["title"]
-                    start_p = unique_nodes[i]["page"]
-                    end_p = unique_nodes[i+1]["page"] - 1
-                    
-                    # Prevent empty page ranges
+    def extract_book_segments(self, pdf_path):
+        """Splits a single PDF book file into logical chapter segments using digital outline bookmarks, printed TOC, or scanned headings"""
+        reader = pypdf.PdfReader(pdf_path)
+        total_pages = len(reader.pages)
+        
+        # 1. Parse bookmarks/outline
+        outline = reader.outline
+        nodes = self.parse_outline_nodes(reader, outline)
+        
+        # Sort bookmarks by page number to create contiguous ranges
+        nodes = sorted(nodes, key=lambda x: x["page"])
+        
+        unique_nodes = []
+        seen_pages = set()
+        for n in nodes:
+            if n["page"] not in seen_pages:
+                seen_pages.add(n["page"])
+                unique_nodes.append(n)
+        
+        segments = []
+        if unique_nodes:
+            print(f"Found {len(unique_nodes)} bookmarks/chapters in digital outline for {pdf_path.name}.")
+            unique_nodes.append({"title": "Appendix / Index", "page": total_pages})
+            for i in range(len(unique_nodes) - 1):
+                ch_title = unique_nodes[i]["title"]
+                start_p = unique_nodes[i]["page"]
+                end_p = unique_nodes[i+1]["page"] - 1
+                if start_p <= end_p:
+                    segments.append((ch_title, start_p, end_p))
+        else:
+            print(f"No digital bookmarks found in {pdf_path.name}. Attempting OCR & printed TOC heading detection...")
+            detected_headings = self.detect_scanned_headings(reader, total_pages)
+            if detected_headings:
+                print(f"Detected {len(detected_headings)} heading/chapter markers in {pdf_path.name}.")
+                detected_headings = sorted(detected_headings, key=lambda x: x["page"])
+                detected_headings.append({"title": "Appendix / End", "page": total_pages})
+                for i in range(len(detected_headings) - 1):
+                    ch_title = detected_headings[i]["title"]
+                    start_p = detected_headings[i]["page"]
+                    end_p = detected_headings[i+1]["page"] - 1
                     if start_p <= end_p:
                         segments.append((ch_title, start_p, end_p))
             else:
-                print("No digital bookmarks/outline found in PDF. Attempting OCR heading detection...")
-                detected_headings = self.detect_scanned_headings(reader, total_pages)
-                if detected_headings:
-                    print(f"Detected {len(detected_headings)} heading/chapter markers from scanned page text.")
-                    detected_headings = sorted(detected_headings, key=lambda x: x["page"])
-                    detected_headings.append({"title": "Appendix / End", "page": total_pages})
-                    for i in range(len(detected_headings) - 1):
-                        ch_title = detected_headings[i]["title"]
-                        start_p = detected_headings[i]["page"]
-                        end_p = detected_headings[i+1]["page"] - 1
-                        if start_p <= end_p:
-                            segments.append((ch_title, start_p, end_p))
-                else:
-                    print("Splitting book into default 10-page segments.")
-                    segment_size = 10
-                    for start_p in range(0, total_pages, segment_size):
-                        end_p = min(start_p + segment_size - 1, total_pages - 1)
-                        segments.append((f"Section starting page {start_p + 1}", start_p, end_p))
-            
-            # Apply slice limit
-            sliced_segments = segments[start:end] if end is not None else segments[start:]
-            print(f"Processing range [{start}:{end if end is not None else len(segments)}] ({len(sliced_segments)} segments)...")
-            
-            count = 0
-            for ch_title, start_p, end_p in sliced_segments:
-                rel_path = f"{pdf_path.name}::range::{start_p}_{end_p}"
-                filename = pdf_path.name
-                
-                # Check if already processed
-                cursor.execute("SELECT id, extracted_text FROM articles WHERE file_path = ?", (rel_path,))
-                row = cursor.fetchone()
-                if row and row[1]:
-                    continue
+                print(f"Splitting {pdf_path.name} into default 15-page segments.")
+                segment_size = 15
+                for start_p in range(0, total_pages, segment_size):
+                    end_p = min(start_p + segment_size - 1, total_pages - 1)
+                    segments.append((f"Section starting page {start_p + 1}", start_p, end_p))
                     
-                print(f"[{count+1}] Extracting Chapter: '{ch_title}' (Pages {start_p+1} to {end_p+1})...")
-                extracted_text, is_ocr = self.extract_pages_range(pdf_path, start_p, end_p)
-                extracted_text = self.clean_ocr_text(extracted_text)
-                ch_title = self.clean_ocr_text(ch_title)
-                
-                # Attempt to extract year from metadata or filename, or default to current year
-                year = None
-                try:
-                    meta = reader.metadata
-                    if meta and meta.creation_date:
-                        val = meta.creation_date.year
-                        if isinstance(val, int):
-                            year = val
-                except Exception:
-                    pass
-                if not year:
-                    year = datetime.now().year
-                    
-                processed_at = datetime.now().isoformat()
-                zoom_snippet = f"Chapter segment from pages {start_p+1} to {end_p+1}."
-                
-                if row:
-                    cursor.execute("""
-                        UPDATE articles 
-                        SET extracted_text = ?, is_ocr = ?, processed_at = ?, title = ?, year = ?, zoom_snippet = ?
-                        WHERE file_path = ?
-                    """, (extracted_text, 1 if is_ocr else 0, processed_at, ch_title, year, zoom_snippet, rel_path))
-                else:
-                    cursor.execute("""
-                        INSERT INTO articles (file_path, filename, title, year, zoom_snippet, extracted_text, is_ocr, processed_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (rel_path, filename, ch_title, year, zoom_snippet, extracted_text, 1 if is_ocr else 0, processed_at))
-                    
-                self.conn.commit()
-                count += 1
-                
-            print(f"Extraction step completed. Processed {count} new chapters.")
+        return segments, reader
+
+    def process_all_articles(self, limit=None):
+        """Walks the article directory or splits single/multiple PDF books, extracts text, and updates SQLite DB"""
+        # Parse range limit if range format
+        start, end = 0, None
+        if isinstance(limit, tuple):
+            start, end = limit
+        elif isinstance(limit, int):
+            start, end = 0, limit
             
+        cursor = self.conn.cursor()
+
+        # Gather target PDF files
+        pdf_paths = []
+        if self.input_mode == "book":
+            # Support comma, semicolon, or newline separated list of PDF paths
+            raw_path_str = str(self.input_path)
+            candidate_paths = [p.strip() for p in raw_path_str.replace('\n', ',').replace(';', ',').split(',') if p.strip()]
+            for cp in candidate_paths:
+                p_obj = Path(cp)
+                if p_obj.is_file() and p_obj.suffix.lower() == '.pdf':
+                    pdf_paths.append(p_obj)
+                elif p_obj.is_dir():
+                    for root, dirs, files in os.walk(p_obj):
+                        for f in files:
+                            if f.lower().endswith('.pdf'):
+                                pdf_paths.append(Path(root) / f)
         else:
-            # Mode: Folder (Recursive walking, backward compatible with Elektor)
-            zoom_metadata = self.load_zoom_metadata()
-            pdf_paths = []
-            for root, dirs, files in os.walk(self.articles_dir):
-                for file in files:
-                    if file.lower().endswith('.pdf'):
-                        pdf_paths.append(Path(root) / file)
-                        
-            print(f"Found {len(pdf_paths)} total PDFs in {self.articles_dir}")
-            pdf_paths = sorted(pdf_paths)
-            
-            # Apply slice based on range
-            sliced_paths = pdf_paths[start:end] if end is not None else pdf_paths[start:]
-            print(f"Processing range [{start}:{end if end is not None else len(pdf_paths)}] ({len(sliced_paths)} files)...")
-            
-            count = 0
-            for pdf_path in sliced_paths:
-                # Get path relative to the articles dir
-                rel_path = str(pdf_path.relative_to(self.articles_dir.parent))
-                filename = pdf_path.name
+            # Mode: Folder (Recursive walking)
+            if self.articles_dir.exists():
+                for root, dirs, files in os.walk(self.articles_dir):
+                    for file in files:
+                        if file.lower().endswith('.pdf'):
+                            pdf_paths.append(Path(root) / file)
+                            
+        pdf_paths = sorted(list(set(pdf_paths)))
+        if not pdf_paths:
+            print(f"Error: No valid PDF files found for extraction at {self.input_path}")
+            return
+
+        print(f"=== Extraction Mode: {self.input_mode.upper()} ({len(pdf_paths)} target PDF file(s)) ===")
+        
+        count = 0
+        zoom_metadata = self.load_zoom_metadata()
+        
+        for pdf_path in pdf_paths:
+            try:
+                reader = pypdf.PdfReader(pdf_path)
+                num_pages = len(reader.pages)
+            except Exception as e:
+                print(f"Warning: Could not read PDF {pdf_path.name}: {e}")
+                continue
+
+            # If in Book Mode OR if PDF volume in Folder Mode has > 15 pages: Split into chapters!
+            if self.input_mode == "book" or num_pages > 15:
+                print(f"Processing Multi-Page Volume ({num_pages} pages): {pdf_path.name}...")
+                segments, pdf_reader = self.extract_book_segments(pdf_path)
                 
-                # Check if already processed
-                cursor.execute("SELECT id, extracted_text FROM articles WHERE file_path = ?", (rel_path,))
-                row = cursor.fetchone()
-                if row and row[1]:
-                    continue
+                sliced_segments = segments[start:end] if end is not None else segments[start:]
+                for ch_title, start_p, end_p in sliced_segments:
+                    rel_path = f"{pdf_path.name}::range::{start_p}_{end_p}"
+                    filename = pdf_path.name
                     
-                print(f"[{count+1}] Processing: {rel_path}...")
-                
-                # Extract Year from path
-                year = None
-                for p in pdf_path.parts:
-                    if p.isdigit() and len(p) == 4:
-                        year = int(p)
-                        break
+                    cursor.execute("SELECT id, extracted_text FROM articles WHERE file_path = ?", (rel_path,))
+                    row = cursor.fetchone()
+                    if row and row[1]:
+                        continue
                         
-                zoom_snippet = zoom_metadata.get(filename, "")
-                title = ""
-                if zoom_snippet:
-                    title = zoom_snippet.split("By")[0].replace("project ", "").replace("PROJECT ", "").strip()
-                    if not title:
-                        title = filename
-                else:
-                    title = filename
+                    print(f"  [{count+1}] Extracting Segment: '{pdf_path.stem} - {ch_title}' (Pages {start_p+1}-{end_p+1})...")
+                    extracted_text, is_ocr = self.extract_pages_range(pdf_path, start_p, end_p)
+                    extracted_text = self.clean_ocr_text(extracted_text)
+                    ch_title = self.clean_ocr_text(ch_title)
+                    full_title = ch_title
                     
-                extracted_text, is_ocr = self.extract_text_from_pdf(pdf_path)
-                extracted_text = self.clean_ocr_text(extracted_text)
-                title = self.clean_ocr_text(title)
-                
-                processed_at = datetime.now().isoformat()
-                if row:
-                    cursor.execute("""
-                        UPDATE articles 
-                        SET extracted_text = ?, is_ocr = ?, processed_at = ?, title = ?, year = ?, zoom_snippet = ?
-                        WHERE file_path = ?
-                    """, (extracted_text, 1 if is_ocr else 0, processed_at, title, year, zoom_snippet, rel_path))
-                else:
+                    year = datetime.now().year
+                    processed_at = datetime.now().isoformat()
+                    zoom_snippet = f"Volume segment from pages {start_p+1} to {end_p+1}."
+                    
                     cursor.execute("""
                         INSERT OR REPLACE INTO articles (file_path, filename, title, year, zoom_snippet, extracted_text, is_ocr, processed_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (rel_path, filename, title, year, zoom_snippet, extracted_text, 1 if is_ocr else 0, processed_at))
+                    """, (rel_path, filename, full_title, year, zoom_snippet, extracted_text, 1 if is_ocr else 0, processed_at))
                     
+                    self.conn.commit()
+                    count += 1
+            else:
+                # Single-article short PDF (<= 15 pages) inside folder
+                rel_path = str(pdf_path.name)
+                filename = pdf_path.name
+                
+                cursor.execute("SELECT id, extracted_text FROM articles WHERE file_path = ?", (rel_path,))
+                row = cursor.fetchone()
+                if row and row[1]:
+                    continue
+                    
+                print(f"  [{count+1}] Processing Article PDF: {filename}...")
+                extracted_text, is_ocr = self.extract_text_from_pdf(pdf_path)
+                extracted_text = self.clean_ocr_text(extracted_text)
+                title = self.clean_ocr_text(filename)
+                
+                year = datetime.now().year
+                processed_at = datetime.now().isoformat()
+                zoom_snippet = zoom_metadata.get(filename, "")
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO articles (file_path, filename, title, year, zoom_snippet, extracted_text, is_ocr, processed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (rel_path, filename, title, year, zoom_snippet, extracted_text, 1 if is_ocr else 0, processed_at))
+                
                 self.conn.commit()
                 count += 1
-                
-            print(f"Extraction step completed. Processed {count} new files.")
+
+        print(f"Extraction step completed. Processed {count} new chapters/documents.")
 
     def close(self):
         self.conn.close()
