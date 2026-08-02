@@ -300,6 +300,31 @@ class ArchiveExtractor:
             print(f"Error OCRing pages {start_page}-{end_page} for {pdf_path}: {e}")
             return "", False
 
+    def detect_scanned_headings(self, reader, total_pages):
+        """Scans PDF page text to detect heading titles (e.g. BÖLÜM, KISIM, CHAPTER, 1. GİRİŞ) when digital PDF bookmarks are missing"""
+        import re
+        heading_nodes = []
+        # Matches lines like: "BÖLÜM 1: GİRİŞ", "CHAPTER 3", "I. TÜRK TARİHİ", "1. TARİH ÖNCESİ DEVRİLER"
+        heading_pattern = re.compile(
+            r'^\s*(BÖLÜM|CHAPTER|KISIM|SECTION|PART|[0-9]+\.|[I|V|X]+\.)\s+([A-ZÇĞİÖŞÜ0-9\s\-\.\:\,]{3,80})', 
+            re.IGNORECASE
+        )
+        
+        seen_pages = set()
+        for page_idx in range(min(total_pages, 200)):
+            try:
+                page_text = reader.pages[page_idx].extract_text() or ""
+                lines = [line.strip() for line in page_text.split('\n') if line.strip()]
+                for line in lines[:3]:
+                    if heading_pattern.match(line) and page_idx not in seen_pages:
+                        seen_pages.add(page_idx)
+                        heading_nodes.append({"title": line[:80], "page": page_idx})
+                        break
+            except Exception:
+                pass
+                
+        return heading_nodes
+
     def process_all_articles(self, limit=None):
         """Walks the article directory or splits a single PDF book, extracts text, and updates SQLite DB"""
         if not self.articles_dir.exists():
@@ -343,7 +368,7 @@ class ArchiveExtractor:
             
             segments = []
             if unique_nodes:
-                print(f"Found {len(unique_nodes)} bookmarks/chapters in book outline.")
+                print(f"Found {len(unique_nodes)} bookmarks/chapters in digital book outline.")
                 # Add a dummy node at the end of the document
                 unique_nodes.append({"title": "Appendix / Index", "page": total_pages})
                 for i in range(len(unique_nodes) - 1):
@@ -355,12 +380,24 @@ class ArchiveExtractor:
                     if start_p <= end_p:
                         segments.append((ch_title, start_p, end_p))
             else:
-                print("No bookmarks/outline found in PDF. Splitting book into default 10-page segments.")
-                # Fallback: Split every 10 pages
-                segment_size = 10
-                for start_p in range(0, total_pages, segment_size):
-                    end_p = min(start_p + segment_size - 1, total_pages - 1)
-                    segments.append((f"Section starting page {start_p + 1}", start_p, end_p))
+                print("No digital bookmarks/outline found in PDF. Attempting OCR heading detection...")
+                detected_headings = self.detect_scanned_headings(reader, total_pages)
+                if detected_headings:
+                    print(f"Detected {len(detected_headings)} heading/chapter markers from scanned page text.")
+                    detected_headings = sorted(detected_headings, key=lambda x: x["page"])
+                    detected_headings.append({"title": "Appendix / End", "page": total_pages})
+                    for i in range(len(detected_headings) - 1):
+                        ch_title = detected_headings[i]["title"]
+                        start_p = detected_headings[i]["page"]
+                        end_p = detected_headings[i+1]["page"] - 1
+                        if start_p <= end_p:
+                            segments.append((ch_title, start_p, end_p))
+                else:
+                    print("Splitting book into default 10-page segments.")
+                    segment_size = 10
+                    for start_p in range(0, total_pages, segment_size):
+                        end_p = min(start_p + segment_size - 1, total_pages - 1)
+                        segments.append((f"Section starting page {start_p + 1}", start_p, end_p))
             
             # Apply slice limit
             sliced_segments = segments[start:end] if end is not None else segments[start:]

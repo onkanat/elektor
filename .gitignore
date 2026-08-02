@@ -5,11 +5,13 @@ __pycache__/
 *.pyd
 .pytest_cache/
 
-# Databases (Local State)
+# Local Project Configs & Databases
 *.db
 *.db-journal
 *.db-wal
 qdrant_*/
+projects_*.json
+!projects_index.json
 
 # Exported training datasets
 exports/
