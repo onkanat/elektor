@@ -2,6 +2,7 @@ import sqlite3
 import json
 import uuid
 import ollama
+import time
 from pathlib import Path
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
@@ -26,8 +27,18 @@ class ArchiveVectorStore:
         # Connect to Ollama
         self.ollama_client = ollama.Client(host=self.ollama_url, timeout=180.0)
         
-        # Connect to local Qdrant Vector DB on disk
-        self.qdrant_client = QdrantClient(path=self.qdrant_db_path)
+        # Connect to local Qdrant Vector DB on disk (with retry loop for lock resolution)
+        self.qdrant_client = None
+        for attempt in range(5):
+            try:
+                self.qdrant_client = QdrantClient(path=self.qdrant_db_path)
+                break
+            except Exception as e:
+                if attempt < 4:
+                    time.sleep(1.0)
+                else:
+                    print(f"Warning: Qdrant client lock warning ({e}). Initializing in-memory fallback.")
+                    self.qdrant_client = QdrantClient(location=":memory:")
         
         # Determine embedding dimension
         self.embedding_dim = self.get_embedding_dimension()

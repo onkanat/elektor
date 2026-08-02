@@ -326,7 +326,7 @@ class ArchiveAnalyzer:
                     processed_at = datetime.now().isoformat()
                     
                     cursor.execute("""
-                        INSERT INTO enrichments (
+                        INSERT OR REPLACE INTO enrichments (
                             article_id, summary, topics, turkish_title, turkish_summary, sft_qa, dpo_pairs, tr_sft_qa, tr_dpo_pairs, processed_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
