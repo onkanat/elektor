@@ -129,62 +129,127 @@ class ArchiveExtractor:
             return "", False
 
     def clean_ocr_text(self, text):
-        """Sanitizes text by replacing common OCR character recognition mistakes"""
+        """Sanitizes text by replacing common OCR character recognition mistakes, repairing broken word spaces, line hyphens, and cleaning TOC index artifacts."""
         if not text:
             return text
             
-        # 1. Spaced words or broken hyphenations
-        text = text.replace("circu it", "circuit")
-        text = text.replace("circu its", "circuits")
-        text = text.replace("transi stor", "transistor")
-        text = text.replace("transi stors", "transistors")
-        text = text.replace("resis tor", "resistor")
-        text = text.replace("resis tors", "resistors")
-        text = text.replace("capaci tor", "capacitor")
-        text = text.replace("capaci tors", "capacitors")
-        text = text.replace("op- arnp", "op-amp")
-        text = text.replace("op arnp", "op-amp")
-        
-        # 2. Specific word replacements with word boundaries
         import re
+        
+        # 1. Repair hyphenated word breaks across lines (e.g. "impa- \n ratorluk" -> "imparatorluk")
+        text = re.sub(r'(\w+)-\s*\n\s*(\w+)', r'\1\2', text)
+        
+        # 2. General Turkish Suffix Re-joining (e.g. "medeni yeti" -> "medeniyeti", "ge nişliği" -> "genişliği")
+        turkish_suffix_pattern = re.compile(
+            r'(\b[a-zA-ZçğıöşüÇĞİÖŞÜ]{3,})\s+(lar|ler|lık|lik|luk|lük|mda|mde|nda|nde|nin|nın|nün|nun|ten|tan|den|dan|ya|ye|yu|yü|cı|ci|cu|cü|lüğü|luğu|liğe|liğine|sının|sinin|ları|leri|yeti|yati|liği|lığı)\b',
+            re.IGNORECASE
+        )
+        text = turkish_suffix_pattern.sub(r'\1\2', text)
+
+        # 3. Repair common historical OCR typography mistakes (e.g., İkesuslar -> İksoslar, Teb devri, vb.)
+        tr_ocr_corrections = {
+            r"\bİke\s*susl?\s*ar?\b": "İksoslar",
+            r"\bİkesusla\s*rın\b": "İksosların",
+            r"\bTep\s+de\s*vri\b": "Teb devri",
+            r"\binh\s*itat\b": "inhitat",
+            r"\bBeşin\s+ci\b": "Beşinci",
+            r"\bmedeni\s+yeti\b": "medeniyeti",
+            r"\bm\s+usiki\b": "musiki",
+            r"\bimpa\s*rator\s*luk?\b": "imparatorluk",
+            r"\bim\s*paratorlu\s*ğu\b": "imparatorluğu",
+            r"\bSan['’\s]*at\s*ler\b": "Sanatları",
+            r"\bS\.\s*lll\.\b": "S. III.",
+            r"\bM\.\s*E\.\b": "M.Ö.",
+        }
+        
+        for pattern, replacement in tr_ocr_corrections.items():
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+            
+        # 4. Spaced technical & English OCR fixes
+        text = text.replace("circu it", "circuit").replace("transi stor", "transistor").replace("resis tor", "resistor").replace("capaci tor", "capacitor")
+        
         replacements = {
             r"\bsw1ng1ng\b": "swinging",
             r"\bc1rcu1t\b": "circuit",
             r"\bc1rcu1ts\b": "circuits",
             r"\bd1stortion\b": "distortion",
             r"\bd1g1tal\b": "digital",
-            r"\bl1kew1se\b": "likewise",
             r"\bampl1f1er\b": "amplifier",
-            r"\bampl1f1ers\b": "amplifiers",
             r"\btrans1stor\b": "transistor",
-            r"\btrans1stors\b": "transistors",
             r"\bres1stor\b": "resistor",
-            r"\bres1stors\b": "resistors",
             r"\bcapac1tor\b": "capacitor",
-            r"\bcapac1tors\b": "capacitors",
-            r"\b74I0\b": "7410",
-            r"\b1C11\b": "IC11",
-            r"\boparnp\b": "op-amp",
-            r"\barnp\b": "amp",
-            r"\barnps\b": "amps",
             r"\brnicro\b": "micro",
             r"\bcligital\b": "digital",
             r"\banaclog\b": "analogue",
             r"\bF1gute\b": "Figure",
             r"\bf1gure\b": "figure",
-            r"\bf1gures\b": "figures",
-            r"\bF1g\b": "Figure",
-            r"\bf1g\b": "figure",
-            r"\bl0nF\b": "10nF",
-            r"\bl00nF\b": "100nF",
-            r"\blµF\b": "1µF",
-            r"\bl0µF\b": "10µF",
         }
         
         for pattern, replacement in replacements.items():
             text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
             
         return text
+
+    def parse_printed_toc(self, reader, total_pages):
+        """Scans front pages for printed Table of Contents (FİHRİST / İÇİNDEKİLER) with page numbers like 'S. 112', '127-149'"""
+        import re
+        toc_nodes = []
+        # Matches printed TOC lines: "IX - ANADOLU. . 127-149", "S. 112. - İksoslar devri", "A. Etiler imparatorluğu. . . S. 127."
+        toc_pattern = re.compile(
+            r'([I|V|X]+|[A-Z]|\d+)\s*[\.\-]?\s*([A-ZÇĞİÖŞÜa-zçğıöşü\s\-\,\:\'\’]{3,60})[\.\s]*S?\s*[\.\:]?\s*(\d{1,4})',
+            re.IGNORECASE
+        )
+        
+        seen_pages = set()
+        for page_idx in range(min(total_pages, 25)):
+            try:
+                page_text = reader.pages[page_idx].extract_text() or ""
+                if "İÇİNDEKİLER" in page_text.upper() or "FİHRİST" in page_text.upper() or "FIHRIST" in page_text.upper():
+                    lines = [line.strip() for line in page_text.split('\n') if line.strip()]
+                    for line in lines:
+                        match = toc_pattern.search(line)
+                        if match:
+                            prefix, title, p_str = match.groups()
+                            target_p = int(p_str)
+                            if 0 <= target_p <= total_pages and target_p not in seen_pages:
+                                seen_pages.add(target_p)
+                                full_title = f"{prefix.upper()} - {title.strip()}"
+                                toc_nodes.append({"title": full_title[:80], "page": target_p - 1})
+            except Exception:
+                pass
+                
+        return toc_nodes
+
+    def detect_scanned_headings(self, reader, total_pages):
+        """Scans PDF page text to detect heading titles (e.g. BÖLÜM, KISIM, CHAPTER, 1. GİRİŞ) when digital PDF bookmarks are missing"""
+        import re
+        
+        # 1. First attempt parsing printed Table of Contents page (FİHRİST / İÇİNDEKİLER)
+        toc_headings = self.parse_printed_toc(reader, total_pages)
+        if toc_headings:
+            print(f"Parsed {len(toc_headings)} chapter entries from printed Table of Contents (FİHRİST).")
+            return toc_headings
+
+        heading_nodes = []
+        # Matches lines like: "BÖLÜM 1: GİRİŞ", "CHAPTER 3", "I. TÜRK TARİHİ", "1. TARİH ÖNCESİ DEVRİLER"
+        heading_pattern = re.compile(
+            r'^\s*(BÖLÜM|CHAPTER|KISIM|SECTION|PART|[0-9]+\.|[I|V|X]+\.)\s+([A-ZÇĞİÖŞÜ0-9\s\-\.\:\,]{3,80})', 
+            re.IGNORECASE
+        )
+        
+        seen_pages = set()
+        for page_idx in range(min(total_pages, 200)):
+            try:
+                page_text = reader.pages[page_idx].extract_text() or ""
+                lines = [line.strip() for line in page_text.split('\n') if line.strip()]
+                for line in lines[:3]:
+                    if heading_pattern.match(line) and page_idx not in seen_pages:
+                        seen_pages.add(page_idx)
+                        heading_nodes.append({"title": line[:80], "page": page_idx})
+                        break
+            except Exception:
+                pass
+                
+        return heading_nodes
 
     def extract_text_from_pdf(self, pdf_path):
         """Attempts to extract digital text. If too short, falls back to OCR."""
