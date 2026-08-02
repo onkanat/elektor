@@ -94,30 +94,30 @@ class ArchiveAnalyzer:
         
         system_prompt = (
             f"{self.llm_persona} "
-            "Analyze the technical text and output a single JSON object. Follow the requested structure strictly."
+            "Analyze the document text and output a single JSON object. Follow the requested structure strictly."
         )
         
         user_prompt = (
             f"Article Title: {title}\n"
             f"Article Text:\n{truncated_text}\n\n"
-            f"Generate a JSON object containing EXACTLY {self.qa_count} advanced technical Q&A pairs and 1 DPO pair with the following key structure:\n"
+            f"Generate a JSON object containing EXACTLY {self.qa_count} advanced Q&A pairs and 1 DPO pair with the following key structure:\n"
             "{\n"
-            "  \"summary\": \"English summary of the project/article (2-4 detailed sentences)\",\n"
+            "  \"summary\": \"English summary of the document/article (2-4 detailed sentences)\",\n"
             "  \"topics\": [\"Topic 1\", \"Topic 2\", \"Topic 3\"],\n"
             "  \"sft_qa\": [\n"
-            "    {\"question\": \"Advanced technical question 1 in English\", \"answer\": \"Long, comprehensive, step-by-step engineering answer explaining hardware operation, component roles, or circuit design\"},\n"
+            "    {\"question\": \"Advanced question 1 in English\", \"answer\": \"Long, comprehensive, step-by-step answer explaining the concepts, evidence, mechanisms, or details related to the text\"},\n"
             f"    ... (Include EXACTLY {self.qa_count} total Q&A items in this array)\n"
             "  ],\n"
             "  \"dpo_pair\": {\n"
-            "    \"question\": \"Detailed technical question in English\",\n"
-            "    \"chosen\": \"Correct, detailed engineering explanation/solution in English\",\n"
-            "    \"rejected\": \"Misleading response containing a common hardware design error, bad layout practice, or incorrect calculation in English\"\n"
+            "    \"question\": \"Detailed question in English\",\n"
+            "    \"chosen\": \"Correct, detailed explanation/solution in English\",\n"
+            "    \"rejected\": \"Misleading response containing a plausible misconception, incorrect factual claim, or flawed reasoning in English\"\n"
             "  }\n"
             "}\n\n"
             "Guidelines:\n"
-            f"1. Generate EXACTLY {self.qa_count} distinct advanced technical Q&A items in 'sft_qa'.\n"
-            "2. Answers MUST be detailed, thorough, and instructive. Provide full explanations for hardware mechanisms, pinouts, component calculations, or code logic.\n"
-            "3. In the DPO pair, the rejected answer must contain a realistic engineering mistake (e.g. swapping TX/RX, omitting pullups, missing decoupling capacitors, wrong pin definitions) related to the article.\n"
+            f"1. Generate EXACTLY {self.qa_count} distinct Q&A items in 'sft_qa'.\n"
+            f"2. Answers MUST be detailed, thorough, and instructive according to the domain: {self.llm_subject}.\n"
+            f"3. In the DPO pair, the rejected answer must contain a plausible misconception, incorrect factual claim, or flawed reasoning related to {self.llm_subject} and the article text.\n"
             "4. Format any mathematical equations or formulas using standard LaTeX notation, for example: \\(p = \\frac{n \\cdot n_{cyl}}{60 \\cdot a}\\) instead of plain text.\n"
             "5. Return ONLY the valid JSON object. Do not include markdown code block formatting."
         )
@@ -167,10 +167,10 @@ class ArchiveAnalyzer:
         full_text = "\n\n".join(text_block)
         
         system_prompt = (
-            f"You are a professional technical translator specializing in {self.llm_subject}.\n"
-            "Translate the technical text block provided by the user into natural, high-quality Turkish.\n\n"
+            f"You are a professional translator specializing in {self.llm_subject}.\n"
+            "Translate the text block provided by the user into natural, high-quality Turkish.\n\n"
             "CRITICAL TERMINOLOGY RULES:\n"
-            "1. PRESERVE ALL TECHNICAL TERMS IN THEIR ORIGINAL STANDARD FORM (e.g. ESP32, SPI, I2C, MOSFET, ADC, DAC, PWM, microcontroller, op-amp, decoupling capacitor, pull-up, baud rate, duty cycle, flip-flop, PCB, RAM, ROM, GPIO, UART, DMA, breadboard, SMD, transceiver, etc.).\n"
+            "1. PRESERVE ALL PROPER NAMES, DATES, DOMAIN TERMINOLOGY, AND ACRONYMS IN THEIR STANDARD ACCURATE FORM.\n"
             "2. Keep all math/LaTeX formulas intact.\n"
             "3. Preserve the exact markers (e.g. Title:, Summary:, Q1:, A1:, DPO_Q:, DPO_Chosen:, DPO_Rejected:) to demarcate segments."
         )
