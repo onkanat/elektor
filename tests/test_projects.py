@@ -13,6 +13,24 @@ async def test_list_projects():
         assert "projects" in data
         assert isinstance(data["projects"], list)
 
+@pytest.fixture(autouse=True)
+def restore_config():
+    import shutil, os, glob
+    if os.path.exists("config.json"):
+        shutil.copy("config.json", "config.json.bak")
+    if os.path.exists("projects_index.json"):
+        shutil.copy("projects_index.json", "projects_index.json.bak")
+    yield
+    if os.path.exists("config.json.bak"):
+        shutil.move("config.json.bak", "config.json")
+    if os.path.exists("projects_index.json.bak"):
+        shutil.move("projects_index.json.bak", "projects_index.json")
+    for f in glob.glob("projects_test_proj_*.json") + glob.glob("projects_pytest_*.json"):
+        try:
+            os.remove(f)
+        except Exception:
+            pass
+
 @pytest.mark.asyncio
 async def test_create_and_select_project():
     pid = f"test_proj_{uuid.uuid4().hex[:6]}"

@@ -131,6 +131,10 @@ class ArchiveVectorStore:
             print(f"Embedding article [{article_id}]: {title}...")
             
             chunks = self.chunk_text(text)
+            # Limit chunks per article to top 100 most representative chunks to avoid multi-minute loops on giant books
+            if len(chunks) > 100:
+                chunks = chunks[:100]
+                
             article_success = True
             for chunk_idx, chunk in enumerate(chunks):
                 try:
@@ -154,27 +158,24 @@ class ArchiveVectorStore:
                         vector=vector,
                         payload=payload
                     ))
+                    
+                    # Upsert in batches of 50
+                    if len(points_to_upload) >= 50:
+                        self.qdrant_client.upsert(collection_name=self.collection_name, points=points_to_upload)
+                        points_to_upload = []
                 except Exception as e:
                     print(f"  Failed to embed chunk {chunk_idx} of article {article_id}: {e}")
                     article_success = False
             
+            if points_to_upload:
+                self.qdrant_client.upsert(collection_name=self.collection_name, points=points_to_upload)
+                points_to_upload = []
+                
             if article_success:
                 embedded_article_ids.append(article_id)
+                cursor.execute("UPDATE articles SET is_embedded = 1 WHERE id = ?", (article_id,))
+                conn.commit()
             count += 1
-            
-        # Upload all points to Qdrant
-        if points_to_upload:
-            print(f"Uploading {len(points_to_upload)} vectors to Qdrant...")
-            self.qdrant_client.upsert(
-                collection_name=self.collection_name,
-                points=points_to_upload
-            )
-            print("Upload completed.")
-            
-            # Mark successfully uploaded articles as embedded in SQLite
-            for art_id in embedded_article_ids:
-                cursor.execute("UPDATE articles SET is_embedded = 1 WHERE id = ?", (art_id,))
-            conn.commit()
             
         conn.close()
 

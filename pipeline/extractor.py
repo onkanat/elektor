@@ -511,7 +511,7 @@ class ArchiveExtractor:
                     """, (extracted_text, 1 if is_ocr else 0, processed_at, title, year, zoom_snippet, rel_path))
                 else:
                     cursor.execute("""
-                        INSERT INTO articles (file_path, filename, title, year, zoom_snippet, extracted_text, is_ocr, processed_at)
+                        INSERT OR REPLACE INTO articles (file_path, filename, title, year, zoom_snippet, extracted_text, is_ocr, processed_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, (rel_path, filename, title, year, zoom_snippet, extracted_text, 1 if is_ocr else 0, processed_at))
                     
