@@ -13,6 +13,16 @@ async def test_health_check():
         assert "config" in data
 
 @pytest.mark.asyncio
+async def test_system_metrics():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.get("/api/system/metrics")
+        assert response.status_code == 200
+        data = response.json()
+        assert "cpu_percent" in data
+        assert "memory" in data
+        assert "vram_models" in data
+
+@pytest.mark.asyncio
 async def test_read_config():
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.get("/api/config")
@@ -29,6 +39,14 @@ async def test_pipeline_status():
         data = response.json()
         assert "status" in data
         assert "logs" in data
+
+@pytest.mark.asyncio
+async def test_pipeline_invalid_command():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post("/api/pipeline/run", json={"command": "invalid_cmd"})
+        assert response.status_code == 400
+        data = response.json()
+        assert "Geçersiz komut" in data["detail"]
 
 @pytest.mark.asyncio
 async def test_list_datasets():

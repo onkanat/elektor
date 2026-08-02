@@ -13,6 +13,8 @@ from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import pydantic
 import ollama
+import psutil
+import httpx
 
 app = FastAPI(title="Elektor Universal PDF Pipeline Backend API", version="1.0.0")
 
@@ -213,6 +215,50 @@ def health_check():
         "config": config
     }
 
+@app.get("/api/system/metrics")
+def get_system_metrics():
+    config = get_config()
+    ollama_url = config.get("ollama_url", "http://localhost:11434")
+    
+    # System RAM & CPU
+    cpu_percent = psutil.cpu_percent(interval=None)
+    vm = psutil.virtual_memory()
+    mem_info = {
+        "total_mb": round(vm.total / (1024 * 1024), 1),
+        "used_mb": round(vm.used / (1024 * 1024), 1),
+        "available_mb": round(vm.available / (1024 * 1024), 1),
+        "percent": vm.percent
+    }
+    
+    # Ollama Loaded Models & VRAM Usage
+    vram_models = []
+    ollama_online = False
+    try:
+        with httpx.Client(timeout=3.0) as client:
+            resp = client.get(f"{ollama_url}/api/ps")
+            if resp.status_code == 200:
+                ollama_online = True
+                data = resp.json()
+                for m in data.get("models", []):
+                    vram_bytes = m.get("size_vram", 0) or m.get("size", 0)
+                    vram_models.append({
+                        "name": m.get("name") or m.get("model"),
+                        "param_size": m.get("details", {}).get("parameter_size", "-"),
+                        "quant": m.get("details", {}).get("quantization_level", "-"),
+                        "vram_mb": round(vram_bytes / (1024 * 1024), 1),
+                        "vram_gb": round(vram_bytes / (1024 * 1024 * 1024), 2),
+                        "expires_at": m.get("expires_at")
+                    })
+    except Exception:
+        ollama_online = False
+
+    return {
+        "cpu_percent": cpu_percent,
+        "memory": mem_info,
+        "ollama_online": ollama_online,
+        "vram_models": vram_models
+    }
+
 @app.get("/api/config")
 def read_config():
     return get_config()
@@ -242,13 +288,16 @@ def run_pipeline_process(cmd: str, limit: Optional[str] = None, reset: bool = Fa
     if reset:
         args.append("--reset")
 
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
     try:
         process = subprocess.Popen(
             args,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1
+            bufsize=1,
+            env=env
         )
 
         for line in iter(process.stdout.readline, ''):
@@ -280,6 +329,10 @@ def trigger_pipeline(payload: Dict[str, Any] = Body(...)):
             raise HTTPException(status_code=400, detail="A pipeline task is already running.")
 
     cmd = payload.get("command", "pipeline")
+    valid_commands = ["pipeline", "extract", "enrich", "embed", "export"]
+    if cmd not in valid_commands:
+        raise HTTPException(status_code=400, detail=f"Geçersiz komut: '{cmd}'. Geçerli komutlar: {valid_commands}")
+
     limit = payload.get("limit")
     reset = payload.get("reset", False)
     confirm_reset = payload.get("confirm_reset", False)

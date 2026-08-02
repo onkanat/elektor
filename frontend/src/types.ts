@@ -70,3 +70,24 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
 }
+
+export interface VramModel {
+  name: string;
+  param_size: string;
+  quant: string;
+  vram_mb: number;
+  vram_gb: number;
+  expires_at?: string;
+}
+
+export interface SystemMetrics {
+  cpu_percent: number;
+  memory: {
+    total_mb: number;
+    used_mb: number;
+    available_mb: number;
+    percent: number;
+  };
+  ollama_online: boolean;
+  vram_models: VramModel[];
+}

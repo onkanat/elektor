@@ -1,4 +1,6 @@
+import React from 'react';
 import type { HealthInfo } from '../types';
+import { SystemMetricsCard } from './SystemMetricsCard';
 
 interface HeaderProps {
   health: HealthInfo | null;
@@ -49,6 +51,9 @@ export const Header: React.FC<HeaderProps> = ({
       </nav>
 
       <div className="header-badges">
+        {/* Live System Metrics (CPU, RAM, VRAM) */}
+        <SystemMetricsCard />
+
         {/* Proje Gezgini Launcher Button */}
         <button
           className="btn btn-secondary"
@@ -61,11 +66,6 @@ export const Header: React.FC<HeaderProps> = ({
         <div className={`badge ${isOllamaOnline ? 'online' : 'offline'}`}>
           <span className="dot"></span>
           Ollama: {isOllamaOnline ? 'Aktif' : 'Çevrimdışı'}
-        </div>
-
-        <div className="badge online">
-          <span className="dot"></span>
-          Port: 3456
         </div>
       </div>
     </header>

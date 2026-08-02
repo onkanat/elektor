@@ -142,59 +142,72 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
               className="form-control"
               value={formData.sft_qa_count}
               onChange={handleChange}
-              min={1}
-              max={50}
             />
           </div>
         </div>
 
         <div className="form-group">
-          <label>Hedef Uzmanlık Personası (LLM Persona)</label>
-          <textarea
-            name="llm_persona"
+          <label>Öğretmen Model (Teacher Analyzer)</label>
+          <input
+            type="text"
+            name="model_analyzer"
             className="form-control"
-            value={formData.llm_persona}
+            value={formData.model_analyzer}
             onChange={handleChange}
-            rows={2}
           />
         </div>
 
         <div className="form-group">
-          <label>Konu & Alan Tanımı (LLM Subject)</label>
-          <textarea
-            name="llm_subject"
+          <label>Çeviri Modeli (Bilingual Translator)</label>
+          <input
+            type="text"
+            name="model_translator"
             className="form-control"
-            value={formData.llm_subject}
+            value={formData.model_translator}
             onChange={handleChange}
-            rows={2}
           />
         </div>
 
-        <div style={{ display: 'flex', gap: '1rem', marginTop: '1.25rem' }}>
-          <button className="btn btn-primary" onClick={handleSaveForm}>
-            💾 Yapılandırmayı Kaydet
-          </button>
+        <div className="form-group">
+          <label>Vektör Embedding Modeli</label>
+          <input
+            type="text"
+            name="model_embedding"
+            className="form-control"
+            value={formData.model_embedding}
+            onChange={handleChange}
+          />
+        </div>
+
+        {/* JSON / Form Görünüm Anahtarı */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem' }}>
           <button
             className="btn btn-secondary"
             onClick={() => setIsEditingJson(!isEditingJson)}
+            style={{ fontSize: '0.8rem' }}
           >
-            {isEditingJson ? '📝 Forma Dön' : '🔍 Raw config.json Düzenle'}
+            {isEditingJson ? '📝 Form Görünümüne Dön' : '⚙️ config.json Doğrudan Düzenle'}
           </button>
-          {saveSuccess && <span style={{ color: '#34d399', alignSelf: 'center', fontSize: '0.85rem' }}>✓ Kaydedildi!</span>}
+
+          <button className="btn btn-primary" onClick={isEditingJson ? handleSaveJson : handleSaveForm}>
+            💾 Yapılandırmayı Kaydet
+          </button>
         </div>
+
+        {saveSuccess && (
+          <div style={{ marginTop: '0.75rem', color: '#34d399', fontSize: '0.85rem' }}>
+            ✓ config.json başarıyla güncellendi!
+          </div>
+        )}
 
         {isEditingJson && (
           <div style={{ marginTop: '1rem' }}>
-            <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Canlı config.json Editörü</label>
             <textarea
-              className="form-control mono"
+              className="form-control"
+              style={{ height: '220px', fontFamily: 'monospace', fontSize: '0.8rem' }}
               value={jsonText}
               onChange={(e) => setJsonText(e.target.value)}
-              rows={12}
             />
-            <button className="btn btn-emerald" style={{ marginTop: '0.5rem' }} onClick={handleSaveJson}>
-              JSON Olarak Kaydet
-            </button>
           </div>
         )}
       </div>
@@ -208,9 +221,10 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
           </span>
         </div>
 
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem' }}>
+        {/* LİMİT VE RESET KONTROLLERİ */}
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem', background: 'var(--bg-primary)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
           <div style={{ flex: 1 }}>
-            <label style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Limit (Örn: 5, 10:20, all)</label>
+            <label style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Örnek Limiti (Limit: Örn. 5, 10:20, all)</label>
             <input
               type="text"
               className="form-control"
@@ -227,65 +241,83 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
               checked={resetInput}
               onChange={(e) => setResetInput(e.target.checked)}
             />
-            <label htmlFor="resetCheck" style={{ fontSize: '0.8rem', cursor: 'pointer' }}>
-              Veritabanını Sıfırla (--reset)
+            <label htmlFor="resetCheck" style={{ fontSize: '0.8rem', cursor: 'pointer', color: resetInput ? '#fb7185' : 'var(--text-secondary)' }}>
+              Veritabanını Sıfırla (--reset) ⚠️
             </label>
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', marginBottom: '1.25rem' }}>
-          <button
-            className={`btn btn-emerald ${isRunning ? 'btn-disabled' : ''}`}
-            disabled={isRunning}
-            onClick={() => handleTrigger('pipeline', limitInput)}
-          >
-            ⚡ Hızlı Test Çalıştır (Limit: {limitInput})
-          </button>
+        {/* BÖLÜM 1: TAM PIPELINE BUTONLARI */}
+        <div style={{ marginBottom: '1.25rem' }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
+            TAM PIPELINE ÇALIŞTIRMA (Tüm 4 Adım Ardışık İlerler)
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
+            <button
+              className={`btn btn-emerald ${isRunning ? 'btn-disabled' : ''}`}
+              disabled={isRunning}
+              onClick={() => handleTrigger('pipeline', limitInput)}
+            >
+              ⚡ Hızlı Test (Limit: {limitInput})
+            </button>
 
-          <button
-            className={`btn btn-primary ${isRunning ? 'btn-disabled' : ''}`}
-            disabled={isRunning}
-            onClick={() => handleTrigger('pipeline', 'all')}
-          >
-            🔥 Tüm Dökümanı İşle (Full Pipeline)
-          </button>
+            <button
+              className={`btn btn-primary ${isRunning ? 'btn-disabled' : ''}`}
+              disabled={isRunning}
+              onClick={() => handleTrigger('pipeline', 'all')}
+            >
+              🔥 Tüm Dökümanı İşle (Full Pipeline)
+            </button>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '1rem' }}>
-          <button
-            className="btn btn-secondary"
-            style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
-            disabled={isRunning}
-            onClick={() => onRunPipeline('extract', limitInput)}
-          >
-            1. Extract
-          </button>
-          <button
-            className="btn btn-secondary"
-            style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
-            disabled={isRunning}
-            onClick={() => onRunPipeline('enrich', limitInput)}
-          >
-            2. Enrich
-          </button>
-          <button
-            className="btn btn-secondary"
-            style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
-            disabled={isRunning}
-            onClick={() => onRunPipeline('embed', limitInput)}
-          >
-            3. Embed
-          </button>
+        {/* BÖLÜM 2: BAĞIMSIZ ADIM BUTONLARI (STEP-BY-STEP EXECUTION) */}
+        <div style={{ marginBottom: '1.25rem', background: 'rgba(15, 23, 42, 0.4)', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px dashed var(--border-color)' }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--accent-cyan)', marginBottom: '0.5rem' }}>
+            🎯 TEKİL ADIM ÇALIŞTIR (Step-by-Step Execution)
+          </div>
 
-          <button
-            className="btn btn-secondary"
-            style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
-            disabled={isRunning}
-            onClick={() => onRunPipeline('export')}
-          >
-            4. Export JSONL
-          </button>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+            <button
+              className={`btn btn-secondary ${isRunning ? 'btn-disabled' : ''}`}
+              style={{ fontSize: '0.78rem', padding: '0.45rem 0.6rem', textAlign: 'left' }}
+              disabled={isRunning}
+              onClick={() => handleTrigger('extract', limitInput)}
+              title="Sadece PDF metinlerini ve haritayı ayıklar"
+            >
+              📄 1. Metin Ayıkla (Extract)
+            </button>
+
+            <button
+              className={`btn btn-secondary ${isRunning ? 'btn-disabled' : ''}`}
+              style={{ fontSize: '0.78rem', padding: '0.45rem 0.6rem', textAlign: 'left' }}
+              disabled={isRunning}
+              onClick={() => handleTrigger('enrich', limitInput)}
+              title="Qwen ve TranslateGemma ile SFT/DPO üretir"
+            >
+              🧠 2. AI Zenginleştir (Enrich)
+            </button>
+
+            <button
+              className={`btn btn-secondary ${isRunning ? 'btn-disabled' : ''}`}
+              style={{ fontSize: '0.78rem', padding: '0.45rem 0.6rem', textAlign: 'left' }}
+              disabled={isRunning}
+              onClick={() => handleTrigger('embed', limitInput)}
+              title="Qdrant Vektör DB'ye gömer ve indeksler"
+            >
+              🔍 3. Vektörle (Embed)
+            </button>
+
+            <button
+              className={`btn btn-secondary ${isRunning ? 'btn-disabled' : ''}`}
+              style={{ fontSize: '0.78rem', padding: '0.45rem 0.6rem', textAlign: 'left' }}
+              disabled={isRunning}
+              onClick={() => handleTrigger('export')}
+              title="SFT/DPO/Chat .jsonl veri setlerini exports/ klasörüne yazar"
+            >
+              📦 4. Veri Seti Aktar (Export)
+            </button>
+          </div>
         </div>
 
         {/* Live Terminal */}
