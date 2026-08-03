@@ -1,5 +1,5 @@
 {
-  "active_project_id": "türk",
+  "active_project_id": "octave",
   "projects": {
     "sdr_engineers": {
       "project_id": "sdr_engineers",
@@ -21,6 +21,13 @@
       "config_file": "projects_türk.json",
       "created_at": 1785658919.086047,
       "last_accessed": 1785744674.8134022
+    },
+    "octave": {
+      "project_id": "octave",
+      "project_name": "Octave kod eğitim",
+      "config_file": "projects_octave.json",
+      "created_at": 1785754367.266581,
+      "last_accessed": 1785790159.480861
     }
   }
 }
