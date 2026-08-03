@@ -8,6 +8,7 @@ interface HeaderProps {
   setActiveTab: (tab: 'config' | 'dataset' | 'chat') => void;
   activeProjectName?: string;
   onOpenProjectExplorer: () => void;
+  onOpenQuickHelp: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -16,12 +17,36 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   activeProjectName,
   onOpenProjectExplorer,
+  onOpenQuickHelp,
 }) => {
   const isOllamaOnline = health?.ollama_status === 'online';
 
   return (
     <header className="app-header">
-      <div className="brand">
+      <div className="brand" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+        <button
+          className="help-icon-btn"
+          title="Hızlı Yardım & Dokümantasyon (README.md)"
+          onClick={onOpenQuickHelp}
+          style={{
+            background: 'rgba(59, 130, 246, 0.15)',
+            border: '1px solid var(--accent-blue)',
+            color: '#60a5fa',
+            borderRadius: '50%',
+            width: '32px',
+            height: '32px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            fontSize: '1.1rem',
+            fontWeight: 'bold',
+            transition: 'all 0.2s ease',
+            boxShadow: '0 0 10px rgba(59, 130, 246, 0.2)'
+          }}
+        >
+          ❓
+        </button>
         <div className="brand-icon">⚡</div>
         <div className="brand-title">
           <h1>Elektor Sentetik Veri Platformu</h1>

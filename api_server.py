@@ -642,6 +642,14 @@ def chat_with_analyzer(payload: Dict[str, Any] = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ollama chat error: {str(e)}")
 
+@app.get("/api/readme")
+def get_readme():
+    readme_path = Path("README.md")
+    if readme_path.exists():
+        with open(readme_path, "r", encoding="utf-8") as f:
+            return {"content": f.read()}
+    return {"content": "# Doküman bulunamadı."}
+
 # Mount React frontend static build
 FRONTEND_DIST = Path("frontend/dist")
 if FRONTEND_DIST.exists():

@@ -4,6 +4,7 @@ import { SectionConfig } from './components/SectionConfig';
 import { SectionDatasetViewer } from './components/SectionDatasetViewer';
 import { SectionModelChat } from './components/SectionModelChat';
 import { ProjectExplorer } from './components/ProjectExplorer';
+import { QuickHelpModal } from './components/QuickHelpModal';
 import type { ProjectItem } from './components/ProjectExplorer';
 import type { HealthInfo, PipelineConfig, PipelineState } from './types';
 
@@ -14,6 +15,7 @@ export const App: React.FC = () => {
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string>('sdr_engineers');
   const [showProjectExplorer, setShowProjectExplorer] = useState<boolean>(false);
+  const [showQuickHelp, setShowQuickHelp] = useState<boolean>(false);
 
   const [pipelineState, setPipelineState] = useState<PipelineState>({
     status: 'idle',
@@ -159,6 +161,7 @@ export const App: React.FC = () => {
         setActiveTab={setActiveTab}
         activeProjectName={activeProjectObj?.project_name || config?.dataset_name}
         onOpenProjectExplorer={() => setShowProjectExplorer(true)}
+        onOpenQuickHelp={() => setShowQuickHelp(true)}
       />
 
       <ProjectExplorer
@@ -168,6 +171,11 @@ export const App: React.FC = () => {
         onSelectProject={handleSelectProject}
         onCreateProject={handleCreateProject}
         onClose={() => setShowProjectExplorer(false)}
+      />
+
+      <QuickHelpModal
+        isOpen={showQuickHelp}
+        onClose={() => setShowQuickHelp(false)}
       />
 
       <main className="main-content">
