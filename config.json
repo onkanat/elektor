@@ -12,12 +12,12 @@
   "generation_language": "tr",
   "translation_target": "tr",
   "sft_qa_count": 10,
-  "dataset_name": "Türk_tarih_seti",
+  "dataset_name": "Software-Defined Radio for Engineers",
   "dataset_name_tr": "Türk_tarih_seti",
   "qdrant_collection_name": "türk_articles",
   "chunk_size": 800,
   "chunk_overlap": 150,
   "ocr_threshold_chars": 100,
   "tesseract_cmd": "/opt/homebrew/bin/tesseract",
-  "project_id": "türk"
+  "project_id": "sdr_engineers"
 }

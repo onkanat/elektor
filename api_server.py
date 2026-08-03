@@ -114,22 +114,40 @@ def select_project(payload: Dict[str, Any] = Body(...)):
     projects[project_id]["last_accessed"] = time.time()
     save_projects_registry(registry)
 
-    # Load project's specific config if saved under projects/<project_id>.json
+    # Load project's specific config if saved under projects_<project_id>.json
     proj_config_path = Path(f"projects_{project_id}.json")
+    proj_config = {}
     if proj_config_path.exists():
         try:
             with open(proj_config_path, "r", encoding="utf-8") as f:
                 proj_config = json.load(f)
-                save_config(proj_config)
         except Exception:
             pass
 
     current_config = get_config()
-    current_config["project_id"] = project_id
-    current_config["dataset_name"] = projects[project_id].get("project_name", current_config.get("dataset_name"))
-    save_config(current_config)
+    target_config = dict(current_config)
+    target_config.update(proj_config)
 
-    return {"status": "success", "active_project_id": project_id, "config": current_config}
+    # Force sync project_id, database path, and qdrant paths for selected project
+    target_config["project_id"] = project_id
+    target_config["dataset_name"] = projects[project_id].get("project_name", target_config.get("dataset_name", project_id))
+    
+    expected_db = f"database/{project_id}.db"
+    if not target_config.get("db_path") or not target_config["db_path"].endswith(f"{project_id}.db"):
+        target_config["db_path"] = expected_db
+        
+    if not target_config.get("qdrant_db_path") or project_id not in target_config["qdrant_db_path"]:
+        target_config["qdrant_db_path"] = f"qdrant_{project_id}"
+
+    if not target_config.get("qdrant_collection_name") or project_id not in target_config["qdrant_collection_name"]:
+        target_config["qdrant_collection_name"] = f"{project_id}_articles"
+
+    # Save to config.json AND projects_<project_id>.json
+    save_config(target_config)
+    with open(proj_config_path, "w", encoding="utf-8") as f:
+        json.dump(target_config, f, indent=2, ensure_ascii=False)
+
+    return {"status": "success", "active_project_id": project_id, "config": target_config}
 
 @app.post("/api/projects/create")
 def create_project(payload: Dict[str, Any] = Body(...)):
@@ -268,6 +286,17 @@ def update_config(data: Dict[str, Any] = Body(...)):
     current = get_config()
     current.update(data)
     save_config(current)
+
+    # Sync to active project's JSON file if project_id exists
+    project_id = current.get("project_id")
+    if project_id:
+        proj_config_path = Path(f"projects_{project_id}.json")
+        try:
+            with open(proj_config_path, "w", encoding="utf-8") as f:
+                json.dump(current, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Warning: Could not update {proj_config_path}: {e}")
+
     return {"status": "success", "config": current}
 
 # Pipeline Execution Background Task
