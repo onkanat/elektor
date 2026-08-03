@@ -559,6 +559,7 @@ def get_qdrant_info():
     if not os.path.exists(qdrant_path):
         return {"exists": False, "path": qdrant_path, "collection": collection_name, "points_count": 0}
 
+    client = None
     try:
         from qdrant_client import QdrantClient
         client = QdrantClient(path=qdrant_path)
@@ -579,6 +580,12 @@ def get_qdrant_info():
         }
     except Exception as e:
         return {"exists": False, "path": qdrant_path, "error": str(e)}
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
 
 @app.post("/api/db/qdrant/search")
 def search_qdrant(payload: Dict[str, Any] = Body(...)):
@@ -589,6 +596,7 @@ def search_qdrant(payload: Dict[str, Any] = Body(...)):
     if not query_text.strip():
         raise HTTPException(status_code=400, detail="Query string cannot be empty")
 
+    store = None
     try:
         from pipeline.vector_store import ArchiveVectorStore
         store = ArchiveVectorStore()
@@ -596,6 +604,9 @@ def search_qdrant(payload: Dict[str, Any] = Body(...)):
         return {"query": query_text, "results": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Qdrant search error: {str(e)}")
+    finally:
+        if store is not None:
+            store.close()
 
 # Section C: Analyzer Model Chat Uç Noktası
 @app.post("/api/chat")

@@ -205,6 +205,14 @@ class ArchiveVectorStore:
             print(f"Search failed: {e}")
             return []
 
+    def close(self):
+        """Closes the Qdrant client connection releasing local file locks"""
+        if hasattr(self, 'qdrant_client') and self.qdrant_client is not None:
+            try:
+                self.qdrant_client.close()
+            except Exception:
+                pass
+
 if __name__ == "__main__":
     store = ArchiveVectorStore()
     store.load_to_vector_db(limit=2)
