@@ -64,14 +64,15 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
     return false;
   };
 
-  // Fetch JSONL dataset list on mount
+  const [selectedRowModal, setSelectedRowModal] = useState<any | null>(null);
+
+  // Fetch JSONL dataset list on mount / project change
   useEffect(() => {
     fetch('/api/datasets')
       .then((res) => res.json())
       .then((data) => {
         if (data.datasets && data.datasets.length > 0) {
           setDatasets(data.datasets);
-          // Initial auto-select
           const activeList = data.datasets.filter((d: DatasetItem) => isProjectMatch(d.relative_path));
           if (activeList.length > 0) {
             setSelectedFile(activeList[0].relative_path);
@@ -125,22 +126,30 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
       });
   }, [selectedFile, jsonlPage, jsonlSearch]);
 
-  // Fetch SQLite tables on mount/subTab switch
+  // Fetch SQLite tables on subTab switch or project change
   useEffect(() => {
     if (subTab === 'sqlite') {
+      setIsLoadingSqlite(true);
       fetch('/api/db/sqlite/tables')
         .then((res) => res.json())
         .then((data) => {
           if (data.tables) {
             setSqliteTables(data.tables);
             if (data.tables.length > 0) {
-              setSelectedTable(data.tables[0].name);
+              const exists = data.tables.some((t: SQLiteTableInfo) => t.name === selectedTable);
+              if (!exists) {
+                setSelectedTable(data.tables[0].name);
+              }
             }
           }
+          setIsLoadingSqlite(false);
         })
-        .catch((err) => console.error('Error fetching SQLite tables:', err));
+        .catch((err) => {
+          console.error('Error fetching SQLite tables:', err);
+          setIsLoadingSqlite(false);
+        });
     }
-  }, [subTab]);
+  }, [subTab, activeProjectId, activeDatasetName]);
 
   // Fetch SQLite rows
   useEffect(() => {
@@ -157,9 +166,9 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
         console.error('Error fetching SQLite rows:', err);
         setIsLoadingSqlite(false);
       });
-  }, [selectedTable, sqlitePage, sqliteSearch, subTab]);
+  }, [selectedTable, sqlitePage, sqliteSearch, subTab, activeProjectId, activeDatasetName]);
 
-  // Fetch Qdrant Info on subTab switch
+  // Fetch Qdrant Info on subTab switch or project change
   useEffect(() => {
     if (subTab === 'qdrant') {
       fetch('/api/db/qdrant/info')
@@ -167,7 +176,7 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
         .then((data) => setQdrantInfo(data))
         .catch((err) => console.error('Error fetching Qdrant info:', err));
     }
-  }, [subTab]);
+  }, [subTab, activeProjectId, activeDatasetName]);
 
   const handleQdrantSearch = async () => {
     if (!qdrantQuery.trim()) return;
@@ -433,24 +442,66 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
                 <thead>
                   <tr>
                     <th>ID</th>
-                    <th>Başlık (Title)</th>
-                    <th>Yıl / Mod</th>
-                    <th>Ayıklanan Metin Önizlemesi</th>
+                    <th>Başlık / Bilgi</th>
+                    <th>Metin & İçerik Önizlemesi</th>
+                    <th style={{ width: '110px' }}>İşlem</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sqliteRows.map((row: any, i: number) => (
-                    <tr key={i}>
-                      <td style={{ fontWeight: 600, color: 'var(--accent-cyan)' }}>{row.id}</td>
-                      <td style={{ fontWeight: 500 }}>{row.title || row.filename}</td>
-                      <td>{row.year || row.mode || '-'}</td>
-                      <td style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', maxWidth: '500px' }}>
-                        {row.text_content_preview || row.text_content || '-'}
-                      </td>
-                    </tr>
-                  ))}
+                  {sqliteRows.map((row: any, i: number) => {
+                    const textPreview = row.extracted_text_preview || row.extracted_text || row.summary_preview || row.summary || row.tr_sft_qa_preview || row.sft_qa_preview || row.zoom_snippet || '-';
+                    const titleStr = row.title || row.turkish_title || row.filename || `Kayıt #${row.article_id || row.id}`;
+                    const subtitle = row.year ? `Yıl: ${row.year}` : (row.article_id ? `Article ID: ${row.article_id}` : (row.file_path ? `Path: ${row.file_path}` : ''));
+
+                    return (
+                      <tr key={i} style={{ cursor: 'pointer' }} onClick={() => setSelectedRowModal(row)}>
+                        <td style={{ fontWeight: 600, color: 'var(--accent-cyan)' }}>{row.id}</td>
+                        <td style={{ fontWeight: 500, minWidth: '180px' }}>
+                          <div>{titleStr}</div>
+                          {subtitle && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>{subtitle}</div>}
+                        </td>
+                        <td style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', maxWidth: '500px', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.4 }}>
+                          {textPreview}
+                        </td>
+                        <td>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedRowModal(row);
+                            }}
+                          >
+                            🔍 Detay / Metin
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Full Extracted Text & Row Details Modal */}
+          {selectedRowModal && (
+            <div className="modal-backdrop" onClick={() => setSelectedRowModal(null)}>
+              <div className="modal-card" style={{ maxWidth: '800px', width: '90%' }} onClick={(e) => e.stopPropagation()}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-primary)' }}>
+                    📖 Metin Detayı: {selectedRowModal.title || selectedRowModal.filename || `ID #${selectedRowModal.id}`}
+                  </h3>
+                  <button className="btn btn-secondary" style={{ padding: '0.2rem 0.6rem' }} onClick={() => setSelectedRowModal(null)}>✕ Kapat</button>
+                </div>
+
+                <div style={{ maxHeight: '60vh', overflowY: 'auto', background: 'var(--bg-primary)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', fontSize: '0.85rem', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-primary)' }}>
+                  {selectedRowModal.extracted_text || selectedRowModal.summary || selectedRowModal.tr_sft_qa || selectedRowModal.sft_qa || JSON.stringify(selectedRowModal, null, 2)}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                  <button className="btn btn-primary" onClick={() => setSelectedRowModal(null)}>Tamam</button>
+                </div>
+              </div>
             </div>
           )}
         </div>

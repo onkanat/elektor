@@ -431,10 +431,20 @@ def preview_dataset(
     }
 
 # SQLite Lite Query Viewer
+def resolve_db_path(raw_path: str) -> str:
+    if not raw_path:
+        return "database/sdr_engineers.db"
+    db_obj = Path(raw_path)
+    if len(db_obj.parts) == 1:
+        return str(Path("database") / raw_path)
+    return str(db_obj)
+
+# SQLite Lite Query Viewer
 @app.get("/api/db/sqlite/tables")
 def get_sqlite_tables():
     config = get_config()
-    db_path = config.get("db_path", "database/sdr_engineers.db")
+    raw_path = config.get("db_path", "database/sdr_engineers.db")
+    db_path = resolve_db_path(raw_path)
     if not os.path.exists(db_path):
         return {"tables": [], "db_path": db_path, "exists": False}
 
@@ -442,7 +452,7 @@ def get_sqlite_tables():
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = [row[0] for row in cursor.fetchall()]
+        tables = [row[0] for row in cursor.fetchall() if not row[0].startswith("sqlite_")]
         
         info = []
         for t in tables:
@@ -463,7 +473,8 @@ def query_sqlite_table(
     search: Optional[str] = None
 ):
     config = get_config()
-    db_path = config.get("db_path", "database/sdr_engineers.db")
+    raw_path = config.get("db_path", "database/sdr_engineers.db")
+    db_path = resolve_db_path(raw_path)
     if not os.path.exists(db_path):
         raise HTTPException(status_code=404, detail="Database file not found")
 
@@ -473,11 +484,17 @@ def query_sqlite_table(
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
+        # Get column info dynamically
+        cursor.execute(f"PRAGMA table_info(`{table}`);")
+        cols_info = cursor.fetchall()
+        text_cols = [c[1] for c in cols_info if c[2].upper() in ['TEXT', 'VARCHAR', 'CHAR', 'CLOB'] or c[1] in ['title', 'filename', 'extracted_text', 'summary', 'turkish_title', 'turkish_summary', 'sft_qa', 'dpo_pairs', 'tr_sft_qa', 'tr_dpo_pairs']]
+
         where_clause = ""
         params = []
-        if search:
-            where_clause = "WHERE title LIKE ? OR text_content LIKE ?"
-            params = [f"%{search}%", f"%{search}%"]
+        if search and text_cols:
+            clauses = [f"`{col}` LIKE ?" for col in text_cols]
+            where_clause = "WHERE (" + " OR ".join(clauses) + ")"
+            params = [f"%{search}%"] * len(text_cols)
 
         count_sql = f"SELECT COUNT(*) FROM `{table}` {where_clause}"
         cursor.execute(count_sql, params)
@@ -488,10 +505,9 @@ def query_sqlite_table(
         rows = [dict(row) for row in cursor.fetchall()]
         
         for r in rows:
-            if "text_content" in r and r["text_content"] and len(r["text_content"]) > 500:
-                r["text_content_preview"] = r["text_content"][:500] + "..."
-            if "raw_ai_response" in r and r["raw_ai_response"] and len(r["raw_ai_response"]) > 300:
-                r["raw_ai_response_preview"] = r["raw_ai_response"][:300] + "..."
+            for k, val in list(r.items()):
+                if isinstance(val, str) and len(val) > 400:
+                    r[f"{k}_preview"] = val[:400] + "..."
 
         conn.close()
         return {
