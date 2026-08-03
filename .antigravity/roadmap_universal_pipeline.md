@@ -59,3 +59,16 @@ Refactored training data format compiler:
 *   **AI Enrichment**: Processed using `qwen3.6:27b-mtp-q4_K_M` (analyzer) and `translategemma:12b-it-q4_K_M` (translator).
 *   **Vector DB**: Embedded **1,278 chunks** in `qdrant_sdr/` using `nomic-embed-text:latest`.
 *   **HF Upload**: Published successfully as a new Hugging Face dataset under [onkanat/sdr-engineers-dataset](https://huggingface.co/datasets/onkanat/sdr-engineers-dataset).
+
+---
+
+## 🔮 Future Plans & Cloud Expansion (Gelecek Planlar)
+
+### 📌 Phase 5: Automatic One-Click Hugging Face Push (`run.py export --push-to-hub`)
+- **Arayüz & CLI Entegrasyonu**: Bölüm B arayüzüne ve `run.py export` komutuna tek tıkla Hugging Face Hub'a yükleme seçeneği (`--push-to-hub`).
+- **Otomatik Dataset Card & Kapak Üretimi**: Dökümanın ilk sayfasını / kapağını otomatik görsel yaparak YAML meta-veri başlığı ile Hugging Face `README.md` kartını otomatik derleme.
+
+### 📌 Phase 6: Zero-Cost Cloud GPU & Serverless Offloading (Ücretsiz Donanım Stratejisi)
+- **Hugging Face Serverless Inference API**: Yerel GPU yetersizliğinde istekleri ücretsiz HF Serverless API uç noktalarına (`Qwen/Qwen2.5-72B-Instruct`, `Llama-3.3-70B-Instruct`) yönlendirerek yerel donanım yükünü sıfırlama.
+- **HF Spaces + ZeroGPU (NVIDIA A100/H100)**: Sentetik veri üretim script'lerini ücretsiz ZeroGPU destekli HF Space üzerinde çalıştırma.
+- **Colab & Kaggle Notebook Entegrasyonu**: Haftalık 30 saat ücretsiz 2x T4 GPU (Kaggle) ve Colab ortamında toplu üretim yapıp verileri anında `dataset.push_to_hub()` ile HF Hub'a aktarma.
