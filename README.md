@@ -68,8 +68,8 @@ Adjust parameters in the `config.json` file for your target domain:
 {
   "input_mode": "book",
   "input_path": "/path/to/rp2040_datasheet.pdf",
-  "db_path": "rp2040_datasheet.db",
-  "qdrant_db_path": "qdrant_rp2040",
+  "db_path": "database/sdr_engineers.db",
+  "qdrant_db_path": "qdrant_sdr",
   "ollama_url": "http://192.168.1.14:11434",
   "model_embedding": "nomic-embed-text:latest",
   "model_analyzer": "qwen3.6:35b-a3b-mtp-q4_K_M",
@@ -85,6 +85,101 @@ Adjust parameters in the `config.json` file for your target domain:
   "tesseract_cmd": "/opt/homebrew/bin/tesseract"
 }
 ```
+
+---
+
+## 🧠 Model ve Prompt Sandbox Ayarları Rehberi (config.json)
+
+`config.json` ve projeye özel `projects_<project_id>.json` dosyalarında yer alan **Model ve Prompt Sandbox Ayarları**, Elektor/Synthetic Data Pipeline'ının üretken yapay zeka (LLM) modelleriyle kurduğu etkileşimin sınırlarını, uzmanlık kimliğini ve veri kalitesini doğrudan belirleyen kritik parametrelerdir.
+
+Bu ayarların doğru yapılandırılması, modellerin genel-geçer veya yanlış alana ait yanıtlar (örneğin tarih dökümanında donanım/devre şeması yanıtı üretilmesi gibi "prompt sızıntılarını") üretmesini engeller ve domain-agnostik (alana özgü) sentetik veri seti kalitesini garanti altına alır.
+
+### 🎯 1. Neden Kritik Önem Taşır?
+
+1. **Domain İzolasyonu (Sınırlandırma):** LLM'e verilen roller (`llm_persona`) ve odak konuları (`llm_subject`), modelin dökümanı incelerken yalnızca hedeflenen alanın terminolojisi ve perspektifiyle SFT (Supervised Fine-Tuning) ve DPO (Direct Preference Optimization) çiftleri üretmesini sağlar.
+2. **Hallüsinasyon ve Sızıntı Önleme:** Kod tabanında sabit (hardcoded) promptlar kullanıldığında model dökümandan bağımsız olarak eski şablonlara kayabilir. Sandbox parametreleri ile istemler dinamik biçimlendirilir.
+3. **Dil ve Çeviri Hassasiyeti:** `generation_language` ve `translation_target` ayarları, kaynak döküman dili ile çıktı veri seti dilini ayrıştırarak çok dilli (multilingual) model eğitimine hazır veri üretir.
+
+---
+
+### 📋 2. Temel Sandbox Parametreleri ve Anlamları
+
+| Parametre | Açıklama | Örnek Değer |
+| :--- | :--- | :--- |
+| `llm_persona` | Analizci modelin üstlendiği uzmanlık rolü | `"Akademik tarih araştırmaları uzmanı"` / `"SDR & DSP Hardware Engineer"` |
+| `llm_subject` | Analiz edilen dökümanın temel konusu | `"Türk Tarihi, Cumhuriyet Dönemi"` / `"Software-Defined Radio, FPGA"` |
+| `generation_language` | Analiz ve soru-cevap üretilecek hedef dil | `"tr"` / `"en"` |
+| `translation_target` | İkincil çeviri veri seti hedef dili | `"tr"` |
+| `model_analyzer` | Veri seti analizi ve Q&A üretecek ana LLM | `"gemma4:26b-a4b-it-qat"` / `"qwen3.5:2b"` |
+| `model_embedding` | Vektör veritabanı chunk gömme modeli | `"nomic-embed-text:latest"` |
+| `sft_qa_count` | Her döküman/bölüm için üretilecek SFT soru sayısı | `10` |
+| `chunk_size` / `chunk_overlap` | Metin bölümleme ve çakışma karakter sayısı | `800` / `150` |
+| `ocr_threshold_chars` | OCR tetikleme alt karakter eşiği | `100` |
+
+---
+
+### 💡 3. Konfigürasyon Örnekleri
+
+#### Örnek A: Tarih ve Sosyal Bilimler Projesi (Türk Tarih Tezi Seti)
+Tarih ve akademi odaklı dökümanlar işlenirken modelin akademik dil kullanmasını ve tarihsel terimlere sadık kalmasını sağlayan yapılandırma:
+
+```json
+{
+  "project_id": "türk",
+  "dataset_name": "Türk_tarih_seti",
+  "input_mode": "folder",
+  "input_path": "/Belgelerim/TürkTarihTezi",
+  "db_path": "database/türk.db",
+  "qdrant_db_path": "qdrant_türk",
+  "qdrant_collection_name": "türk_articles",
+  "generation_language": "tr",
+  "translation_target": "tr",
+  "llm_persona": "Cumhuriyet dönemi akademik tarih araştırmaları uzmanı ve historiograf",
+  "llm_subject": "Türk Tarihi, Türk Tarih Tezi, 1931 Ders Kitapları Analizi",
+  "model_analyzer": "gemma4:26b-a4b-it-qat",
+  "model_translator": "translategemma:12b-it-q4_K_M",
+  "model_embedding": "nomic-embed-text:latest",
+  "sft_qa_count": 10,
+  "chunk_size": 800,
+  "chunk_overlap": 150,
+  "ocr_threshold_chars": 100
+}
+```
+
+#### Örnek B: Teknik ve Donanım Mühendisliği Projesi (SDR & RP2040)
+Gömülü sistemler veya donanım dökümanları işlenirken teknik register, sinyal işleme ve devre şeması kavramlarına odaklanan yapılandırma:
+
+```json
+{
+  "project_id": "sdr_engineers",
+  "dataset_name": "Software-Defined Radio for Engineers",
+  "input_mode": "book",
+  "input_path": "/articles/SDR4Engineers.pdf",
+  "db_path": "database/sdr_engineers.db",
+  "qdrant_db_path": "qdrant_sdr",
+  "qdrant_collection_name": "sdr_articles",
+  "generation_language": "en",
+  "translation_target": "tr",
+  "llm_persona": "Senior SDR & DSP Hardware Architecture Engineer",
+  "llm_subject": "Software-Defined Radio, FPGA, RF Front-End, SPI/I2C Protocols",
+  "model_analyzer": "qwen3.5:2b",
+  "model_translator": "translategemma:12b-it-q4_K_M",
+  "model_embedding": "nomic-embed-text:latest",
+  "sft_qa_count": 10,
+  "chunk_size": 800,
+  "chunk_overlap": 150,
+  "ocr_threshold_chars": 100
+}
+```
+
+---
+
+### 📌 4. Önemli Kullanım Notları
+
+> [!IMPORTANT]
+> **Proje Oluştururken Sınırları Belirleyin:** Yeni bir proje açarken veya `config.json` düzenlerken `llm_persona` ve `llm_subject` alanlarını ne kadar net ve spesifik tanımlarsanız, LLM tarafından üretilecek SFT Soru-Cevap ve DPO tercih çiftlerinin kalitesi o derece yüksek olur.
+>
+> **Modül Uyumluğu:** `generation_language: "tr"` seçildiğinde sistem promptları ve üretilen sentetik veri seti doğrudan Türkçe olarak yapılandırılır; ek bir çeviri maliyetine gerek kalmaz.
 
 ---
 
