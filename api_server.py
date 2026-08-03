@@ -15,6 +15,7 @@ import pydantic
 import ollama
 import psutil
 import httpx
+from pipeline.mcp_tools import search_vector_rag, query_sqlite_knowledge, inject_sft_dpo_context, evaluate_knowledge_gap
 
 app = FastAPI(title="Elektor Universal PDF Pipeline Backend API", version="1.0.0")
 
@@ -641,6 +642,103 @@ def chat_with_analyzer(payload: Dict[str, Any] = Body(...)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ollama chat error: {str(e)}")
+
+# Section C: Pre-Fine-Tuning Impact Simulator Uç Noktası
+@app.post("/api/chat/simulate")
+def simulate_pre_finetuning_impact(payload: Dict[str, Any] = Body(...)):
+    config = get_config()
+    ollama_url = config.get("ollama_url", "http://localhost:11434")
+    model = payload.get("model") or config.get("model_analyzer", "qwen3.6:27b-mtp-q4_K_M")
+    user_prompt = payload.get("prompt", "").strip()
+    system_prompt = payload.get("system_prompt") or config.get("llm_persona", "")
+    
+    if not user_prompt:
+        raise HTTPException(status_code=400, detail="Prompt string is required")
+
+    tool_logs = []
+    
+    # 1. Execute RAG & MCP Tools
+    rag_result = search_vector_rag(user_prompt, top_k=4)
+    tool_logs.append({
+        "name": "search_vector_rag",
+        "description": "Qdrant Vektör Veritabanı Arama",
+        "status": rag_result["status"],
+        "count": rag_result.get("count", 0),
+        "snippets": [r.get("text", "")[:180] for r in rag_result.get("results", [])]
+    })
+    
+    sqlite_result = query_sqlite_knowledge(user_prompt, limit=3)
+    tool_logs.append({
+        "name": "query_sqlite_knowledge",
+        "description": "SQLite Döküman & SFT Q&A Çifti Arama",
+        "status": sqlite_result["status"],
+        "articles_found": sqlite_result.get("articles_found", 0),
+        "enrichments_found": sqlite_result.get("enrichments_found", 0)
+    })
+    
+    sft_dpo_result = inject_sft_dpo_context(user_prompt, limit=2)
+    tool_logs.append({
+        "name": "inject_sft_dpo_context",
+        "description": "JSONL Veri Seti Örnek Enjeksiyonu",
+        "status": sft_dpo_result["status"],
+        "count": sft_dpo_result.get("count", 0)
+    })
+
+    # Construct RAG Context string
+    context_chunks = []
+    for r in rag_result.get("results", []):
+        context_chunks.append(f"--- Döküman Parçası ({r.get('title')}, {r.get('year')}) ---\n{r.get('text')}")
+    for a in sqlite_result.get("articles", []):
+        if "extracted_text_snippet" in a:
+            context_chunks.append(f"--- SQLite Döküman ({a.get('title')}) ---\n{a.get('extracted_text_snippet')}")
+    for s in sft_dpo_result.get("samples", []):
+        rec = s.get("record", {})
+        context_chunks.append(f"--- SFT/DPO Örnek ({s.get('file')}) ---\n{json.dumps(rec, ensure_ascii=False)}")
+        
+    full_context_str = "\n\n".join(context_chunks)
+
+    # 2. Call BASE Model (Zero-Shot - Ham Model)
+    base_response = ""
+    try:
+        client = ollama.Client(host=ollama_url, timeout=90.0)
+        base_res = client.chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a general AI assistant. Answer directly using general knowledge without specific domain files."},
+                {"role": "user", "content": user_prompt}
+            ]
+        )
+        base_response = base_res.get("message", {}).get("content", "")
+    except Exception as e:
+        base_response = f"[Ham Model Hatası]: {str(e)}"
+
+    # 3. Call SIMULATED FT Model (RAG & SFT/DPO Context Injected)
+    simulated_response = ""
+    try:
+        client = ollama.Client(host=ollama_url, timeout=90.0)
+        sim_system_prompt = f"{system_prompt}\n\n=== RELEVANT DOMAIN KNOWLEDGE & SFT CONTEXT ===\n{full_context_str}"
+        sim_res = client.chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": sim_system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+        )
+        simulated_response = sim_res.get("message", {}).get("content", "")
+    except Exception as e:
+        simulated_response = f"[Simüle Model Hatası]: {str(e)}"
+
+    # 4. Evaluate Delta (Knowledge Gain & Fine-Tuning Impact)
+    eval_result = evaluate_knowledge_gap(base_response, simulated_response, full_context_str)
+
+    return {
+        "prompt": user_prompt,
+        "model": model,
+        "base_response": base_response,
+        "simulated_response": simulated_response,
+        "tool_logs": tool_logs,
+        "evaluation": eval_result
+    }
 
 @app.get("/api/readme")
 def get_readme():
