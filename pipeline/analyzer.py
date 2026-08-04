@@ -357,6 +357,7 @@ class ArchiveAnalyzer:
             print(f"=== Code Enrichment (Pass 1: Analysis with '{self.model_name}'): Processing {len(pass1_rows)} AST Code Units ===")
             count1 = 0
             for row in pass1_rows:
+                unit_id, project_id, file_path, unit_type, name, sig, docstring, code = row
                 pragmatic_ratio = self.config.get("pragmatic_ratio", 50)
                 use_pragmatic = (unit_id % 100) < pragmatic_ratio
 
