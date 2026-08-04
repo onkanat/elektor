@@ -15,13 +15,18 @@ class ArchiveExtractor:
             self.config = json.load(f)
             
         self.input_mode = self.config.get("input_mode", "folder")
-        if "input_path" in self.config:
+        self.raw_input_path = str(self.config.get("input_path", "")).strip()
+        if self.raw_input_path.startswith("http://") or self.raw_input_path.startswith("https://") or self.raw_input_path.startswith("git@"):
+            self.input_path = self.raw_input_path
+            self.articles_dir = Path("downloads/repos")
+        elif "input_path" in self.config:
             self.input_path = Path(self.config["input_path"])
+            self.articles_dir = self.input_path
         else:
             usb_path = Path(self.config.get("usb_path", "/Volumes/USB DISK"))
             self.input_path = usb_path / "articles"
-            
-        self.articles_dir = self.input_path
+            self.articles_dir = self.input_path
+
         
         if "usb_path" in self.config:
             self.csv_path = Path(self.config["usb_path"]) / "lib" / "zoom_pageinfo.csv"
@@ -467,8 +472,46 @@ class ArchiveExtractor:
             
         cursor = self.conn.cursor()
 
+        if self.input_mode in ("rendergit", "github", "git_repo"):
+            print(f"=== Extraction Mode: RENDERGIT (Target Repo: {self.input_path}) ===")
+            repo_input = str(self.input_path).strip()
+            project_id = self.config.get("project_id", "git_project")
+
+            from pipeline.code_extractor import clone_repository, flatten_repository_rendergit, extract_and_store_code_units
+
+            if repo_input.startswith("http://") or repo_input.startswith("https://") or repo_input.startswith("git@"):
+                repo_name = repo_input.rstrip("/").split("/")[-1].replace(".git", "")
+                repo_dir = Path("downloads/repos") / repo_name
+                clone_repository(repo_input, repo_dir)
+            else:
+                repo_dir = Path(repo_input)
+
+            rendergit_out_path = Path("exports") / f"{project_id}_rendergit.md"
+            flattened_text, parsed_files = flatten_repository_rendergit(repo_dir, output_file=rendergit_out_path)
+
+            extracted_units = extract_and_store_code_units(
+                parsed_files=parsed_files,
+                repo_dir=repo_dir,
+                db_path=Path(self.db_path),
+                project_id=project_id,
+                repo_url=repo_input
+            )
+
+            # Store flattened repo text as an article entry in SQLite DB
+            rel_path = f"repo::{repo_dir.name}"
+            processed_at = datetime.now().isoformat()
+            cursor.execute("""
+                INSERT OR REPLACE INTO articles (file_path, filename, title, year, zoom_snippet, extracted_text, is_ocr, processed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (rel_path, repo_dir.name, f"Git Repository: {repo_dir.name}", datetime.now().year, f"Flattened repository text ({len(parsed_files)} source files)", flattened_text, 0, processed_at))
+            self.conn.commit()
+
+            print(f"Rendergit Extraction completed. Parsed {len(parsed_files)} source files, extracted {len(extracted_units)} AST code units.")
+            return
+
         # Gather target PDF files
         pdf_paths = []
+
         if self.input_mode == "book":
             # Support comma, semicolon, or newline separated list of PDF paths
             raw_path_str = str(self.input_path)

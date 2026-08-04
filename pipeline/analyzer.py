@@ -21,17 +21,47 @@ class ArchiveAnalyzer:
         self.llm_persona = self.config.get("llm_persona", "You are an expert embedded systems engineer, technical writer, and AI trainer.")
         self.llm_subject = self.config.get("llm_subject", "analog and digital circuit design, microcontrollers, embedded systems, RF communication, power electronics, and test equipment.")
         
-        # Connect to Ollama
-        self.client = ollama.Client(host=self.ollama_url, timeout=180.0)
+        # Connect to Ollama with 300s timeout for 35B models
+        self.client = ollama.Client(host=self.ollama_url, timeout=300.0)
         
-        # Connect/Initialize SQLite database
-        self.conn = sqlite3.connect(self.db_path)
+        # Connect/Initialize SQLite database with WAL mode and timeout
+        self.conn = sqlite3.connect(self.db_path, timeout=30.0)
         self.create_tables()
+
+    def call_ollama_chat_with_retry(self, model, messages, options=None, format=None, keep_alive="30m", max_retries=3):
+        """Executes an Ollama chat request with automatic retry and exponential backoff on timeouts/failures"""
+        import time
+        chat_kwargs = {
+            "model": model,
+            "messages": messages,
+            "keep_alive": keep_alive
+        }
+        if options:
+            chat_kwargs["options"] = options
+        if format:
+            chat_kwargs["format"] = format
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.client.chat(**chat_kwargs)
+                return response
+            except Exception as e:
+                print(f"  Ollama Chat Warning (Attempt {attempt}/{max_retries} for model '{model}'): {e}")
+                if attempt < max_retries:
+                    sleep_sec = attempt * 5
+                    print(f"  Retrying in {sleep_sec} seconds...")
+                    time.sleep(sleep_sec)
+                else:
+                    print(f"  Ollama Chat Failed for '{model}' after {max_retries} attempts.")
+                    return None
+
 
     def create_tables(self):
         cursor = self.conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS enrichments (
+
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 article_id INTEGER UNIQUE,
                 summary TEXT,
@@ -284,9 +314,161 @@ class ArchiveAnalyzer:
             "tr_dpo_pairs": tr_res["tr_dpo_pairs"]
         }
 
-    def enrich_all(self, limit=None):
-        """Enriches extracted articles in SQLite DB using a two-pass batch optimization"""
+    def enrich_code_units(self, limit=None):
+        """Enriches extracted AST code_units into synthetic SFT instruction pairs in English and Turkish"""
         cursor = self.conn.cursor()
+
+        # Ensure synthetic_code_pairs table exists
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS synthetic_code_pairs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code_unit_id INTEGER,
+                project_id TEXT,
+                instruction TEXT,
+                input_code TEXT,
+                output_response TEXT,
+                tr_instruction TEXT,
+                tr_output_response TEXT,
+                category TEXT,
+                created_at REAL,
+                FOREIGN KEY(code_unit_id) REFERENCES code_units(id)
+            )
+        """)
+        self.conn.commit()
+
+        # Check if code_units exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='code_units'")
+        if not cursor.fetchone():
+            return
+
+        limit_val = limit if isinstance(limit, int) and limit > 0 else 50
+
+        # --- CODE PASS 1: English Code Unit Analysis (Analyzer Model) ---
+        cursor.execute("""
+            SELECT u.id, u.project_id, u.file_path, u.unit_type, u.name, u.signature, u.docstring, u.code
+            FROM code_units u
+            LEFT JOIN synthetic_code_pairs p ON u.id = p.code_unit_id
+            WHERE p.id IS NULL
+            LIMIT ?
+        """, (limit_val,))
+        pass1_rows = cursor.fetchall()
+
+        if pass1_rows:
+            print(f"=== Code Enrichment (Pass 1: Analysis with '{self.model_name}'): Processing {len(pass1_rows)} AST Code Units ===")
+            count1 = 0
+            for row in pass1_rows:
+                unit_id, project_id, file_path, unit_type, name, sig, docstring, code = row
+
+                sys_prompt = f"You are an expert software architect and static analyzer. {self.llm_persona}"
+                user_prompt = (
+                    f"Analyze the following Python {unit_type} `{name}` from file `{file_path}`.\n"
+                    f"Explain its purpose, signature, inner logic, arguments, return values, and key implementation details:\n\n"
+                    f"```python\n{code}\n```"
+                )
+
+                try:
+                    res = self.call_ollama_chat_with_retry(
+                        model=self.model_name,
+                        messages=[
+                            {"role": "system", "content": sys_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        options={"temperature": 0.2, "num_predict": 4096},
+                        keep_alive="30m"
+                    )
+
+                    if not res:
+                        continue
+
+                    output_expl = res.get("message", {}).get("content", "")
+                    tr_inst = f"`{file_path}` dosyasındaki `{name}` {unit_type} biriminin amacını ve iç mantığını açıkla."
+                    instruction = f"Explain the purpose and implementation of `{name}` in `{file_path}`."
+
+                    cursor.execute("""
+                        INSERT INTO synthetic_code_pairs 
+                        (code_unit_id, project_id, instruction, input_code, output_response, tr_instruction, tr_output_response, category, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        unit_id, project_id, instruction, code, output_expl,
+                        tr_inst, "", "explanation", datetime.now().timestamp()
+                    ))
+                    self.conn.commit()
+                    count1 += 1
+                    print(f"  [{count1}/{len(pass1_rows)}] Analyzed AST {unit_type}: {name}")
+                except Exception as e:
+                    print(f"Error analyzing code unit {name}: {e}")
+
+            print(f"Code Pass 1 Complete. Analyzed {count1} code units.")
+
+            # Unload main analyzer model from VRAM to make room for TranslateGemma
+            print(f"Unloading code analyzer model ('{self.model_name}') from VRAM...")
+            try:
+                self.client.generate(model=self.model_name, prompt="", keep_alive=0)
+            except Exception as e:
+                print(f"Warning: Failed to unload code analyzer model: {e}")
+        else:
+            print("Code Pass 1: No un-processed AST code units found.")
+
+        # --- CODE PASS 2: Turkish Code Unit Translation (TranslateGemma Model) ---
+        cursor.execute("""
+            SELECT id, output_response
+            FROM synthetic_code_pairs
+            WHERE tr_output_response IS NULL OR tr_output_response = ''
+            LIMIT ?
+        """, (limit_val,))
+        pass2_rows = cursor.fetchall()
+
+        if pass2_rows:
+            print(f"\n=== Code Enrichment (Pass 2: Translation with '{self.translator_model}'): Processing {len(pass2_rows)} Code Instruction Pairs ===")
+            count2 = 0
+            for row in pass2_rows:
+                pair_id, output_expl = row
+                if not output_expl:
+                    continue
+
+                try:
+                    tr_res = self.call_ollama_chat_with_retry(
+                        model=self.translator_model,
+                        messages=[
+                            {"role": "user", "content": f"Translate the following code explanation into technical Turkish. Preserve code snippets as is:\n\n{output_expl}"}
+                        ],
+                        options={"temperature": 0.2, "num_predict": 4096},
+                        keep_alive="30m"
+                    )
+
+                    tr_out = tr_res.get("message", {}).get("content", output_expl) if tr_res else output_expl
+
+                    cursor.execute("""
+                        UPDATE synthetic_code_pairs
+                        SET tr_output_response = ?
+                        WHERE id = ?
+                    """, (tr_out, pair_id))
+                    self.conn.commit()
+                    count2 += 1
+                    print(f"  [{count2}/{len(pass2_rows)}] Translated Code Explanation -> ID {pair_id}")
+                except Exception as e:
+                    print(f"Error translating code pair {pair_id}: {e}")
+
+            print(f"Code Pass 2 Complete. Translated {count2} code instruction pairs.")
+
+            # Unload translator model from VRAM
+            print(f"Unloading translation model ('{self.translator_model}') from VRAM...")
+            try:
+                self.client.generate(model=self.translator_model, prompt="", keep_alive=0)
+            except Exception as e:
+                print(f"Warning: Failed to unload code translator model: {e}")
+        else:
+            print("Code Pass 2: No code pairs require translation.")
+
+        print("Code Enrichment Complete.")
+
+
+    def enrich_all(self, limit=None):
+        """Enriches extracted articles and AST code units in SQLite DB using a two-pass batch optimization"""
+        self.enrich_code_units(limit=limit)
+
+        cursor = self.conn.cursor()
+
         
         # Parse range limit if range format
         start, end = 0, None

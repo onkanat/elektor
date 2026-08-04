@@ -104,23 +104,25 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
           >
             <option value="book">Book Mode (Tek veya Çoklu PDF Kitap Bölümleme)</option>
             <option value="folder">Folder Mode (Özyinelemeli Klasör + Akıllı Çoklu Kitap Bölümleme)</option>
+            <option value="rendergit">Rendergit Mode (Git Kod Reposu / GitHub URL)</option>
           </select>
         </div>
 
         <div className="form-group">
-          <label>Döküman / Klasör / Çoklu Dosya Yolu (Input Path)</label>
+          <label>{formData.input_mode === 'rendergit' ? 'Repo Adresi / Git URL veya Dizin (Input Path)' : 'Döküman / Klasör / Çoklu Dosya Yolu (Input Path)'}</label>
           <input
             type="text"
             name="input_path"
             className="form-control"
             value={formData.input_path}
             onChange={handleChange}
-            placeholder="/Users/.../cilt1.pdf, /Users/.../cilt2.pdf veya Klasör Yolu"
+            placeholder={formData.input_mode === 'rendergit' ? 'https://github.com/karpathy/rendergit veya /path/to/repo' : '/Users/.../cilt1.pdf, /Users/.../cilt2.pdf veya Klasör Yolu'}
           />
           <span style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem', display: 'block' }}>
-            💡 <strong>Klasör Modu:</strong> Klasördeki tüm çok sayfalı PDF ciltleri otomatik bölümlere/içindekilere ayrılır. <strong>Kitap Modu:</strong> Virgül (,) ile birden fazla PDF yolu verilebilir.
+            💡 {formData.input_mode === 'rendergit' ? <strong>Rendergit Modu:</strong> : <strong>Klasör Modu:</strong>} Klasördeki/Repodaki kodlar AST ve rendergit formatıyla otomatik veri setine dönüştürülür.
           </span>
         </div>
+
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
           <div className="form-group">

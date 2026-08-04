@@ -16,6 +16,7 @@ import ollama
 import psutil
 import httpx
 from pipeline.mcp_tools import search_vector_rag, query_sqlite_knowledge, inject_sft_dpo_context, evaluate_knowledge_gap
+from pipeline.code_extractor import clone_repository, flatten_repository_rendergit, extract_and_store_code_units, init_code_db
 
 app = FastAPI(title="Elektor Universal PDF Pipeline Backend API", version="1.0.0")
 
@@ -748,7 +749,226 @@ def get_readme():
             return {"content": f.read()}
     return {"content": "# Doküman bulunamadı."}
 
+# ==============================================================================
+# GITHUB REPOSITORY & CODE AST DATASET GENERATOR API ENDPOINTS
+# ==============================================================================
+
+@app.post("/api/code/clone-and-extract")
+def clone_and_extract_code(payload: Dict[str, Any] = Body(...)):
+    """
+    Clones a Git repository URL or parses a local repository folder,
+    flattens it using rendergit format, extracts AST code units, and stores them in SQLite DB.
+    """
+    repo_url = payload.get("repo_url", "").strip()
+    project_id = payload.get("project_id", "").strip() or "git_project"
+    extract_ast = payload.get("extract_ast", True)
+
+    if not repo_url:
+        raise HTTPException(status_code=400, detail="repo_url parameter is required")
+
+    config = get_config()
+    db_path = Path(config.get("db_path", f"database/{project_id}.db"))
+
+    # Determine local directory path for cloned repo
+    if repo_url.startswith("http://") or repo_url.startswith("https://") or repo_url.startswith("git@"):
+        repo_name = repo_url.rstrip("/").split("/")[-1].replace(".git", "")
+        repo_dir = Path("downloads/repos") / repo_name
+        try:
+            clone_repository(repo_url, repo_dir)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Git clone error: {str(e)}")
+    else:
+        repo_dir = Path(repo_url)
+        if not repo_dir.exists() or not repo_dir.is_dir():
+            raise HTTPException(status_code=400, detail=f"Local repo directory does not exist: {repo_url}")
+
+    # Flatten repository (rendergit format)
+    rendergit_out_path = Path("exports") / f"{project_id}_rendergit.md"
+    flattened_text, parsed_files = flatten_repository_rendergit(repo_dir, output_file=rendergit_out_path)
+
+    extracted_units = []
+    if extract_ast:
+        extracted_units = extract_and_store_code_units(
+            parsed_files=parsed_files,
+            repo_dir=repo_dir,
+            db_path=db_path,
+            project_id=project_id,
+            repo_url=repo_url
+        )
+
+    # Count categories
+    counts = {"function": 0, "class": 0, "loop": 0}
+    for u in extracted_units:
+        ut = u.get("unit_type")
+        if ut in counts:
+            counts[ut] += 1
+
+    return {
+        "status": "success",
+        "project_id": project_id,
+        "repo_url": repo_url,
+        "repo_dir": str(repo_dir),
+        "rendergit_file": str(rendergit_out_path),
+        "parsed_files_count": len(parsed_files),
+        "extracted_code_units_count": len(extracted_units),
+        "unit_categories": counts
+    }
+
+
+@app.get("/api/code/units")
+def get_code_units(
+    project_id: str = Query("git_project"),
+    unit_type: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0)
+):
+    """
+    Retrieves extracted AST code units from SQLite database for a given project_id.
+    """
+    config = get_config()
+    db_path = Path(config.get("db_path", f"database/{project_id}.db"))
+
+    if not db_path.exists():
+        return {"project_id": project_id, "total": 0, "units": []}
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # Check table existence
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='code_units'")
+    if not cursor.fetchone():
+        conn.close()
+        return {"project_id": project_id, "total": 0, "units": []}
+
+    query = "SELECT * FROM code_units WHERE project_id = ?"
+    params = [project_id]
+
+    if unit_type:
+        query += " AND unit_type = ?"
+        params.append(unit_type)
+
+    # Count total
+    count_query = query.replace("SELECT *", "SELECT COUNT(*)")
+    cursor.execute(count_query, params)
+    total_count = cursor.fetchone()[0]
+
+    query += " ORDER BY id ASC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+
+    units = [dict(row) for row in rows]
+    return {
+        "project_id": project_id,
+        "total": total_count,
+        "limit": limit,
+        "offset": offset,
+        "units": units
+    }
+
+
+@app.post("/api/code/generate-dataset")
+def generate_code_dataset(payload: Dict[str, Any] = Body(...)):
+    """
+    Generates synthetic code SFT/DPO instruction pairs using Ollama (Qwen/Gemma)
+    from extracted AST code units, with TranslateGemma translating instructions/explanations to Turkish.
+    """
+    project_id = payload.get("project_id", "").strip() or "git_project"
+    categories = payload.get("categories") or ["explanation", "docstring", "completion"]
+    translate_tr = payload.get("translate_tr", True)
+    limit = payload.get("limit", 10)
+
+    config = get_config()
+    db_path = Path(config.get("db_path", f"database/{project_id}.db"))
+    ollama_url = config.get("ollama_url", "http://localhost:11434")
+    model_analyzer = config.get("model_analyzer", "qwen3.6:35b-a3b-mtp-q4_K_M")
+    model_translator = config.get("model_translator", "translategemma:12b-it-q4_K_M")
+
+    if not db_path.exists():
+        raise HTTPException(status_code=404, detail=f"Database file not found: {db_path}")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM code_units WHERE project_id = ? LIMIT ?", (project_id, limit))
+    rows = cursor.fetchall()
+    if not rows:
+        conn.close()
+        raise HTTPException(status_code=404, detail=f"No code units found for project_id: {project_id}")
+
+    client = ollama.Client(host=ollama_url, timeout=120.0)
+    synthetic_pairs = []
+
+    for row in rows:
+        unit = dict(row)
+        code = unit.get("code", "")
+        name = unit.get("name", "")
+        unit_type = unit.get("unit_type", "function")
+
+        # 1. Generate SFT Explanation Pair
+        if "explanation" in categories:
+            prompt = f"Analyze the following Python {unit_type} `{name}` and explain its exact logic, arguments, return values, and edge cases:\n\n```python\n{code}\n```"
+            try:
+                res = client.chat(
+                    model=model_analyzer,
+                    messages=[
+                        {"role": "system", "content": "You are an expert Python software architect and static analyzer."},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                output_text = res.get("message", {}).get("content", "")
+                
+                tr_inst = ""
+                tr_out = ""
+                if translate_tr:
+                    # Translate instruction and explanation into Turkish (do not translate raw code)
+                    tr_inst_res = client.chat(
+                        model=model_translator,
+                        messages=[{"role": "user", "content": f"Translate the following instruction into technical Turkish:\n\n{prompt}"}]
+                    )
+                    tr_inst = tr_inst_res.get("message", {}).get("content", "")
+
+                    tr_out_res = client.chat(
+                        model=model_translator,
+                        messages=[{"role": "user", "content": f"Translate the following code explanation into technical Turkish:\n\n{output_text}"}]
+                    )
+                    tr_out = tr_out_res.get("message", {}).get("content", "")
+
+                synthetic_pairs.append({
+                    "code_unit_id": unit["id"],
+                    "project_id": project_id,
+                    "instruction": f"Explain the purpose and inner mechanics of the {unit_type} `{name}`.",
+                    "input": code,
+                    "output": output_text,
+                    "tr_instruction": tr_inst or f"`{name}` {unit_type} biriminin amacını ve iç mantığını açıkla.",
+                    "tr_output": tr_out or output_text,
+                    "category": "explanation"
+                })
+            except Exception as e:
+                print(f"Error generating explanation for {name}: {e}")
+
+    # Export to JSONL file
+    export_file = Path("exports") / f"{project_id}_code_sft_dataset.jsonl"
+    export_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(export_file, "a", encoding="utf-8") as f:
+        for p in synthetic_pairs:
+            f.write(json.dumps(p, ensure_ascii=False) + "\n")
+
+    conn.close()
+
+    return {
+        "status": "success",
+        "project_id": project_id,
+        "generated_pairs_count": len(synthetic_pairs),
+        "export_file": str(export_file)
+    }
+
 # Mount React frontend static build
+
 FRONTEND_DIST = Path("frontend/dist")
 if FRONTEND_DIST.exists():
     app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="static_assets")

@@ -28,11 +28,12 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [newProjectId, setNewProjectId] = useState<string>('');
   const [newProjectName, setNewProjectName] = useState<string>('');
-  const [newInputMode, setNewInputMode] = useState<'book' | 'folder'>('book');
+  const [newInputMode, setNewInputMode] = useState<'book' | 'folder' | 'rendergit'>('book');
   const [newInputPath, setNewInputPath] = useState<string>('');
   const [newPersona, setNewPersona] = useState<string>('Professional Systems Engineer');
   const [newSubject, setNewSubject] = useState<string>('Technical Documentation & Architecture');
   const [isCreating, setIsCreating] = useState<boolean>(false);
+
 
   if (!isOpen) return null;
 
@@ -141,23 +142,36 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({
                 <select
                   className="form-control"
                   value={newInputMode}
-                  onChange={(e: any) => setNewInputMode(e.target.value)}
+                  onChange={(e: any) => {
+                    const mode = e.target.value;
+                    setNewInputMode(mode);
+                    if (mode === 'rendergit') {
+                      setNewPersona('Senior Principal Software Architect & Code Auditor');
+                      setNewSubject('Python Software Architecture, AST Analysis, Performance & Security');
+                    } else {
+                      setNewPersona('Professional Systems Engineer');
+                      setNewSubject('Technical Documentation & Architecture');
+                    }
+                  }}
                 >
                   <option value="book">Book Mode (Tek PDF)</option>
                   <option value="folder">Folder Mode (PDF Klasörü)</option>
+                  <option value="rendergit">Rendergit (kod veri-seti)</option>
                 </select>
+
               </div>
 
               <div className="form-group">
-                <label>Döküman / Dosya Yolu</label>
+                <label>{newInputMode === 'rendergit' ? 'Repo Adresi (GitHub URL / Dizin)' : 'Döküman / Dosya Yolu'}</label>
                 <input
                   type="text"
                   className="form-control"
-                  placeholder="/Users/.../document.pdf"
+                  placeholder={newInputMode === 'rendergit' ? 'https://github.com/karpathy/rendergit' : '/Users/.../document.pdf'}
                   value={newInputPath}
                   onChange={(e) => setNewInputPath(e.target.value)}
                 />
               </div>
+
             </div>
 
             <div className="form-group">

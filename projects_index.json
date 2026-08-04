@@ -1,5 +1,5 @@
 {
-  "active_project_id": "octave",
+  "active_project_id": "sdr_engineers",
   "projects": {
     "sdr_engineers": {
       "project_id": "sdr_engineers",
@@ -7,13 +7,6 @@
       "config_file": "config.json",
       "created_at": 1785614042.054173,
       "last_accessed": 1785744501.749328
-    },
-    "test_rp2040": {
-      "project_id": "test_rp2040",
-      "project_name": "RP2040 Microcontroller Datasheet",
-      "config_file": "projects_test_rp2040.json",
-      "created_at": 1785614042.056113,
-      "last_accessed": 1785744510.083028
     },
     "türk": {
       "project_id": "türk",

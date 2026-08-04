@@ -18,9 +18,23 @@ class DatasetBuilder:
         self.export_dir.mkdir(parents=True, exist_ok=True)
         self.dataset_name = self.config.get("dataset_name", "Document")
         self.dataset_name_tr = self.config.get("dataset_name_tr", "Döküman")
-        
+
+    def _save_jsonl_and_parquet(self, file_path: Path, records: list):
+        with open(file_path, "w", encoding="utf-8") as f:
+            for rec in records:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        if records:
+            try:
+                import pandas as pd
+                parquet_path = file_path.with_suffix(".parquet")
+                df = pd.DataFrame(records)
+                df.to_parquet(parquet_path, engine="pyarrow", index=False)
+            except Exception as e:
+                print(f"Warning: Parquet conversion error for {file_path.name}: {e}")
+
     def export_datasets(self):
         """Compiles enriched SQLite data and exports SFT, DPO, and Chat datasets (English and Turkish)"""
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -178,43 +192,93 @@ class DatasetBuilder:
                     "output": tr_summary.strip()
                 })
                 
+        # Check and export synthetic_code_pairs table
+
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='synthetic_code_pairs'")
+        if cursor.fetchone():
+            cursor.execute("""
+                SELECT instruction, input_code, output_response, tr_instruction, tr_output_response 
+                FROM synthetic_code_pairs
+            """)
+            code_rows = cursor.fetchall()
+            if code_rows:
+                code_sft_records = []
+                tr_code_sft_records = []
+                for inst, inp, out, tr_inst, tr_out in code_rows:
+                    code_sft_records.append({
+                        "instruction": inst,
+                        "input": inp,
+                        "output": out
+                    })
+                    tr_code_sft_records.append({
+                        "instruction": tr_inst if tr_inst else inst,
+                        "input": inp,
+                        "output": tr_out if tr_out else out
+                    })
+                    sft_records.append({
+                        "instruction": inst,
+                        "input": inp,
+                        "output": out
+                    })
+                    tr_sft_records.append({
+                        "instruction": tr_inst if tr_inst else inst,
+                        "input": inp,
+                        "output": tr_out if tr_out else out
+                    })
+
+                    # Convert code pair to Chat format (messages)
+                    user_msg_en = f"{inst}\n\n```python\n{inp}\n```" if inp else inst
+                    chat_records.append({
+                        "messages": [
+                            {"role": "user", "content": user_msg_en},
+                            {"role": "assistant", "content": out}
+                        ]
+                    })
+
+                    tr_inst_val = tr_inst if tr_inst else inst
+                    user_msg_tr = f"{tr_inst_val}\n\n```python\n{inp}\n```" if inp else tr_inst_val
+                    tr_out_val = tr_out if tr_out else out
+                    tr_chat_records.append({
+                        "messages": [
+                            {"role": "user", "content": user_msg_tr},
+                            {"role": "assistant", "content": tr_out_val}
+                        ]
+                    })
+
+                code_sft_file = self.export_dir / "code_sft_dataset.jsonl"
+                self._save_jsonl_and_parquet(code_sft_file, code_sft_records)
+
+                tr_code_sft_file = self.export_dir / "tr_code_sft_dataset.jsonl"
+                self._save_jsonl_and_parquet(tr_code_sft_file, tr_code_sft_records)
+
+                print(f"  Code SFT      : {len(code_sft_records)} samples -> {code_sft_file} & .parquet")
+                print(f"  Turkish Code SFT: {len(tr_code_sft_records)} samples -> {tr_code_sft_file} & .parquet")
+
         # Write English SFT
         sft_file = self.export_dir / "sft_dataset.jsonl"
-        with open(sft_file, "w", encoding="utf-8") as f:
-            for rec in sft_records:
-                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        self._save_jsonl_and_parquet(sft_file, sft_records)
                 
         # Write English DPO
         dpo_file = self.export_dir / "dpo_dataset.jsonl"
-        with open(dpo_file, "w", encoding="utf-8") as f:
-            for rec in dpo_records:
-                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        self._save_jsonl_and_parquet(dpo_file, dpo_records)
                 
         # Write English Chat
         chat_file = self.export_dir / "chat_dataset.jsonl"
-        with open(chat_file, "w", encoding="utf-8") as f:
-            for rec in chat_records:
-                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        self._save_jsonl_and_parquet(chat_file, chat_records)
                 
         # Write Turkish SFT
         tr_sft_file = self.export_dir / "tr_sft_dataset.jsonl"
-        with open(tr_sft_file, "w", encoding="utf-8") as f:
-            for rec in tr_sft_records:
-                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        self._save_jsonl_and_parquet(tr_sft_file, tr_sft_records)
 
         # Write Turkish Chat
         tr_chat_file = self.export_dir / "tr_chat_dataset.jsonl"
-        with open(tr_chat_file, "w", encoding="utf-8") as f:
-            for rec in tr_chat_records:
-                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        self._save_jsonl_and_parquet(tr_chat_file, tr_chat_records)
 
         # Write Turkish DPO
         tr_dpo_file = self.export_dir / "tr_dpo_dataset.jsonl"
-        with open(tr_dpo_file, "w", encoding="utf-8") as f:
-            for rec in tr_dpo_records:
-                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        self._save_jsonl_and_parquet(tr_dpo_file, tr_dpo_records)
                 
-        print("\nDatasets exported successfully:")
+        print("\nDatasets exported successfully (JSONL & Parquet):")
         print(f"  English SFT   : {len(sft_records)} samples -> {sft_file}")
         print(f"  English DPO   : {len(dpo_records)} samples -> {dpo_file}")
         print(f"  English Chat  : {len(chat_records)} samples -> {chat_file}")
@@ -223,6 +287,8 @@ class DatasetBuilder:
         print(f"  Turkish DPO   : {len(tr_dpo_records)} samples -> {tr_dpo_file}")
         
         conn.close()
+
+
 
 if __name__ == "__main__":
     builder = DatasetBuilder()

@@ -1,8 +1,9 @@
 export interface PipelineConfig {
   project_id?: string;
   project_name?: string;
-  input_mode: 'folder' | 'book';
+  input_mode: 'folder' | 'book' | 'rendergit' | 'github';
   input_path: string;
+
   db_path: string;
   qdrant_db_path: string;
   ollama_url: string;

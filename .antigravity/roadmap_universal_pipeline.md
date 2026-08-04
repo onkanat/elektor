@@ -72,3 +72,40 @@ Refactored training data format compiler:
 - **Hugging Face Serverless Inference API**: Yerel GPU yetersizliğinde istekleri ücretsiz HF Serverless API uç noktalarına (`Qwen/Qwen2.5-72B-Instruct`, `Llama-3.3-70B-Instruct`) yönlendirerek yerel donanım yükünü sıfırlama.
 - **HF Spaces + ZeroGPU (NVIDIA A100/H100)**: Sentetik veri üretim script'lerini ücretsiz ZeroGPU destekli HF Space üzerinde çalıştırma.
 - **Colab & Kaggle Notebook Entegrasyonu**: Haftalık 30 saat ücretsiz 2x T4 GPU (Kaggle) ve Colab ortamında toplu üretim yapıp verileri anında `dataset.push_to_hub()` ile HF Hub'a aktarma.
+
+---
+
+### 📌 Phase 7: Git Repository Rendergit & AST Code Dataset Generator - [COMPLETED & EXPANDING]
+- **Rendergit Flattening**: Karpathy'nin `rendergit` mimarisini saf Python ile boru hattına entegre ederek Git depolarını tek bir yapılandırılmış metin dosyasına (`exports/<project_id>_rendergit.md`) dönüştürme.
+- **AST (Abstract Syntax Tree) Extraction**: `ast.NodeVisitor` ile Python kodlarındaki fonksiyon, sınıf ve döngüleri semantik olarak ayrıştırıp SQLite `code_units` tablosuna indeksleme.
+- **Kıdemli Mimar Kimliği (LLM Persona & Subject)**: Kod projeleri için `llm_persona` (*Senior Principal Software Architect & Code Auditor*) ve `llm_subject` (*Python Software Architecture, AST Analysis, Performance & Security*) değişkenleri ile üst düzey mimari sentez.
+- **TranslateGemma Çeviri Güvencesi**: Kod bloklarını koruyarak komut ve açıklamaları Türkçe'ye çevirme.
+
+---
+
+### 📌 Phase 8: Proje Gezgini & Çoklu Veri Setleri Birleştirme Motoru (Project & Dataset Merger Engine) - [PLANNED]
+- **Arayüz Entegrasyonu**: **"Proje Gezgini & Çoklu Veri Setleri"** sekmesine projelerin veri setlerini tek çatı altında toplamak için **"Proje Birleştir"** ("Merge Projects") butonu eklenecektir.
+- **Açılır Pencere (Modal) & Proje Seçimi**: Butona tıklandığında açılan pencerede sistemde mevcut tüm projeler listelenecek, kullanıcı birleştirmek istediği projeleri seçecek ve verilen yeni proje/veri seti adı ile birleştirme işlemini gerçekleştirecektir.
+- **Şema & Veri Yapısı Uyum Kontrolü**: Birleştirilmek istenen veri setlerinin yapılarının (SQLite tabloları, JSONL şemaları, AST kod birimleri ve metadatalar) uyumu otomatik kontrol edildikten sonra birleştirme uygulanacaktır.
+- **Planlama & Onay Şartı**: İşlem öncesinde detaylı teknik plan hazırlanacak ve **plan kullanıcı ile tartışılıp onay alınmadan koda dökülmeyecektir**.
+- **Rendergit Özel Kullanım Senaryosu**: Özellikle `rendergit` aracı ile işlenen farklı kod depolarına (AST birimleri, sentezlenen SFT/DPO çiftleri ve RAG vektör indeksleri) ait çoklu veri setlerini tek bir ana projede konsolide etmek için tasarlanmıştır.
+
+---
+
+### 🎯 Sentetik Kod Veri Seti Çeşitliliği (Code Dataset Diversity Strategy)
+
+Modelin sadece kod açıklamakla kalmayıp refactoring, hata düzeltme ve test yazma yeteneklerini geliştirmek için sentezlenen 4 temel sentetik veri türü:
+
+1. **Code Explanation & Architectural Audit (Mevcut - Aktif):**
+   - *Instruction:* "`rendergit.py` dosyasındaki `RenderDecision` class biriminin amacını ve iç mantığını açıkla."
+   - *Output:* DTO/Result desen analizi, karmaşıklık analizi ($O(1)$), eksik `@dataclass` riski ve refactoring önerileri.
+2. **Code Completion (İmza → Implementasyon):**
+   - *Instruction:* "`RenderDecision` sınıfını immutability ve type safety ilkelerine göre refactor ederek Python kodunu yaz."
+   - *Output:* Doğrudan refactor edilmiş üretim seviyesi Python kodu (`dataclass(frozen=True)` + `Enum`).
+3. **Bug Fixing & Vulnerability Detection:**
+   - *Instruction:* "Aşağıdaki kodda tip güvenliği ve magic string kullanımı riski var, bul ve düzelt."
+   - *Output:* Güvenlik/mantık hatası analizi ve düzeltilmiş kod bloğu.
+4. **Unit Test Generation:**
+   - *Instruction:* "`RenderDecision` sınıfı ve karar motoru için pytest birim testleri yaz."
+   - *Output:* Tam kapsamlı `pytest` birim test kiti.
+
