@@ -145,24 +145,38 @@ class CodeAnalyzer(ast.NodeVisitor):
 
 def clone_repository(repo_url: str, target_dir: Path) -> Path:
     """
-    Clones a git repository URL into target_dir. If target_dir exists, pulls latest.
+    Clones a git repository URL into target_dir. If target_dir exists with .git, pulls latest.
+    If target_dir exists without .git (incomplete clone), cleans directory before cloning.
     """
+    import shutil
     target_dir.parent.mkdir(parents=True, exist_ok=True)
     
-    if target_dir.exists() and (target_dir / ".git").exists():
-        try:
-            subprocess.run(
-                ["git", "-C", str(target_dir), "pull"],
-                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-            )
-        except Exception as e:
-            print(f"Git pull warning: {e}")
-        return target_dir
+    if target_dir.exists():
+        if (target_dir / ".git").exists():
+            print(f"Repository '{target_dir.name}' already exists at '{target_dir}'. Pulling latest updates...")
+            try:
+                subprocess.run(
+                    ["git", "-C", str(target_dir), "pull"],
+                    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120
+                )
+                print(f"Git pull completed for '{target_dir.name}'.")
+            except Exception as e:
+                print(f"Git pull warning (using existing local repository): {e}")
+            return target_dir
+        else:
+            print(f"Found incomplete directory '{target_dir}' without .git. Cleaning before cloning...")
+            shutil.rmtree(target_dir, ignore_errors=True)
 
+    print(f"Cloning repository '{repo_url}' into '{target_dir}' (this may take a moment for large repositories)...")
     cmd = ["git", "clone", "--depth", "1", repo_url, str(target_dir)]
-    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if res.returncode != 0:
-        raise RuntimeError(f"Failed to clone git repo: {res.stderr}")
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=600)
+        if res.returncode != 0:
+            raise RuntimeError(f"Failed to clone git repo '{repo_url}': {res.stderr}")
+        print(f"Successfully cloned '{repo_url}' into '{target_dir}'.")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"Git clone timed out after 600s for repository '{repo_url}'.")
+
     return target_dir
 
 
