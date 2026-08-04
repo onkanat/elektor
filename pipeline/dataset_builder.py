@@ -32,6 +32,25 @@ class DatasetBuilder:
             except Exception as e:
                 print(f"Warning: Parquet conversion error for {file_path.name}: {e}")
 
+    @staticmethod
+    def clean_persona_intros(text: str) -> str:
+        """Strips boilerplate greetings, persona intros, and filler lines for rendergit code dataset outputs"""
+        if not text:
+            return ""
+        import re
+        patterns = [
+            r"^(?:As a|I am a|Being a)\s+Senior\s+[^.\n]+\.?\s*",
+            r"^İşte\s+[^.\n]+\s+sunan\s+(?:bir\s+)?belge:\s*",
+            r"^İşte\s+[^.\n]+\s+teknik\s+açıklama:\s*",
+            r"^Here is a comprehensive architecture[^.\n]+:\s*",
+            r"^Here is a detailed static analysis[^.\n]+:\s*"
+        ]
+        cleaned = text.strip()
+        for pat in patterns:
+            cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE | re.MULTILINE).strip()
+        cleaned = re.sub(r"^(?:---\s*\n)+", "", cleaned).strip()
+        return cleaned
+
     def export_datasets(self):
         """Compiles enriched SQLite data and exports SFT, DPO, and Chat datasets (English and Turkish)"""
 
@@ -197,14 +216,24 @@ class DatasetBuilder:
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='synthetic_code_pairs'")
         if cursor.fetchone():
             cursor.execute("""
-                SELECT instruction, input_code, output_response, tr_instruction, tr_output_response 
+                SELECT instruction, input_code, output_response, tr_instruction, tr_output_response, category 
                 FROM synthetic_code_pairs
             """)
             code_rows = cursor.fetchall()
             if code_rows:
                 code_sft_records = []
                 tr_code_sft_records = []
-                for inst, inp, out, tr_inst, tr_out in code_rows:
+                input_mode = self.config.get("input_mode", "")
+
+                for row in code_rows:
+                    inst, inp, out, tr_inst, tr_out = row[0], row[1], row[2], row[3], row[4]
+                    cat = row[5] if len(row) > 5 and row[5] else "explanation"
+
+                    if input_mode == "rendergit":
+                        out = self.clean_persona_intros(out)
+                        if tr_out:
+                            tr_out = self.clean_persona_intros(tr_out)
+
                     code_sft_records.append({
                         "instruction": inst,
                         "input": inp,
@@ -226,10 +255,18 @@ class DatasetBuilder:
                         "output": tr_out if tr_out else out
                     })
 
-                    # Convert code pair to Chat format (messages)
+                    if cat == "educational":
+                        sys_en = "You are a senior software engineering educator and mentor. Provide comprehensive, pedagogical code analysis explaining underlying design patterns, trade-offs, theoretical concepts, and architectural decisions."
+                        sys_tr = "Sen kıdemli bir yazılım mimarı ve eğitmenisin. Kodu hem teknik hem de pedagojik açıdan inceleyerek tasarım kalıplarını, yazılım ilkelerini ve derinlemesine mimari mantığı açıkla."
+                    else:
+                        sys_en = "You are a pragmatic, concise Python software architect. Provide direct code analysis and refactoring starting immediately with structured Markdown headings, without greetings or introductory filler."
+                        sys_tr = "Sen pragmatik, öz ve net bir Python yazılım mimarısın. Selamlama veya teorik dolgu yapmadan doğrudan yapılandırılmış Markdown başlıkları ile net kod analizi ve refactoring önerileri sun."
+
+                    # Convert code pair to Chat format with system prompt
                     user_msg_en = f"{inst}\n\n```python\n{inp}\n```" if inp else inst
                     chat_records.append({
                         "messages": [
+                            {"role": "system", "content": sys_en},
                             {"role": "user", "content": user_msg_en},
                             {"role": "assistant", "content": out}
                         ]
@@ -240,6 +277,7 @@ class DatasetBuilder:
                     tr_out_val = tr_out if tr_out else out
                     tr_chat_records.append({
                         "messages": [
+                            {"role": "system", "content": sys_tr},
                             {"role": "user", "content": user_msg_tr},
                             {"role": "assistant", "content": tr_out_val}
                         ]

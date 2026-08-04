@@ -22,6 +22,7 @@ export interface PipelineConfig {
   chunk_overlap: number;
   ocr_threshold_chars: number;
   tesseract_cmd: string;
+  pragmatic_ratio?: number;
 }
 
 export interface HealthInfo {

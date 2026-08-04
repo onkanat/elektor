@@ -357,14 +357,43 @@ class ArchiveAnalyzer:
             print(f"=== Code Enrichment (Pass 1: Analysis with '{self.model_name}'): Processing {len(pass1_rows)} AST Code Units ===")
             count1 = 0
             for row in pass1_rows:
-                unit_id, project_id, file_path, unit_type, name, sig, docstring, code = row
+                pragmatic_ratio = self.config.get("pragmatic_ratio", 50)
+                use_pragmatic = (unit_id % 100) < pragmatic_ratio
 
-                sys_prompt = f"You are an expert software architect and static analyzer. {self.llm_persona}"
-                user_prompt = (
-                    f"Analyze the following Python {unit_type} `{name}` from file `{file_path}`.\n"
-                    f"Explain its purpose, signature, inner logic, arguments, return values, and key implementation details:\n\n"
-                    f"```python\n{code}\n```"
-                )
+                if self.input_mode == "rendergit":
+                    if use_pragmatic:
+                        category = "pragmatic"
+                        sys_prompt = "You are a pragmatic, concise Python software architect. Provide direct code analysis starting immediately with structured Markdown headings, without greetings or introductory filler."
+                        user_prompt = (
+                            f"Analyze the Python {unit_type} `{name}` from file `{file_path}`.\n"
+                            f"Do NOT include introductory greetings or persona intros (such as 'As a Senior Architect...'). Start IMMEDIATELY with section `### Purpose`.\n\n"
+                            f"Use the following structure:\n"
+                            f"### Purpose\n<concise 1-2 sentence purpose>\n\n"
+                            f"### Attributes & Signature\n<key params & types>\n\n"
+                            f"### Implementation Analysis & Refactoring\n<1-2 key technical observations and clean refactored Python snippet if applicable>\n\n"
+                            f"Code:\n```python\n{code}\n```"
+                        )
+                    else:
+                        category = "educational"
+                        sys_prompt = "You are a senior software engineering educator and mentor. Provide comprehensive, pedagogical code analysis explaining underlying design patterns, trade-offs, theoretical concepts, and architectural decisions."
+                        user_prompt = (
+                            f"Analyze the Python {unit_type} `{name}` from file `{file_path}` in a comprehensive, educational manner.\n"
+                            f"Do NOT include boilerplate greetings (such as 'As a Senior Architect...'). Start IMMEDIATELY with section `### Overview & Pedagogy`.\n\n"
+                            f"Use the following structure:\n"
+                            f"### Overview & Pedagogy\n<educational breakdown and design patterns used>\n\n"
+                            f"### Theoretical Concepts & Principles\n<design patterns, DTO/Enum/SOLID trade-offs>\n\n"
+                            f"### Detailed Line-by-Line Breakdown\n<key execution steps>\n\n"
+                            f"### Refactored Version & Recommendations\n<clean code recommendations>\n\n"
+                            f"Code:\n```python\n{code}\n```"
+                        )
+                else:
+                    category = "explanation"
+                    sys_prompt = f"You are an expert software architect and static analyzer. {self.llm_persona}"
+                    user_prompt = (
+                        f"Analyze the following Python {unit_type} `{name}` from file `{file_path}`.\n"
+                        f"Explain its purpose, signature, inner logic, arguments, return values, and key implementation details:\n\n"
+                        f"```python\n{code}\n```"
+                    )
 
                 try:
                     res = self.call_ollama_chat_with_retry(
@@ -390,7 +419,7 @@ class ArchiveAnalyzer:
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         unit_id, project_id, instruction, code, output_expl,
-                        tr_inst, "", "explanation", datetime.now().timestamp()
+                        tr_inst, "", category, datetime.now().timestamp()
                     ))
                     self.conn.commit()
                     count1 += 1

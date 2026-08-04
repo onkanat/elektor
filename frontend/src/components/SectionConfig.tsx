@@ -123,6 +123,31 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
           </span>
         </div>
 
+        {/* Pragmatik vs Pedagojik Kayan Ayar Çubuğu (Slider) */}
+        <div className="form-group" style={{ backgroundColor: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <label style={{ margin: 0, fontWeight: 600 }}>⚡ Veri Seti Dağılım Modu (Pragmatik vs. Pedagojik)</label>
+            <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#6366f1' }}>
+              %{formData.pragmatic_ratio ?? 50} Pragmatik / %{100 - (formData.pragmatic_ratio ?? 50)} Pedagojik
+            </span>
+          </div>
+          <input
+            type="range"
+            name="pragmatic_ratio"
+            min="0"
+            max="100"
+            step="5"
+            style={{ width: '100%', cursor: 'pointer', accentColor: '#6366f1' }}
+            value={formData.pragmatic_ratio ?? 50}
+            onChange={handleChange}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+            <span>🎓 %100 Pedagojik (Derin Teori)</span>
+            <span>⚖️ %50 / %50 Dengeli</span>
+            <span>⚡ %100 Pragmatik (Doğrudan Kod)</span>
+          </div>
+        </div>
+
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
           <div className="form-group">

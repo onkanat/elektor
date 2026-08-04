@@ -1,8 +1,8 @@
 {
   "input_mode": "rendergit",
-  "input_path": "https://github.com/onkanat/gedit",
-  "db_path": "database/rendergit_test.db",
-  "qdrant_db_path": "qdrant_rendergit_test",
+  "input_path": "https://github.com/karpathy/rendergit",
+  "db_path": "database/rendergit_01.db",
+  "qdrant_db_path": "qdrant_rendergit_01",
   "ollama_url": "http://192.168.1.14:11434",
   "model_embedding": "nomic-embed-text:latest",
   "model_analyzer": "ornith:35b-q4_K_M",
@@ -12,12 +12,13 @@
   "generation_language": "bilingual",
   "translation_target": "tr",
   "sft_qa_count": 15,
-  "dataset_name": "rendergit_test",
-  "dataset_name_tr": "rendergit_test",
-  "qdrant_collection_name": "rendergit_test_articles",
+  "dataset_name": "RenderGit_Python_veriseti",
+  "dataset_name_tr": "RenderGit_Python_veriseti",
+  "qdrant_collection_name": "rendergit_01_articles",
   "chunk_size": 800,
   "chunk_overlap": 150,
   "ocr_threshold_chars": 100,
   "tesseract_cmd": "/opt/homebrew/bin/tesseract",
-  "project_id": "rendergit_test"
+  "project_id": "rendergit_01",
+  "pragmatic_ratio": 50
 }

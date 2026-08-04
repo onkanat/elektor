@@ -125,3 +125,24 @@ async def test_api_code_endpoints():
             assert units_data["units"][0]["name"] == "sample_func"
 
 
+def test_clean_persona_intros():
+    from pipeline.dataset_builder import DatasetBuilder
+    sample_text = (
+        "As a Senior Principal Software Architect and Static Analyzer, here is the analysis:\n"
+        "--- \n"
+        "### Purpose\nThe class is a data container.\n"
+    )
+    cleaned = DatasetBuilder.clean_persona_intros(sample_text)
+    assert not cleaned.startswith("As a Senior Principal Software Architect")
+    assert cleaned.startswith("### Purpose")
+
+    tr_sample = (
+        "İşte LineNumbers sınıfının kapsamlı mimari analizini sunan belge:\n"
+        "### Özet\nLineNumbers sınıfı özel bir widget'tır.\n"
+    )
+    tr_cleaned = DatasetBuilder.clean_persona_intros(tr_sample)
+    assert not tr_cleaned.startswith("İşte LineNumbers")
+    assert tr_cleaned.startswith("### Özet")
+
+
+
