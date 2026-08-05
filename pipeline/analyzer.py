@@ -22,6 +22,9 @@ class ArchiveAnalyzer:
         self.qa_count = self.config.get("sft_qa_count", self.config.get("qa_count_per_article", 10))
         self.llm_persona = self.config.get("llm_persona", "You are an expert embedded systems engineer, technical writer, and AI trainer.")
         self.llm_subject = self.config.get("llm_subject", "analog and digital circuit design, microcontrollers, embedded systems, RF communication, power electronics, and test equipment.")
+        self.direct_tr_generation = self.config.get("direct_tr_generation", True)
+        self.enable_dpo_verification = self.config.get("enable_dpo_verification", True)
+        self.generate_multi_turn_chat = self.config.get("generate_multi_turn_chat", True)
         
         # Connect to Ollama with 300s timeout for 35B models
         self.client = ollama.Client(host=self.ollama_url, timeout=300.0)
@@ -174,6 +177,94 @@ class ArchiveAnalyzer:
             "topics": json.dumps(result.get("topics", [])),
             "sft_qa": json.dumps(sft_qa),
             "dpo_pairs": json.dumps(dpo_pairs_list)
+        }
+
+    def verify_dpo_pair(self, question, chosen, rejected, source_text):
+        """Verifies technical plausibility, non-identicality, and minimum grounding quality of DPO pairs"""
+        if not question or not chosen or not rejected:
+            return False
+        if chosen.strip().lower() == rejected.strip().lower():
+            return False
+        if len(chosen.strip()) < 15 or len(rejected.strip()) < 15:
+            return False
+        return True
+
+    def analyze_article_direct_turkish(self, article_id, title, text):
+        """Performs DIRECT Turkish technical analysis (summary, topics, Q&As, DPO pair, multi-turn chat) without translation pass"""
+        print(f"Analyzing article [{article_id}] (Direct Turkish Mode - {self.qa_count} Q&As): {title}...")
+        
+        truncated_text = text[:4000] if len(text) > 4000 else text
+        
+        system_prompt = (
+            f"Sen uzman bir gömülü sistemler mimarı, teknik yazar ve Türkçe yapay zeka eğitmenisin. ({self.llm_persona})\n"
+            "Verilen döküman metnini derinlemesine incele ve doğrudan yüksek kaliteli Türkçe teknik içerik üreterek JSON objesi döndür."
+        )
+        
+        user_prompt = (
+            f"Makale/Bölüm Başlığı: {title}\n"
+            f"İçerik Metni:\n{truncated_text}\n\n"
+            f"Aşağıdaki JSON yapısına BİREBİR uyarak EXACTLY {self.qa_count} adet Türkçe soru-cevap çifti, 1 adet DPO çifti ve 1 adet çok turlu (multi-turn) teknik diyalog içeren JSON nesnesi üret:\n"
+            "{\n"
+            "  \"turkish_title\": \"Makalenin Türkçe başlığı\",\n"
+            "  \"turkish_summary\": \"Dökümanın 2-4 cümlelik detaylı Türkçe teknik özeti\",\n"
+            "  \"topics\": [\"Konu 1\", \"Konu 2\", \"Konu 3\"],\n"
+            "  \"tr_sft_qa\": [\n"
+            "    {\"question\": \"Detaylı Türkçe teknik soru 1\", \"answer\": \"Kapsamlı, adım adım ve teknik doğruluğu yüksek Türkçe açıklama\"}\n"
+            "  ],\n"
+            "  \"tr_dpo_pair\": {\n"
+            "    \"question\": \"Türkçe teknik soru\",\n"
+            "    \"chosen\": \"Doğru, açıklayıcı ve teknik olarak kusursuz Türkçe yanıt\",\n"
+            "    \"rejected\": \"İnandırıcı ancak teknik olarak hatalı/yanıltıcı mantık içeren Türkçe yanıt\"\n"
+            "  },\n"
+            "  \"multi_turn_chat\": [\n"
+            "    {\"role\": \"user\", \"content\": \"Kullanıcı sorusu/sorunu\"},\n"
+            "    {\"role\": \"assistant\", \"content\": \"Asistan yönlendirmesi/sorusu\"},\n"
+            "    {\"role\": \"user\", \"content\": \"Kullanıcı detay yanıtı\"},\n"
+            "    {\"role\": \"assistant\", \"content\": \"Asistan çözümü/uyarısı\"}\n"
+            "  ]\n"
+            "}\n\n"
+            "Kurallar:\n"
+            f"1. 'tr_sft_qa' dizisinde tam olarak {self.qa_count} adet soru-cevap öğesi üretin.\n"
+            f"2. Yanıtlar {self.llm_subject} alanına uygun, Türkçe teknik terimlerin korunduğu derinlikte olmalıdır.\n"
+            "3. DPO çiftinde reddedilen (rejected) cevap, mantıklı görünen ancak gerçek bir mühendislik hatası (gerilim uyumsuzluğu, pin hatası, vb.) içermelidir.\n"
+            "4. Matematiksel formülleri LaTeX notation ile yazın: \\(E = m c^2\\).\n"
+            "5. SADECE geçerli JSON formatı döndürün."
+        )
+        
+        result = self.call_ollama_json(system_prompt, user_prompt, model=self.model_name, num_predict=8192)
+        if not result:
+            result = {
+                "turkish_title": title,
+                "turkish_summary": "Özet bulunamadı.",
+                "topics": [],
+                "tr_sft_qa": [],
+                "tr_dpo_pair": {"question": "", "chosen": "", "rejected": ""},
+                "multi_turn_chat": []
+            }
+            
+        sft_qa = result.get("tr_sft_qa", [])
+        dpo_pair = result.get("tr_dpo_pair", {})
+        dpo_pairs_list = [dpo_pair] if dpo_pair and dpo_pair.get("question") else []
+        
+        if self.enable_dpo_verification and dpo_pairs_list:
+            verified_dpo = []
+            for dp in dpo_pairs_list:
+                if self.verify_dpo_pair(dp.get("question", ""), dp.get("chosen", ""), dp.get("rejected", ""), truncated_text):
+                    dp["quality_status"] = "validated"
+                    verified_dpo.append(dp)
+                else:
+                    print(f"  DPO Pair failed quality verification for [{title}]. Marking for review.")
+                    dp["quality_status"] = "flagged"
+                    verified_dpo.append(dp)
+            dpo_pairs_list = verified_dpo
+
+        return {
+            "turkish_title": result.get("turkish_title", title),
+            "turkish_summary": result.get("turkish_summary", ""),
+            "topics": json.dumps(result.get("topics", []), ensure_ascii=False),
+            "tr_sft_qa": json.dumps(sft_qa, ensure_ascii=False),
+            "tr_dpo_pairs": json.dumps(dpo_pairs_list, ensure_ascii=False),
+            "multi_turn_chat": json.dumps(result.get("multi_turn_chat", []), ensure_ascii=False)
         }
 
     def translate_enrichments_to_turkish(self, title, summary, sft_qa_raw, dpo_pairs_raw):
@@ -365,41 +456,90 @@ class ArchiveAnalyzer:
                 unit_id, project_id, file_path, unit_type, name, sig, docstring, code = row
                 pragmatic_ratio = self.config.get("pragmatic_ratio", 50)
                 use_pragmatic = (unit_id % 100) < pragmatic_ratio
+                
+                active_cats = []
+                if self.config.get("code_cat_explanation", True):
+                    active_cats.append(0)
+                if self.config.get("code_cat_completion", True):
+                    active_cats.append(1)
+                if self.config.get("code_cat_bug_fix", True):
+                    active_cats.append(2)
+                if self.config.get("code_cat_unit_test", True):
+                    active_cats.append(3)
 
-                if self.input_mode == "rendergit":
-                    if use_pragmatic:
-                        category = "pragmatic"
-                        sys_prompt = "You are a pragmatic, concise Python software architect. Provide direct code analysis starting immediately with structured Markdown headings, without greetings or introductory filler."
-                        user_prompt = (
-                            f"Analyze the Python {unit_type} `{name}` from file `{file_path}`.\n"
-                            f"Do NOT include introductory greetings or persona intros (such as 'As a Senior Architect...'). Start IMMEDIATELY with section `### Purpose`.\n\n"
-                            f"Use the following structure:\n"
-                            f"### Purpose\n<concise 1-2 sentence purpose>\n\n"
-                            f"### Attributes & Signature\n<key params & types>\n\n"
-                            f"### Implementation Analysis & Refactoring\n<1-2 key technical observations and clean refactored Python snippet if applicable>\n\n"
-                            f"Code:\n```python\n{code}\n```"
-                        )
-                    else:
-                        category = "educational"
-                        sys_prompt = "You are a senior software engineering educator and mentor. Provide comprehensive, pedagogical code analysis explaining underlying design patterns, trade-offs, theoretical concepts, and architectural decisions."
-                        user_prompt = (
-                            f"Analyze the Python {unit_type} `{name}` from file `{file_path}` in a comprehensive, educational manner.\n"
-                            f"Do NOT include boilerplate greetings (such as 'As a Senior Architect...'). Start IMMEDIATELY with section `### Overview & Pedagogy`.\n\n"
-                            f"Use the following structure:\n"
-                            f"### Overview & Pedagogy\n<educational breakdown and design patterns used>\n\n"
-                            f"### Theoretical Concepts & Principles\n<design patterns, DTO/Enum/SOLID trade-offs>\n\n"
-                            f"### Detailed Line-by-Line Breakdown\n<key execution steps>\n\n"
-                            f"### Refactored Version & Recommendations\n<clean code recommendations>\n\n"
-                            f"Code:\n```python\n{code}\n```"
-                        )
-                else:
-                    category = "explanation"
-                    sys_prompt = f"You are an expert software architect and static analyzer. {self.llm_persona}"
+                if not active_cats:
+                    active_cats = [0, 1, 2, 3]
+
+                cat_selector = active_cats[unit_id % len(active_cats)]
+
+                if cat_selector == 1:
+                    category = "completion"
+                    instruction = f"Implement the Python {unit_type} `{name}` with signature `{sig}` cleanly according to type safety and best practices."
+                    tr_inst = f"`{file_path}` dosyasındaki `{name}` {unit_type} birimini imzasına (`{sig}`) uygun olarak tip güvenli biçimde kodla."
+                    sys_prompt = "You are a senior Python software engineer. Provide pure, high-quality, production-ready Python code implementation based on the signature and docstring."
                     user_prompt = (
-                        f"Analyze the following Python {unit_type} `{name}` from file `{file_path}`.\n"
-                        f"Explain its purpose, signature, inner logic, arguments, return values, and key implementation details:\n\n"
-                        f"```python\n{code}\n```"
+                        f"Implement the Python {unit_type} `{name}` in file `{file_path}`.\n"
+                        f"Signature: `{sig}`\n"
+                        f"Docstring:\n{docstring}\n\n"
+                        f"Reference Implementation:\n```python\n{code}\n```\n\n"
+                        f"Provide a clean, refactored production implementation with complete type hints and docstrings. Do NOT include filler text."
                     )
+                elif cat_selector == 2:
+                    category = "bug_fix"
+                    instruction = f"Analyze `{name}` in `{file_path}` for logic bugs, type risks, or boundary issues and provide the fixed code."
+                    tr_inst = f"`{file_path}` dosyasındaki `{name}` birimindeki olası mantık veya tip hatalarını tespit et ve düzeltilmiş kod halini sun."
+                    sys_prompt = "You are a senior security code auditor. Identify potential bugs, type risks, or magic string hazards and provide the clean, corrected code."
+                    user_prompt = (
+                        f"Review the following Python code for `{name}` in `{file_path}`:\n```python\n{code}\n```\n\n"
+                        f"Identify any code smells, boundary errors, or type risks, then output the corrected Python code snippet with an explanation."
+                    )
+                elif cat_selector == 3:
+                    category = "unit_test"
+                    instruction = f"Write a comprehensive pytest unit test suite for `{name}` in `{file_path}`."
+                    tr_inst = f"`{file_path}` dosyasındaki `{name}` birimi için kapsayıcı pytest birim testleri yaz."
+                    sys_prompt = "You are a test automation engineer specializing in pytest. Write clean, complete pytest test cases covering standard execution and edge cases."
+                    user_prompt = (
+                        f"Write a pytest test suite for the Python {unit_type} `{name}` from file `{file_path}`.\n\n"
+                        f"Code:\n```python\n{code}\n```\n\n"
+                        f"Provide complete, runnable pytest test functions including assertions and edge cases."
+                    )
+                else:
+                    tr_inst = f"`{file_path}` dosyasındaki `{name}` {unit_type} biriminin amacını ve iç mantığını açıkla."
+                    instruction = f"Explain the purpose and implementation of `{name}` in `{file_path}`."
+                    if self.input_mode == "rendergit":
+                        if use_pragmatic:
+                            category = "pragmatic"
+                            sys_prompt = "You are a pragmatic, concise Python software architect. Provide direct code analysis starting immediately with structured Markdown headings, without greetings or introductory filler."
+                            user_prompt = (
+                                f"Analyze the Python {unit_type} `{name}` from file `{file_path}`.\n"
+                                f"Do NOT include introductory greetings or persona intros (such as 'As a Senior Architect...'). Start IMMEDIATELY with section `### Purpose`.\n\n"
+                                f"Use the following structure:\n"
+                                f"### Purpose\n<concise 1-2 sentence purpose>\n\n"
+                                f"### Attributes & Signature\n<key params & types>\n\n"
+                                f"### Implementation Analysis & Refactoring\n<1-2 key technical observations and clean refactored Python snippet if applicable>\n\n"
+                                f"Code:\n```python\n{code}\n```"
+                            )
+                        else:
+                            category = "educational"
+                            sys_prompt = "You are a senior software engineering educator and mentor. Provide comprehensive, pedagogical code analysis explaining underlying design patterns, trade-offs, theoretical concepts, and architectural decisions."
+                            user_prompt = (
+                                f"Analyze the Python {unit_type} `{name}` from file `{file_path}` in a comprehensive, educational manner.\n"
+                                f"Do NOT include boilerplate greetings (such as 'As a Senior Architect...'). Start IMMEDIATELY with section `### Overview & Pedagogy`.\n\n"
+                                f"Use the following structure:\n"
+                                f"### Overview & Pedagogy\n<educational breakdown and design patterns used>\n\n"
+                                f"### Theoretical Concepts & Principles\n<design patterns, DTO/Enum/SOLID trade-offs>\n\n"
+                                f"### Detailed Line-by-Line Breakdown\n<key execution steps>\n\n"
+                                f"### Refactored Version & Recommendations\n<clean code recommendations>\n\n"
+                                f"Code:\n```python\n{code}\n```"
+                            )
+                    else:
+                        category = "explanation"
+                        sys_prompt = f"You are an expert software architect and static analyzer. {self.llm_persona}"
+                        user_prompt = (
+                            f"Analyze the following Python {unit_type} `{name}` from file `{file_path}`.\n"
+                            f"Explain its purpose, signature, inner logic, arguments, return values, and key implementation details:\n\n"
+                            f"```python\n{code}\n```"
+                        )
 
                 try:
                     res = self.call_ollama_chat_with_retry(
@@ -416,8 +556,6 @@ class ArchiveAnalyzer:
                         continue
 
                     output_expl = res.get("message", {}).get("content", "")
-                    tr_inst = f"`{file_path}` dosyasındaki `{name}` {unit_type} biriminin amacını ve iç mantığını açıkla."
-                    instruction = f"Explain the purpose and implementation of `{name}` in `{file_path}`."
 
                     cursor.execute("""
                         INSERT INTO synthetic_code_pairs 
@@ -425,11 +563,11 @@ class ArchiveAnalyzer:
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         unit_id, project_id, instruction, code, output_expl,
-                        tr_inst, "", category, datetime.now().timestamp()
+                        tr_inst, output_expl if self.direct_tr_generation else "", category, datetime.now().timestamp()
                     ))
                     self.conn.commit()
                     count1 += 1
-                    print(f"  [{count1}/{len(pass1_rows)}] Analyzed AST {unit_type}: {name}")
+                    print(f"  [{count1}/{len(pass1_rows)}] Analyzed AST {unit_type} [{category}]: {name}")
                 except Exception as e:
                     print(f"Error analyzing code unit {name}: {e}")
 
@@ -523,7 +661,7 @@ class ArchiveAnalyzer:
             
         placeholders = ",".join(["?"] * len(active_ids))
         
-        # --- PASS 1: English Technical Analysis (Qwen Model - 10 Detailed Q&A) ---
+        # --- PASS 1: Technical Analysis (Direct Turkish vs English) ---
         cursor.execute(f"""
             SELECT a.id, a.title, a.extracted_text 
             FROM articles a
@@ -534,97 +672,119 @@ class ArchiveAnalyzer:
         pass1_rows = cursor.fetchall()
         
         if pass1_rows:
-            print(f"Pass 1: Found {len(pass1_rows)} articles awaiting English enrichment ({self.qa_count} Q&As each) in range [{start}:{end if end is not None else len(all_ids)}].")
+            mode_str = "Direct Turkish" if self.direct_tr_generation else "English"
+            print(f"Pass 1: Found {len(pass1_rows)} articles awaiting {mode_str} enrichment ({self.qa_count} Q&As each) in range [{start}:{end if end is not None else len(all_ids)}].")
             count1 = 0
             for row in pass1_rows:
                 article_id, title, text = row
                 try:
-                    eng_data = self.analyze_article_english(article_id, title, text)
                     processed_at = datetime.now().isoformat()
-                    
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO enrichments (
-                            article_id, summary, topics, turkish_title, turkish_summary, sft_qa, dpo_pairs, tr_sft_qa, tr_dpo_pairs, processed_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        article_id,
-                        eng_data["summary"],
-                        eng_data["topics"],
-                        title,       # Placeholder title, will be translated in Pass 2
-                        "",          # Placeholder summary, will be translated in Pass 2
-                        eng_data["sft_qa"],
-                        eng_data["dpo_pairs"],
-                        "",          # Placeholder tr_sft_qa, translated in Pass 2
-                        "",          # Placeholder tr_dpo_pairs, translated in Pass 2
-                        processed_at
-                    ))
+                    if self.direct_tr_generation:
+                        tr_data = self.analyze_article_direct_turkish(article_id, title, text)
+                        cursor.execute("""
+                            INSERT OR REPLACE INTO enrichments (
+                                article_id, summary, topics, turkish_title, turkish_summary, sft_qa, dpo_pairs, tr_sft_qa, tr_dpo_pairs, processed_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            article_id,
+                            tr_data["turkish_summary"],
+                            tr_data["topics"],
+                            tr_data["turkish_title"],
+                            tr_data["turkish_summary"],
+                            tr_data["tr_sft_qa"],
+                            tr_data["tr_dpo_pairs"],
+                            tr_data["tr_sft_qa"],
+                            tr_data["tr_dpo_pairs"],
+                            processed_at
+                        ))
+                    else:
+                        eng_data = self.analyze_article_english(article_id, title, text)
+                        cursor.execute("""
+                            INSERT OR REPLACE INTO enrichments (
+                                article_id, summary, topics, turkish_title, turkish_summary, sft_qa, dpo_pairs, tr_sft_qa, tr_dpo_pairs, processed_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            article_id,
+                            eng_data["summary"],
+                            eng_data["topics"],
+                            title,       # Placeholder title, will be translated in Pass 2
+                            "",          # Placeholder summary, will be translated in Pass 2
+                            eng_data["sft_qa"],
+                            eng_data["dpo_pairs"],
+                            "",          # Placeholder tr_sft_qa, translated in Pass 2
+                            "",          # Placeholder tr_dpo_pairs, translated in Pass 2
+                            processed_at
+                        ))
                     self.conn.commit()
                     count1 += 1
                 except Exception as e:
                     print(f"Error in Pass 1 for article {article_id}: {e}")
                     self.conn.rollback()
             
-            print(f"Pass 1 complete. Enriched {count1} articles in English with {self.qa_count} Q&A pairs each.")
+            print(f"Pass 1 complete. Enriched {count1} articles ({mode_str} Mode) with {self.qa_count} Q&A pairs each.")
             
             # Unload main model from VRAM/RAM
-            print("Unloading main analyzer model (Qwen) from server memory...")
+            print("Unloading main analyzer model from server memory...")
             try:
                 self.client.generate(model=self.model_name, prompt="", keep_alive=0)
             except Exception as e:
                 print(f"Warning: Failed to unload main model: {e}")
         else:
-            print("Pass 1: No articles require English enrichment in the specified range.")
+            print("Pass 1: No articles require enrichment in the specified range.")
             
-        # --- PASS 2: Turkish Translation (TranslateGemma Model - Term Preservation) ---
-        cursor.execute(f"""
-            SELECT e.article_id, a.title, e.summary, e.sft_qa, e.dpo_pairs, e.turkish_summary
-            FROM enrichments e
-            JOIN articles a ON e.article_id = a.id
-            WHERE (e.tr_sft_qa IS NULL OR e.tr_sft_qa = '' OR e.turkish_summary IS NULL OR e.turkish_summary = '')
-            AND e.article_id IN ({placeholders})
-        """, active_ids)
-        pass2_rows = cursor.fetchall()
-        
-        if pass2_rows:
-            print(f"\nPass 2: Found {len(pass2_rows)} articles awaiting Turkish translation with TranslateGemma in range [{start}:{end if end is not None else len(all_ids)}].")
-            count2 = 0
-            for row in pass2_rows:
-                article_id, title, summary, sft_qa_raw, dpo_pairs_raw, existing_tr_summary = row
-                if not summary or summary == "Summary unavailable.":
-                    continue
-                    
+        # --- PASS 2: Turkish Translation (Only executed if direct_tr_generation is False) ---
+        if not self.direct_tr_generation:
+            cursor.execute(f"""
+                SELECT e.article_id, a.title, e.summary, e.sft_qa, e.dpo_pairs, e.turkish_summary
+                FROM enrichments e
+                JOIN articles a ON e.article_id = a.id
+                WHERE (e.tr_sft_qa IS NULL OR e.tr_sft_qa = '' OR e.turkish_summary IS NULL OR e.turkish_summary = '')
+                AND e.article_id IN ({placeholders})
+            """, active_ids)
+            pass2_rows = cursor.fetchall()
+            
+            if pass2_rows:
+                print(f"\nPass 2: Found {len(pass2_rows)} articles awaiting Turkish translation with TranslateGemma in range [{start}:{end if end is not None else len(all_ids)}].")
+                count2 = 0
+                for row in pass2_rows:
+                    article_id, title, summary, sft_qa_raw, dpo_pairs_raw, existing_tr_summary = row
+                    if not summary or summary == "Summary unavailable.":
+                        continue
+                        
+                    try:
+                        tr_res = self.translate_enrichments_to_turkish(title, summary, sft_qa_raw, dpo_pairs_raw)
+                        
+                        target_tr_summary = existing_tr_summary if existing_tr_summary else tr_res["turkish_summary"]
+                        
+                        cursor.execute("""
+                            UPDATE enrichments
+                            SET turkish_title = ?, turkish_summary = ?, tr_sft_qa = ?, tr_dpo_pairs = ?
+                            WHERE article_id = ?
+                        """, (
+                            tr_res["turkish_title"],
+                            target_tr_summary,
+                            tr_res["tr_sft_qa"],
+                            tr_res["tr_dpo_pairs"],
+                            article_id
+                        ))
+                        self.conn.commit()
+                        count2 += 1
+                    except Exception as e:
+                        print(f"Error in Pass 2 for article {article_id}: {e}")
+                        self.conn.rollback()
+                        
+                print(f"Pass 2 complete. Translated {count2} articles into Turkish using TranslateGemma.")
+                
+                # Unload TranslateGemma model from VRAM/RAM
+                print("Unloading translation model (TranslateGemma) from server memory...")
                 try:
-                    tr_res = self.translate_enrichments_to_turkish(title, summary, sft_qa_raw, dpo_pairs_raw)
-                    
-                    target_tr_summary = existing_tr_summary if existing_tr_summary else tr_res["turkish_summary"]
-                    
-                    cursor.execute("""
-                        UPDATE enrichments
-                        SET turkish_title = ?, turkish_summary = ?, tr_sft_qa = ?, tr_dpo_pairs = ?
-                        WHERE article_id = ?
-                    """, (
-                        tr_res["turkish_title"],
-                        target_tr_summary,
-                        tr_res["tr_sft_qa"],
-                        tr_res["tr_dpo_pairs"],
-                        article_id
-                    ))
-                    self.conn.commit()
-                    count2 += 1
+                    self.client.generate(model=self.translator_model, prompt="", keep_alive=0)
                 except Exception as e:
-                    print(f"Error in Pass 2 for article {article_id}: {e}")
-                    self.conn.rollback()
-                    
-            print(f"Pass 2 complete. Translated {count2} articles (titles, summaries, 10 Q&A pairs, DPO) into Turkish using TranslateGemma.")
-            
-            # Unload TranslateGemma model from VRAM/RAM
-            print("Unloading translation model (TranslateGemma) from server memory...")
-            try:
-                self.client.generate(model=self.translator_model, prompt="", keep_alive=0)
-            except Exception as e:
-                print(f"Warning: Failed to unload translation model: {e}")
+                    print(f"Warning: Failed to unload translation model: {e}")
+            else:
+                print("Pass 2: No articles require translation.")
         else:
-            print("Pass 2: No articles require translation.")
+            print("Pass 2: Skipped (Direct Turkish Generation mode is active).")
             
         print("All enrichment steps completed successfully.")
 

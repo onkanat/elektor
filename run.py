@@ -66,6 +66,13 @@ Examples:
     # Export subcommand
     subparsers.add_parser("export", help="Compile and export SFT, DPO, and Chat datasets to JSONL")
     
+    # HF Upload subcommand
+    hf_parser = subparsers.add_parser("hf_upload", help="Upload exported dataset to Hugging Face Hub")
+    hf_parser.add_argument("--repo_id", type=str, required=True, help="Target Hugging Face repo ID (e.g. username/repo-name)")
+    hf_parser.add_argument("--project_id", type=str, default=None, help="Project ID to upload (defaults to active project)")
+    hf_parser.add_argument("--token", type=str, default=None, help="Hugging Face Access Token (HF_TOKEN)")
+    hf_parser.add_argument("--private", action="store_true", help="Set repository to private")
+
     # Pipeline subcommand
     pipeline_parser = subparsers.add_parser("pipeline", help="Run extract, enrich, embed, and export in a single run")
     pipeline_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit the number of sample articles to process (default: all articles, supports range 'start:end' or integer)")
@@ -114,6 +121,29 @@ Examples:
         print("=== Step 4: Compiling and Exporting Datasets ===")
         builder = DatasetBuilder()
         builder.export_datasets()
+
+    elif args.command == "hf_upload":
+        print("=== Step 5: Uploading Dataset to Hugging Face Hub ===")
+        from pipeline.hf_deployer import HFDeployer
+        deployer = HFDeployer()
+        
+        project_id = args.project_id
+        if not project_id:
+            try:
+                with open("config.json", "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    project_id = cfg.get("project_id", "sdr_engineers")
+            except Exception:
+                project_id = "sdr_engineers"
+
+        res = deployer.upload_dataset(
+            project_id=project_id,
+            repo_id=args.repo_id,
+            hf_token=args.token,
+            private=args.private
+        )
+        print(f"✅ Successfully uploaded {len(res['uploaded_files'])} files to Hugging Face Datasets Hub!")
+        print(f"🔗 Dataset URL: {res['repo_url']}")
         
     elif args.command == "pipeline":
         print("=== RUNNING FULL PIPELINE ===")

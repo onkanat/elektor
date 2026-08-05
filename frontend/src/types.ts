@@ -23,6 +23,13 @@ export interface PipelineConfig {
   ocr_threshold_chars: number;
   tesseract_cmd: string;
   pragmatic_ratio?: number;
+  direct_tr_generation?: boolean;
+  enable_dpo_verification?: boolean;
+  generate_multi_turn_chat?: boolean;
+  code_cat_explanation?: boolean;
+  code_cat_completion?: boolean;
+  code_cat_bug_fix?: boolean;
+  code_cat_unit_test?: boolean;
 }
 
 export interface HealthInfo {

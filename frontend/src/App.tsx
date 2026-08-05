@@ -5,6 +5,7 @@ import { SectionDatasetViewer } from './components/SectionDatasetViewer';
 import { SectionModelChat } from './components/SectionModelChat';
 import { ProjectExplorer } from './components/ProjectExplorer';
 import { QuickHelpModal } from './components/QuickHelpModal';
+import { HFUploadModal } from './components/HFUploadModal';
 import type { ProjectItem } from './components/ProjectExplorer';
 import type { HealthInfo, PipelineConfig, PipelineState } from './types';
 
@@ -16,6 +17,7 @@ export const App: React.FC = () => {
   const [activeProjectId, setActiveProjectId] = useState<string>('sdr_engineers');
   const [showProjectExplorer, setShowProjectExplorer] = useState<boolean>(false);
   const [showQuickHelp, setShowQuickHelp] = useState<boolean>(false);
+  const [showHFModal, setShowHFModal] = useState<boolean>(false);
 
   const [pipelineState, setPipelineState] = useState<PipelineState>({
     status: 'idle',
@@ -162,6 +164,7 @@ export const App: React.FC = () => {
         activeProjectName={activeProjectObj?.project_name || config?.dataset_name}
         onOpenProjectExplorer={() => setShowProjectExplorer(true)}
         onOpenQuickHelp={() => setShowQuickHelp(true)}
+        onOpenHFUploadModal={() => setShowHFModal(true)}
       />
 
       <ProjectExplorer
@@ -170,12 +173,24 @@ export const App: React.FC = () => {
         activeProjectId={activeProjectId}
         onSelectProject={handleSelectProject}
         onCreateProject={handleCreateProject}
+        onRefreshProjects={() => {
+          fetchProjects();
+          fetchHealth();
+        }}
         onClose={() => setShowProjectExplorer(false)}
       />
 
       <QuickHelpModal
         isOpen={showQuickHelp}
         onClose={() => setShowQuickHelp(false)}
+      />
+
+      <HFUploadModal
+        isOpen={showHFModal}
+        activeProjectId={activeProjectId}
+        activeProjectName={activeProjectObj?.project_name || config?.dataset_name}
+        projects={projects}
+        onClose={() => setShowHFModal(false)}
       />
 
       <main className="main-content">

@@ -182,12 +182,19 @@ class DatasetBuilder:
                             q = item.get("question", "").strip()
                             chosen = item.get("chosen", "").strip()
                             rej = item.get("rejected", "").strip()
+                            qual_status = item.get("quality_status", "validated")
                             if q and chosen and rej:
                                 tr_dpo_records.append({
                                     "prompt": q,
                                     "input": f"Bağlam: {self.dataset_name_tr} ({year}) '{display_tr_title}' makalesi",
                                     "chosen": chosen,
-                                    "rejected": rej
+                                    "rejected": rej,
+                                    "metadata": {
+                                        "dataset_type": "dpo",
+                                        "language": "tr",
+                                        "source_title": display_tr_title,
+                                        "quality_status": qual_status
+                                    }
                                 })
                 except Exception as e:
                     print(f"Error parsing Turkish DPO pairs for article '{display_tr_title}': {e}")
@@ -255,7 +262,16 @@ class DatasetBuilder:
                         "output": tr_out if tr_out else out
                     })
 
-                    if cat == "educational":
+                    if cat == "completion":
+                        sys_en = "You are a senior Python software engineer. Provide pure, high-quality, production-ready Python code implementation based on signatures and docstrings."
+                        sys_tr = "Sen tip güvenliğine ve temiz kod ilkelerine hakim kıdemli bir Python yazılım mühendisisin. İmzaya uygun eksiksiz üretim kodu yazarsın."
+                    elif cat == "bug_fix":
+                        sys_en = "You are a senior code security auditor. Identify bugs, boundary errors, or type risks, and provide clean refactored code."
+                        sys_tr = "Sen kod güvenliği ve statik analiz uzmanısın. Mantık ve tip hatalarını tespit edip düzeltilmiş güvenli kod sunarsın."
+                    elif cat == "unit_test":
+                        sys_en = "You are a test automation engineer specializing in pytest. Write clean, runnable unit test suites covering standard and edge cases."
+                        sys_tr = "Sen pytest ve test otomasyonu uzmanısın. Kenar durumları ve fixtürleri kapsayan tam çalışabilir birim testleri yazarsın."
+                    elif cat == "educational":
                         sys_en = "You are a senior software engineering educator and mentor. Provide comprehensive, pedagogical code analysis explaining underlying design patterns, trade-offs, theoretical concepts, and architectural decisions."
                         sys_tr = "Sen kıdemli bir yazılım mimarı ve eğitmenisin. Kodu hem teknik hem de pedagojik açıdan inceleyerek tasarım kalıplarını, yazılım ilkelerini ve derinlemesine mimari mantığı açıkla."
                     else:

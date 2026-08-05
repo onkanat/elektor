@@ -16,7 +16,9 @@ import ollama
 import psutil
 import httpx
 from pipeline.mcp_tools import search_vector_rag, query_sqlite_knowledge, inject_sft_dpo_context, evaluate_knowledge_gap
-from pipeline.code_extractor import clone_repository, flatten_repository_rendergit, extract_and_store_code_units, init_code_db
+from pipeline.project_merger import ProjectMerger
+from pipeline.hf_deployer import HFDeployer
+from pipeline.cloud_gpu_offloader import CloudGPUOffloader
 
 app = FastAPI(title="Elektor Universal PDF Pipeline Backend API", version="1.0.0")
 
@@ -44,27 +46,44 @@ pipeline_state: Dict[str, Any] = {
 pipeline_lock = threading.Lock()
 
 def get_projects_registry() -> Dict[str, Any]:
-    if not PROJECTS_REGISTRY_PATH.exists():
-        default_registry = {
-            "active_project_id": "sdr_engineers",
-            "projects": {
-                "sdr_engineers": {
-                    "project_id": "sdr_engineers",
-                    "project_name": "Software-Defined Radio for Engineers",
-                    "config_file": "config.json",
-                    "created_at": time.time(),
-                    "last_accessed": time.time()
-                }
+    registry = {"active_project_id": "sdr_engineers", "projects": {}}
+    if PROJECTS_REGISTRY_PATH.exists():
+        try:
+            with open(PROJECTS_REGISTRY_PATH, "r", encoding="utf-8") as f:
+                registry = json.load(f)
+        except Exception:
+            pass
+
+    projects = registry.setdefault("projects", {})
+
+    # Auto-discover all projects_*.json files in root directory
+    updated = False
+    for pfile in Path(".").glob("projects_*.json"):
+        if pfile.name == "projects_index.json":
+            continue
+        pid = pfile.stem.replace("projects_", "")
+        if pid not in projects:
+            pname = pid
+            try:
+                with open(pfile, "r", encoding="utf-8") as f:
+                    pcfg = json.load(f)
+                    pname = pcfg.get("dataset_name", pcfg.get("project_name", pid))
+            except Exception:
+                pass
+
+            projects[pid] = {
+                "project_id": pid,
+                "project_name": pname,
+                "config_file": str(pfile),
+                "created_at": pfile.stat().st_ctime,
+                "last_accessed": pfile.stat().st_mtime
             }
-        }
-        with open(PROJECTS_REGISTRY_PATH, "w", encoding="utf-8") as f:
-            json.dump(default_registry, f, indent=2, ensure_ascii=False)
-        return default_registry
-    try:
-        with open(PROJECTS_REGISTRY_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {"active_project_id": "sdr_engineers", "projects": {}}
+            updated = True
+
+    if updated:
+        save_projects_registry(registry)
+
+    return registry
 
 def save_projects_registry(registry: Dict[str, Any]):
     with open(PROJECTS_REGISTRY_PATH, "w", encoding="utf-8") as f:
@@ -743,6 +762,10 @@ def simulate_pre_finetuning_impact(payload: Dict[str, Any] = Body(...)):
 
 @app.get("/api/readme")
 def get_readme():
+    guide_path = Path("USER_GUIDE.md")
+    if guide_path.exists():
+        with open(guide_path, "r", encoding="utf-8") as f:
+            return {"content": f.read()}
     readme_path = Path("README.md")
     if readme_path.exists():
         with open(readme_path, "r", encoding="utf-8") as f:
@@ -966,6 +989,93 @@ def generate_code_dataset(payload: Dict[str, Any] = Body(...)):
         "generated_pairs_count": len(synthetic_pairs),
         "export_file": str(export_file)
     }
+
+# ==============================================================================
+# PHASE 3: PROJECT & DATASET MERGER ENGINE API ENDPOINTS
+# ==============================================================================
+
+@app.post("/api/projects/merge/audit")
+def audit_project_merge(payload: Dict[str, Any] = Body(...)):
+    source_projects = payload.get("source_projects", [])
+    target_id = payload.get("target_project_id", "")
+    merger = ProjectMerger()
+    return merger.audit_merge(source_projects, target_id)
+
+@app.post("/api/projects/merge/execute")
+def execute_project_merge(payload: Dict[str, Any] = Body(...)):
+    source_projects = payload.get("source_projects", [])
+    target_id = payload.get("target_project_id", "")
+    target_name = payload.get("target_project_name", "")
+    confirm = payload.get("confirm", False)
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Birleştirme işlemi için confirm=True onayı zorunludur.")
+    merger = ProjectMerger()
+    try:
+        return merger.execute_merge(source_projects, target_id, target_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Birleştirme hatası: {str(e)}")
+
+# ==============================================================================
+# PHASE 4: HUGGING FACE & CLOUD GPU OFFLOADING API ENDPOINTS
+# ==============================================================================
+
+@app.post("/api/hf/audit")
+def audit_hf_upload(payload: Dict[str, Any] = Body(...)):
+    project_id = payload.get("project_id", "")
+    repo_id = payload.get("repo_id", "")
+    hf_token = payload.get("hf_token", None)
+    private = payload.get("private", False)
+
+    if not project_id or not repo_id:
+        raise HTTPException(status_code=400, detail="project_id ve repo_id alanları zorunludur.")
+
+    deployer = HFDeployer()
+    return deployer.audit_upload(
+        project_id=project_id,
+        repo_id=repo_id,
+        hf_token=hf_token,
+        private=private
+    )
+
+@app.post("/api/hf/upload")
+def upload_dataset_to_hf(payload: Dict[str, Any] = Body(...)):
+    project_id = payload.get("project_id", "")
+    repo_id = payload.get("repo_id", "")
+    hf_token = payload.get("hf_token", None)
+    private = payload.get("private", False)
+
+    if not project_id or not repo_id:
+        raise HTTPException(status_code=400, detail="project_id ve repo_id alanları zorunludur.")
+
+    deployer = HFDeployer()
+    try:
+        return deployer.upload_dataset(
+            project_id=project_id,
+            repo_id=repo_id,
+            hf_token=hf_token,
+            private=private
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Hugging Face yükleme hatası: {str(e)}")
+
+@app.post("/api/cloud/prepare")
+def prepare_cloud_offload(payload: Dict[str, Any] = Body(...)):
+    project_id = payload.get("project_id", "")
+    base_model = payload.get("base_model", "unsloth/Qwen2.5-Coder-7B-Instruct")
+    hf_dataset = payload.get("hf_dataset", "")
+
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id alanı zorunludur.")
+
+    offloader = CloudGPUOffloader()
+    try:
+        return offloader.prepare_cloud_payload(
+            project_id=project_id,
+            base_model=base_model,
+            hf_dataset=hf_dataset
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Bulut GPU paket hazırlık hatası: {str(e)}")
 
 # Mount React frontend static build
 

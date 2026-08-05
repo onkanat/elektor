@@ -40,7 +40,12 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
-    const val = type === 'number' ? Number(value) : value;
+    let val: any = value;
+    if (type === 'number') {
+      val = Number(value);
+    } else if (type === 'checkbox') {
+      val = (e.target as HTMLInputElement).checked;
+    }
     const updated = { ...formData, [name]: val };
     setFormData(updated);
     setJsonText(JSON.stringify(updated, null, 2));
@@ -145,6 +150,90 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
             <span>🎓 %100 Pedagojik (Derin Teori)</span>
             <span>⚖️ %50 / %50 Dengeli</span>
             <span>⚡ %100 Pragmatik (Doğrudan Kod)</span>
+          </div>
+        </div>
+
+        {/* 🎯 Veri Seti Kalite & Üretim Tercihleri (Çevirisiz Türkçe, DPO Doğrulama, Multi-turn) */}
+        <div className="form-group" style={{ backgroundColor: 'rgba(99, 102, 241, 0.05)', padding: '0.75rem 1rem', borderRadius: '0.5rem', border: '1px solid rgba(99, 102, 241, 0.2)', marginBottom: '1rem' }}>
+          <label style={{ margin: 0, fontWeight: 600, color: '#818cf8', marginBottom: '0.5rem', display: 'block' }}>
+            🎯 Veri Seti Kalite & Üretim Tercihleri
+          </label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', cursor: 'pointer', color: 'var(--text-primary)' }}>
+              <input
+                type="checkbox"
+                name="direct_tr_generation"
+                checked={formData.direct_tr_generation ?? true}
+                onChange={handleChange}
+              />
+              <span><strong>Doğrudan Türkçe Üretim:</strong> Çeviri aşaması olmadan dökümandan doğrudan Türkçe SFT/DPO/Chat üretir. (Deaktif edilirse EN-TR çeviri çalışır)</span>
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', cursor: 'pointer', color: 'var(--text-primary)' }}>
+              <input
+                type="checkbox"
+                name="enable_dpo_verification"
+                checked={formData.enable_dpo_verification ?? true}
+                onChange={handleChange}
+              />
+              <span><strong>DPO Teknik Doğrulama Katmanı:</strong> Chosen/Rejected çiftlerini mühendislik doğruluğu ve mantık hatası kalitesine göre filtreler.</span>
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', cursor: 'pointer', color: 'var(--text-primary)' }}>
+              <input
+                type="checkbox"
+                name="generate_multi_turn_chat"
+                checked={formData.generate_multi_turn_chat ?? true}
+                onChange={handleChange}
+              />
+              <span><strong>Çok Turlu (Multi-turn) Diyalog Sentezi:</strong> Adım adım donanım/yazılım sorun giderme ve yönlendirme sohbetleri üretir.</span>
+            </label>
+
+            {/* Faz 2 Sentetik Kod Çeşitliliği Kontrol Kutusarı */}
+            <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.08)', fontSize: '0.78rem', color: '#cbd5e1' }}>
+              <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '0.4rem' }}>💻 Faz 2 Sentetik Kod Çeşitliliği Kategorileri (Aktif/Deaktif Et):</strong>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', cursor: 'pointer', backgroundColor: 'rgba(56, 189, 248, 0.08)', padding: '0.35rem 0.5rem', borderRadius: '0.35rem', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
+                  <input
+                    type="checkbox"
+                    name="code_cat_explanation"
+                    checked={formData.code_cat_explanation ?? true}
+                    onChange={handleChange}
+                  />
+                  <span style={{ color: '#38bdf8' }}>📝 Kod Açıklama & Mimari</span>
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', cursor: 'pointer', backgroundColor: 'rgba(52, 211, 153, 0.08)', padding: '0.35rem 0.5rem', borderRadius: '0.35rem', border: '1px solid rgba(52, 211, 153, 0.2)' }}>
+                  <input
+                    type="checkbox"
+                    name="code_cat_completion"
+                    checked={formData.code_cat_completion ?? true}
+                    onChange={handleChange}
+                  />
+                  <span style={{ color: '#34d399' }}>💻 Kod Tamamlama (İmza → Kod)</span>
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', cursor: 'pointer', backgroundColor: 'rgba(251, 113, 133, 0.08)', padding: '0.35rem 0.5rem', borderRadius: '0.35rem', border: '1px solid rgba(251, 113, 133, 0.2)' }}>
+                  <input
+                    type="checkbox"
+                    name="code_cat_bug_fix"
+                    checked={formData.code_cat_bug_fix ?? true}
+                    onChange={handleChange}
+                  />
+                  <span style={{ color: '#fb7185' }}>🐛 Hata Ayıklama & Güvenlik</span>
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', cursor: 'pointer', backgroundColor: 'rgba(251, 191, 36, 0.08)', padding: '0.35rem 0.5rem', borderRadius: '0.35rem', border: '1px solid rgba(251, 191, 36, 0.2)' }}>
+                  <input
+                    type="checkbox"
+                    name="code_cat_unit_test"
+                    checked={formData.code_cat_unit_test ?? true}
+                    onChange={handleChange}
+                  />
+                  <span style={{ color: '#fbbf24' }}>🧪 pytest Birim Test Üretimi</span>
+                </label>
+              </div>
+            </div>
           </div>
         </div>
 

@@ -9,6 +9,7 @@ interface HeaderProps {
   activeProjectName?: string;
   onOpenProjectExplorer: () => void;
   onOpenQuickHelp: () => void;
+  onOpenHFUploadModal: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,6 +19,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeProjectName,
   onOpenProjectExplorer,
   onOpenQuickHelp,
+  onOpenHFUploadModal,
 }) => {
   const isOllamaOnline = health?.ollama_status === 'online';
 
@@ -86,6 +88,16 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={onOpenProjectExplorer}
         >
           🗂️ Proje: <strong>{activeProjectName || health?.config?.dataset_name || 'sdr_engineers'}</strong>
+        </button>
+
+        {/* Phase 4 HF & Cloud GPU Launcher Button */}
+        <button
+          className="btn btn-emerald"
+          style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', fontWeight: 600 }}
+          onClick={onOpenHFUploadModal}
+          title="Hugging Face Hub Upload & Bulut GPU Fine-Tuning Paket Jeneratörü"
+        >
+          🤗 HF & Bulut GPU
         </button>
 
         <div className={`badge ${isOllamaOnline ? 'online' : 'offline'}`}>

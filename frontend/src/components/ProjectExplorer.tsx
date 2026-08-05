@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ProjectMergerModal } from './ProjectMergerModal';
 
 export interface ProjectItem {
   project_id: string;
@@ -14,6 +15,7 @@ interface ProjectExplorerProps {
   activeProjectId: string;
   onSelectProject: (projectId: string) => Promise<void>;
   onCreateProject: (payload: any) => Promise<void>;
+  onRefreshProjects?: () => void;
   onClose: () => void;
 }
 
@@ -23,9 +25,11 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({
   activeProjectId,
   onSelectProject,
   onCreateProject,
+  onRefreshProjects,
   onClose,
 }) => {
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
+  const [showMergerModal, setShowMergerModal] = useState<boolean>(false);
   const [newProjectId, setNewProjectId] = useState<string>('');
   const [newProjectName, setNewProjectName] = useState<string>('');
   const [newInputMode, setNewInputMode] = useState<'book' | 'folder' | 'rendergit'>('book');
@@ -78,6 +82,19 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({
         zIndex: 999,
       }}
     >
+      <ProjectMergerModal
+        isOpen={showMergerModal}
+        projects={projects}
+        onClose={() => setShowMergerModal(false)}
+        onSuccess={() => {
+          setShowMergerModal(false);
+          if (onRefreshProjects) {
+            onRefreshProjects();
+          }
+          onClose();
+        }}
+      />
+
       <div
         className="card"
         style={{
@@ -96,13 +113,18 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({
         </div>
 
         {/* Action Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
             Kayıtlı Projeler ({projects.length}) — Son gezilen proje otomatik hafızada tutulur.
           </span>
-          <button className="btn btn-emerald" onClick={() => setShowCreateModal(true)}>
-            ➕ Yeni Proje Oluştur
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button className="btn btn-secondary" onClick={() => setShowMergerModal(true)}>
+              🔀 Projeleri Birleştir (Merge)
+            </button>
+            <button className="btn btn-emerald" onClick={() => setShowCreateModal(true)}>
+              ➕ Yeni Proje Oluştur
+            </button>
+          </div>
         </div>
 
         {/* Create Modal Form View */}

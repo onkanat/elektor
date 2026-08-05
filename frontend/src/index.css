@@ -446,3 +446,76 @@ textarea.form-control.mono {
   display: flex;
   gap: 0.75rem;
 }
+
+/* Rich Markdown Body Styling for QuickHelpModal */
+.rich-markdown-body h1 {
+  font-size: 1.4rem;
+  color: #38bdf8;
+  border-bottom: 1px solid #1e293b;
+  padding-bottom: 0.5rem;
+  margin-top: 1.2rem;
+  margin-bottom: 0.75rem;
+}
+.rich-markdown-body h2 {
+  font-size: 1.15rem;
+  color: #fde047;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 0.35rem;
+  margin-top: 1.2rem;
+  margin-bottom: 0.6rem;
+}
+.rich-markdown-body h3 {
+  font-size: 1rem;
+  color: #34d399;
+  margin-top: 1rem;
+  margin-bottom: 0.4rem;
+}
+.rich-markdown-body code {
+  background: rgba(30, 41, 59, 0.8);
+  color: #38bdf8;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.82rem;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+}
+.rich-markdown-body pre {
+  background: #090d16;
+  border: 1px solid #1e293b;
+  padding: 0.85rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+}
+.rich-markdown-body pre code {
+  background: transparent;
+  padding: 0;
+  color: #f1f5f9;
+}
+.rich-markdown-body blockquote {
+  border-left: 3px solid #38bdf8;
+  background: rgba(56, 189, 248, 0.05);
+  margin: 0.75rem 0;
+  padding: 0.5rem 1rem;
+  color: #cbd5e1;
+}
+.rich-markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.82rem;
+}
+.rich-markdown-body th, .rich-markdown-body td {
+  border: 1px solid #1e293b;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.rich-markdown-body th {
+  background: #0f172a;
+  color: #38bdf8;
+}
+.rich-markdown-body ul, .rich-markdown-body ol {
+  padding-left: 1.4rem;
+  margin: 0.5rem 0;
+}
+.rich-markdown-body li {
+  margin-bottom: 0.35rem;
+}

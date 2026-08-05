@@ -1,5 +1,5 @@
 {
-  "active_project_id": "rendergit_01",
+  "active_project_id": "rendergit_merged_all",
   "projects": {
     "sdr_engineers": {
       "project_id": "sdr_engineers",
@@ -28,6 +28,27 @@
       "config_file": "projects_rendergit_01.json",
       "created_at": 1785876193.314294,
       "last_accessed": 1785876193.314294
+    },
+    "rendergit_03": {
+      "project_id": "rendergit_03",
+      "project_name": "RenderGit_Python_veriseti_part3",
+      "config_file": "projects_rendergit_03.json",
+      "created_at": 1785911339.765253,
+      "last_accessed": 1785911339.7652538
+    },
+    "rendergit_02": {
+      "project_id": "rendergit_02",
+      "project_name": "RenderGit_Python_veriseti_part2",
+      "config_file": "projects_rendergit_02.json",
+      "created_at": 1785884857.9988904,
+      "last_accessed": 1785884856.8594983
+    },
+    "rendergit_merged_all": {
+      "project_id": "rendergit_merged_all",
+      "project_name": "RenderGit Consolidated Master Dataset",
+      "config_file": "projects_rendergit_merged_all.json",
+      "created_at": 1785918696.948826,
+      "last_accessed": 1785918696.948826
     }
   }
 }
