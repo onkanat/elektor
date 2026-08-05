@@ -372,9 +372,14 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
           </div>
         )}
 
-        {/* TAB 2: CLOUD GPU OFFLOADING */}
+        {/* TAB 2: CLOUD GPU & JUPYTERLAB OFFLOADING */}
         {activeTab === 'cloud' && (
           <div>
+            <div style={{ backgroundColor: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.2)', padding: '0.75rem', borderRadius: '0.5rem', marginBottom: '1.25rem', fontSize: '0.8rem', color: '#e2e8f0' }}>
+              🪐 <strong>Yerel GPU Sunucusu & JupyterLab Entegrasyonu:</strong><br/>
+              Eğitim paketleri yerel GPU sunucunuz (<code>http://192.168.1.14:8888/lab</code>) ve RunPod / Modal sistemleri için otomatik hazırlanır. Üretilen <code>.ipynb</code> notebook dosyasını doğrudan JupyterLab arayüzüne sürükleyip tek tıkla çalıştırabilirsiniz.
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem', marginBottom: '1.25rem' }}>
               <div>
                 <label style={{ fontSize: '0.8rem', color: '#cbd5e1', fontWeight: 600 }}>Hedef Taban Model (Base Model)</label>
@@ -397,15 +402,15 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
               disabled={isPreparingCloud}
               onClick={handlePrepareCloud}
             >
-              {isPreparingCloud ? '⌛ Paket Hazırlanıyor...' : '🛠️ Bulut GPU Paketi Hazırla (RunPod / Unsloth / Axolotl)'}
+              {isPreparingCloud ? '⌛ Paket Hazırlanıyor...' : '🛠️ JupyterLab & Bulut GPU Paketi Hazırla (.ipynb / .py / .sh)'}
             </button>
 
             {cloudResult && (
               <div style={{ backgroundColor: 'rgba(56, 189, 248, 0.1)', border: '1px solid #38bdf8', padding: '1rem', borderRadius: '0.5rem', marginTop: '1.25rem', color: '#38bdf8', fontSize: '0.85rem' }}>
-                🚀 <strong>Bulut GPU Paketi Oluşturuldu!</strong>
+                🚀 <strong>JupyterLab & Bulut GPU Paketi Oluşturuldu!</strong>
                 <div style={{ marginTop: '0.5rem', color: '#f1f5f9', fontSize: '0.8rem' }}>
                   Paket Dizini: <code>{cloudResult.payload_dir}</code><br/>
-                  Üretilen Dosyalar: <code>{cloudResult.generated_files.join(', ')}</code>
+                  Üretilen Dosyalar ({cloudResult.generated_files.length}): <code>{cloudResult.generated_files.join(', ')}</code>
                 </div>
               </div>
             )}

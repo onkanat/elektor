@@ -16,7 +16,6 @@ class CloudGPUOffloader:
         - Train/Validation loss evaluation & best checkpoint loading
         - Automated GGUF export (q4_k_m) post-training
         """
-        # Clean model name if user accidentally provided a GGUF repo
         clean_model = base_model.replace("-GGUF", "").replace("-gguf", "")
         if "gguf" in base_model.lower():
             clean_model = "Qwen/Qwen3.5-2B" if "2b" in base_model.lower() else "unsloth/Qwen2.5-Coder-7B-Instruct"
@@ -180,6 +179,74 @@ else:
 '''
         return script
 
+    def generate_jupyter_notebook(self, project_id: str, base_model: str, hf_dataset: str) -> dict:
+        """
+        Generates a Jupyter Notebook (.ipynb) payload ready to upload & run in JupyterLab at http://192.168.1.14:8888/lab
+        """
+        unsloth_python = self.generate_unsloth_script(project_id, base_model, hf_dataset)
+        
+        notebook_json = {
+            "cells": [
+                {
+                    "cell_type": "markdown",
+                    "metadata": {},
+                    "source": [
+                        f"# ⚡ Unsloth Fine-Tuning Notebook - Project: {project_id}\n",
+                        f"**Target Model**: `{base_model}`  \n",
+                        f"**Dataset**: `{hf_dataset if hf_dataset else f'onkanat/{project_id}-dataset'}`  \n",
+                        "Designed for local GPU server JupyterLab (`http://192.168.1.14:8888/lab`)."
+                    ]
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "# 1. Environment & Dependency Installation\n",
+                        "!pip install --upgrade pip setuptools wheel\n",
+                        "!pip install --upgrade --force-reinstall --no-cache-dir unsloth unsloth_zoo\n",
+                        "!pip install --upgrade --no-cache-dir \"transformers>=5.0.0\" trl datasets accelerate peft bitsandbytes\n"
+                    ]
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "# 2. Verify GPU & CUDA Setup\n",
+                        "import torch\n",
+                        "print('PyTorch Version:', torch.__version__)\n",
+                        "print('CUDA Available:', torch.cuda.is_available())\n",
+                        "if torch.cuda.is_available():\n",
+                        "    print('GPU Device:', torch.cuda.get_device_name(0))\n",
+                        "    print('BF16 Supported:', torch.cuda.is_bf16_supported())"
+                    ]
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "# 3. Run Unsloth Fine-Tuning & GGUF Export\n",
+                        "import os\n",
+                        "os.environ['EXPORT_GGUF'] = '1'\n\n",
+                        unsloth_python
+                    ]
+                }
+            ],
+            "metadata": {
+                "language_info": {
+                    "name": "python"
+                }
+            },
+            "nbformat": 4,
+            "nbformat_minor": 2
+        }
+        return notebook_json
+
     def generate_axolotl_config(self, project_id: str, hf_dataset: str) -> str:
         """
         Generates Axolotl multi-GPU training configuration.
@@ -234,24 +301,30 @@ save_total_limit: 2
     def prepare_cloud_payload(self, project_id: str, base_model: str = "Qwen/Qwen3.5-2B", hf_dataset: str = "") -> Dict[str, Any]:
         """
         Prepares cloud GPU offloading package in exports/<project_id>/cloud_payload/
+        Includes Python script, Jupyter Notebook (.ipynb), Axolotl YAML, and RunPod shell script.
         """
         target_dir = self.exports_dir / project_id / "cloud_payload"
         target_dir.mkdir(parents=True, exist_ok=True)
 
         unsloth_code = self.generate_unsloth_script(project_id, base_model, hf_dataset)
+        notebook_json = self.generate_jupyter_notebook(project_id, base_model, hf_dataset)
         axolotl_code = self.generate_axolotl_config(project_id, hf_dataset)
 
         unsloth_file = target_dir / "unsloth_finetune.py"
+        notebook_file = target_dir / f"unsloth_finetune_{project_id}.ipynb"
         axolotl_file = target_dir / "axolotl_config.yaml"
 
         with open(unsloth_file, "w", encoding="utf-8") as f:
             f.write(unsloth_code)
 
+        with open(notebook_file, "w", encoding="utf-8") as f:
+            json.dump(notebook_json, f, indent=2, ensure_ascii=False)
+
         with open(axolotl_file, "w", encoding="utf-8") as f:
             f.write(axolotl_code)
 
         runpod_bash = f"""#!/usr/bin/env bash
-# Qwen3.5 / Unsloth High-Speed Cloud GPU Launcher
+# Qwen3.5 / Unsloth High-Speed GPU Launcher for JupyterLab & Remote GPU
 # Generated for Project: {project_id}
 
 set -euo pipefail
@@ -260,7 +333,7 @@ export PYTHONUNBUFFERED=1
 export TOKENIZERS_PARALLELISM=false
 export HF_HOME="${{HF_HOME:-$HOME/.cache/huggingface}}"
 
-echo "🚀 Cloud GPU Fine-Tuning Ortamı Hazırlanıyor..."
+echo "🚀 GPU Fine-Tuning Ortamı Hazırlanıyor..."
 
 if ! command -v nvidia-smi >/dev/null 2>&1; then
     echo "❌ nvidia-smi bulunamadı. CUDA destekli NVIDIA GPU gereklidir."
@@ -286,5 +359,10 @@ python unsloth_finetune.py
             "status": "success",
             "project_id": project_id,
             "payload_dir": str(target_dir),
-            "generated_files": ["unsloth_finetune.py", "axolotl_config.yaml", "run_cloud_gpu.sh"]
+            "generated_files": [
+                "unsloth_finetune.py",
+                f"unsloth_finetune_{project_id}.ipynb",
+                "axolotl_config.yaml",
+                "run_cloud_gpu.sh"
+            ]
         }
