@@ -343,7 +343,10 @@ class ArchiveAnalyzer:
         if not cursor.fetchone():
             return
 
-        limit_val = limit if isinstance(limit, int) and limit > 0 else 50
+        if self.input_mode == "rendergit":
+            limit_val = 10000
+        else:
+            limit_val = limit if isinstance(limit, int) and limit > 0 else 1000
 
         # --- CODE PASS 1: English Code Unit Analysis (Analyzer Model) ---
         cursor.execute("""
