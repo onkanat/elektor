@@ -60,7 +60,7 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadResult, setUploadResult] = useState<any | null>(null);
 
-  const [baseModel, setBaseModel] = useState<string>('unsloth/Qwen2.5-Coder-7B-Instruct');
+  const [baseModel, setBaseModel] = useState<string>('Qwen/Qwen3.5-2B');
   const [isPreparingCloud, setIsPreparingCloud] = useState<boolean>(false);
   const [cloudResult, setCloudResult] = useState<any | null>(null);
 
@@ -383,7 +383,8 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
                   value={baseModel}
                   onChange={(e) => setBaseModel(e.target.value)}
                 >
-                  <option value="unsloth/Qwen2.5-Coder-7B-Instruct">unsloth/Qwen2.5-Coder-7B-Instruct (Kod & SFT için Önerilen)</option>
+                  <option value="Qwen/Qwen3.5-2B">Qwen/Qwen3.5-2B (BF16 LoRA & GGUF Export - Önerilen Hızlı Model)</option>
+                  <option value="unsloth/Qwen2.5-Coder-7B-Instruct">unsloth/Qwen2.5-Coder-7B-Instruct (Kod & SFT için 7B)</option>
                   <option value="unsloth/Llama-3.1-8B-Instruct">unsloth/Llama-3.1-8B-Instruct (Genel SFT / DPO)</option>
                   <option value="unsloth/Qwen2.5-14B-Instruct">unsloth/Qwen2.5-14B-Instruct (Büyük Kod Modeli)</option>
                 </select>
