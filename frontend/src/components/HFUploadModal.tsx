@@ -143,6 +143,8 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
     }
   };
 
+  const [datasetFile, setDatasetFile] = useState<string>('code_sft_dataset.jsonl');
+
   const handlePrepareCloud = async () => {
     setIsPreparingCloud(true);
     setErrorMsg(null);
@@ -156,6 +158,7 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
           project_id: activeProjectId,
           base_model: baseModel,
           hf_dataset: repoId.trim() || '',
+          dataset_file: datasetFile,
         }),
       });
       const data = await resp.json();
@@ -380,7 +383,7 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
               Eğitim paketleri yerel GPU sunucunuz (<code>http://192.168.1.14:8888/lab</code>) ve RunPod / Modal sistemleri için otomatik hazırlanır. Üretilen <code>.ipynb</code> notebook dosyasını doğrudan JupyterLab arayüzüne sürükleyip tek tıkla çalıştırabilirsiniz.
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem', marginBottom: '1.25rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
               <div>
                 <label style={{ fontSize: '0.8rem', color: '#cbd5e1', fontWeight: 600 }}>Hedef Taban Model (Base Model)</label>
                 <select
@@ -392,6 +395,21 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
                   <option value="unsloth/Qwen2.5-Coder-7B-Instruct">unsloth/Qwen2.5-Coder-7B-Instruct (Kod & SFT için 7B)</option>
                   <option value="unsloth/Llama-3.1-8B-Instruct">unsloth/Llama-3.1-8B-Instruct (Genel SFT / DPO)</option>
                   <option value="unsloth/Qwen2.5-14B-Instruct">unsloth/Qwen2.5-14B-Instruct (Büyük Kod Modeli)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', color: '#cbd5e1', fontWeight: 600 }}>Eğitilecek Veri Seti Dosyası (Split)</label>
+                <select
+                  className="form-control"
+                  value={datasetFile}
+                  onChange={(e) => setDatasetFile(e.target.value)}
+                >
+                  <option value="code_sft_dataset.jsonl">code_sft_dataset.jsonl (Kod Tamamlama & SFT - Önerilen)</option>
+                  <option value="tr_code_sft_dataset.jsonl">tr_code_sft_dataset.jsonl (Türkçe Kod SFT)</option>
+                  <option value="sft_dataset.jsonl">sft_dataset.jsonl (Genel SFT)</option>
+                  <option value="dpo_dataset.jsonl">dpo_dataset.jsonl (DPO Tercih Çiftleri)</option>
+                  <option value="auto">Otomatik Algıla (Tüm JSONL Dosyaları)</option>
                 </select>
               </div>
             </div>
@@ -407,8 +425,18 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
 
             {cloudResult && (
               <div style={{ backgroundColor: 'rgba(56, 189, 248, 0.1)', border: '1px solid #38bdf8', padding: '1rem', borderRadius: '0.5rem', marginTop: '1.25rem', color: '#38bdf8', fontSize: '0.85rem' }}>
-                🚀 <strong>JupyterLab & Bulut GPU Paketi Oluşturuldu!</strong>
-                <div style={{ marginTop: '0.5rem', color: '#f1f5f9', fontSize: '0.8rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <strong>🚀 JupyterLab & Bulut GPU Paketi Oluşturuldu!</strong>
+                  <a
+                    href={`/api/cloud/download-notebook?project_id=${activeProjectId}`}
+                    download={`unsloth_finetune_${activeProjectId}.ipynb`}
+                    className="btn btn-emerald"
+                    style={{ textDecoration: 'none', padding: '0.35rem 0.75rem', fontSize: '0.78rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                  >
+                    📥 🪐 Notebook (.ipynb) İndir
+                  </a>
+                </div>
+                <div style={{ color: '#f1f5f9', fontSize: '0.8rem' }}>
                   Paket Dizini: <code>{cloudResult.payload_dir}</code><br/>
                   Üretilen Dosyalar ({cloudResult.generated_files.length}): <code>{cloudResult.generated_files.join(', ')}</code>
                 </div>

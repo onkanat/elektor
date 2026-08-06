@@ -1061,8 +1061,9 @@ def upload_dataset_to_hf(payload: Dict[str, Any] = Body(...)):
 @app.post("/api/cloud/prepare")
 def prepare_cloud_offload(payload: Dict[str, Any] = Body(...)):
     project_id = payload.get("project_id", "")
-    base_model = payload.get("base_model", "unsloth/Qwen2.5-Coder-7B-Instruct")
+    base_model = payload.get("base_model", "Qwen/Qwen3.5-2B")
     hf_dataset = payload.get("hf_dataset", "")
+    dataset_file = payload.get("dataset_file", "")
 
     if not project_id:
         raise HTTPException(status_code=400, detail="project_id alanı zorunludur.")
@@ -1072,10 +1073,22 @@ def prepare_cloud_offload(payload: Dict[str, Any] = Body(...)):
         return offloader.prepare_cloud_payload(
             project_id=project_id,
             base_model=base_model,
-            hf_dataset=hf_dataset
+            hf_dataset=hf_dataset,
+            dataset_file=dataset_file
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Bulut GPU paket hazırlık hatası: {str(e)}")
+
+@app.get("/api/cloud/download-notebook")
+def download_cloud_notebook(project_id: str = Query(...)):
+    target_path = Path("exports") / project_id / "cloud_payload" / f"unsloth_finetune_{project_id}.ipynb"
+    if not target_path.exists():
+        raise HTTPException(status_code=404, detail=f"Jupyter Notebook dosyası bulunamadı. Lütfen önce paketi hazırlayın: {target_path}")
+    return FileResponse(
+        path=target_path,
+        filename=f"unsloth_finetune_{project_id}.ipynb",
+        media_type="application/x-ipynb+json"
+    )
 
 # Mount React frontend static build
 
