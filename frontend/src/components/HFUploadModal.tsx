@@ -50,7 +50,7 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
   onClose,
 }) => {
   const [activeTab, setActiveTab] = useState<'hf' | 'cloud'>('hf');
-  const [repoId, setRepoId] = useState<string>(`onkanat/${activeProjectId}-dataset`);
+  const [repoId, setRepoId] = useState<string>(`onkanat/${activeProjectId || 'sdr_engineers'}-dataset`);
   const [hfToken, setHfToken] = useState<string>('');
   const [isPrivate, setIsPrivate] = useState<boolean>(false);
 
@@ -60,6 +60,7 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadResult, setUploadResult] = useState<any | null>(null);
 
+  const [datasetFile, setDatasetFile] = useState<string>('code_sft_dataset.jsonl');
   const [baseModel, setBaseModel] = useState<string>('Qwen/Qwen3.5-2B');
   const [isPreparingCloud, setIsPreparingCloud] = useState<boolean>(false);
   const [cloudResult, setCloudResult] = useState<any | null>(null);
@@ -68,12 +69,24 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
 
   // Auto-preset repoId whenever activeProjectId changes or modal opens
   useEffect(() => {
-    if (activeProjectId && isOpen) {
-      setRepoId(`onkanat/${activeProjectId}-dataset`);
+    if (isOpen) {
+      const pid = activeProjectId || 'sdr_engineers';
+      setRepoId(`onkanat/${pid}-dataset`);
       setAuditReport(null);
       setUploadResult(null);
+      setErrorMsg(null);
     }
   }, [activeProjectId, isOpen]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -93,7 +106,7 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          project_id: activeProjectId,
+          project_id: activeProjectId || 'sdr_engineers',
           repo_id: repoId.trim(),
           hf_token: hfToken.trim() || undefined,
           private: isPrivate,
@@ -125,7 +138,7 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          project_id: activeProjectId,
+          project_id: activeProjectId || 'sdr_engineers',
           repo_id: repoId.trim(),
           hf_token: hfToken.trim() || undefined,
           private: isPrivate,
@@ -142,8 +155,6 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
       setIsUploading(false);
     }
   };
-
-  const [datasetFile, setDatasetFile] = useState<string>('code_sft_dataset.jsonl');
 
   const handlePrepareCloud = async () => {
     setIsPreparingCloud(true);
