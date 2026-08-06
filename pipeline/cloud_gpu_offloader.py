@@ -172,14 +172,14 @@ model = FastLanguageModel.get_peft_model(
 )
 
 split_dataset = dataset.train_test_split(test_size=VALIDATION_RATIO, seed=SEED, shuffle=True)
-train_data = split_dataset["train"].map(lambda x: build_chat_text(x, tokenizer))
-eval_data = split_dataset["test"].map(lambda x: build_chat_text(x, tokenizer))
+train_data = split_dataset["train"].map(lambda x: build_chat_text(x, tokenizer), remove_columns=dataset.column_names)
+eval_data = split_dataset["test"].map(lambda x: build_chat_text(x, tokenizer), remove_columns=dataset.column_names)
 
 training_args = SFTConfig(
     output_dir=OUTPUT_DIR,
     max_seq_length=MAX_SEQ_LENGTH,
     dataset_text_field="text",
-    dataset_num_proc=2,
+    dataset_num_proc=1,
     per_device_train_batch_size=1 if is_small_model else 2,
     per_device_eval_batch_size=1,
     gradient_accumulation_steps=8 if is_small_model else 4,
@@ -207,6 +207,10 @@ trainer = SFTTrainer(
     tokenizer=tokenizer,
     train_dataset=train_data,
     eval_dataset=eval_data,
+    dataset_text_field="text",
+    max_seq_length=MAX_SEQ_LENGTH,
+    dataset_num_proc=1,
+    packing=False,
     args=training_args,
 )
 
@@ -392,15 +396,15 @@ else:
                         "        text = f'### Instruction:\\n{user_content}\\n\\n### Response:\\n{output}'\n",
                         "    return {'text': text}\n\n",
                         "split_dataset = dataset.train_test_split(test_size=0.05, seed=3407, shuffle=True)\n",
-                        "train_data = split_dataset['train'].map(lambda x: build_chat_text(x, tokenizer))\n",
-                        "eval_data = split_dataset['test'].map(lambda x: build_chat_text(x, tokenizer))\n\n",
+                        "train_data = split_dataset['train'].map(lambda x: build_chat_text(x, tokenizer), remove_columns=dataset.column_names)\n",
+                        "eval_data = split_dataset['test'].map(lambda x: build_chat_text(x, tokenizer), remove_columns=dataset.column_names)\n\n",
                         f"OUTPUT_DIR = 'outputs/{project_id}-sft'\n",
                         f"LORA_OUTPUT_DIR = 'outputs/{project_id}-lora'\n\n",
                         "training_args = SFTConfig(\n",
                         "    output_dir=OUTPUT_DIR,\n",
                         "    max_seq_length=MAX_SEQ_LENGTH,\n",
                         "    dataset_text_field='text',\n",
-                        "    dataset_num_proc=2,\n",
+                        "    dataset_num_proc=1,\n",
                         "    per_device_train_batch_size=1 if is_small_model else 2,\n",
                         "    per_device_eval_batch_size=1,\n",
                         "    gradient_accumulation_steps=8 if is_small_model else 4,\n",
@@ -427,6 +431,10 @@ else:
                         "    tokenizer=tokenizer,\n",
                         "    train_dataset=train_data,\n",
                         "    eval_dataset=eval_data,\n",
+                        "    dataset_text_field='text',\n",
+                        "    max_seq_length=MAX_SEQ_LENGTH,\n",
+                        "    dataset_num_proc=1,\n",
+                        "    packing=False,\n",
                         "    args=training_args,\n",
                         ")\n\n",
                         "print('🔥 Fine-Tuning Eğitimi Başlatılıyor...')\n",
