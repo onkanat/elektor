@@ -67,7 +67,7 @@ elektor/
   ├── database/                 # Dedicated SQLite database directory (*.db)
   ├── exports/                  # Project-isolated dataset export directory
   ├── frontend/                 # React + Vite Web UI with Hata Ayıklama Konsolu
-  ├── .antigravity/             # Roadmap, walkthroughs, and architecture docs
+  ├── .antigravity/             # System architecture reference docs (ARCHITECTURE.md)
   └── README.md
 ```
 
