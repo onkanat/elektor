@@ -221,64 +221,36 @@ def create_project(payload: Dict[str, Any] = Body(...)):
 
     return {"status": "created", "project_id": project_id, "config": new_config}
 
-@app.get("/api/health")
-def health_check():
-    config = get_config()
-    ollama_url = config.get("ollama_url", "http://localhost:11434")
-    
-    # Check Ollama connectivity
-    ollama_status = "offline"
-    available_models = []
-    try:
-        client = ollama.Client(host=ollama_url)
-        models_resp = client.list()
-        if isinstance(models_resp, dict) and "models" in models_resp:
-            available_models = [m.get("name") or m.get("model") for m in models_resp["models"]]
-        elif hasattr(models_resp, "models"):
-            available_models = [getattr(m, "model", getattr(m, "name", str(m))) for m in models_resp.models]
-        ollama_status = "online"
-    except Exception as e:
-        ollama_status = f"offline ({str(e)})"
-        
-    db_file = Path(config.get("db_path", "database/sdr_engineers.db"))
-    qdrant_path = Path(config.get("qdrant_db_path", "qdrant_sdr"))
+OLLAMA_CACHE = {
+    "last_check": 0.0,
+    "status": "offline",
+    "available_models": [],
+    "vram_models": [],
+    "ollama_online": False
+}
 
-    return {
-        "status": "ok",
-        "port": 3456,
-        "ollama_status": ollama_status,
-        "ollama_url": ollama_url,
-        "available_models": available_models,
-        "sqlite_exists": db_file.exists(),
-        "qdrant_exists": qdrant_path.exists(),
-        "config": config
-    }
+async def update_ollama_cache(ollama_url: str):
+    now = time.time()
+    if now - OLLAMA_CACHE["last_check"] < 5.0:
+        return OLLAMA_CACHE
 
-@app.get("/api/system/metrics")
-def get_system_metrics():
-    config = get_config()
-    ollama_url = config.get("ollama_url", "http://localhost:11434")
-    
-    # System RAM & CPU
-    cpu_percent = psutil.cpu_percent(interval=None)
-    vm = psutil.virtual_memory()
-    mem_info = {
-        "total_mb": round(vm.total / (1024 * 1024), 1),
-        "used_mb": round(vm.used / (1024 * 1024), 1),
-        "available_mb": round(vm.available / (1024 * 1024), 1),
-        "percent": vm.percent
-    }
-    
-    # Ollama Loaded Models & VRAM Usage
-    vram_models = []
-    ollama_online = False
     try:
-        with httpx.Client(timeout=3.0) as client:
-            resp = client.get(f"{ollama_url}/api/ps")
-            if resp.status_code == 200:
-                ollama_online = True
-                data = resp.json()
+        async with httpx.AsyncClient(timeout=1.0) as client:
+            resp_tags = await client.get(f"{ollama_url}/api/tags")
+            available_models = []
+            if resp_tags.status_code == 200:
+                data = resp_tags.json()
                 for m in data.get("models", []):
+                    available_models.append(m.get("name") or m.get("model"))
+                OLLAMA_CACHE["status"] = "online"
+                OLLAMA_CACHE["ollama_online"] = True
+                OLLAMA_CACHE["available_models"] = available_models
+
+            vram_models = []
+            resp_ps = await client.get(f"{ollama_url}/api/ps")
+            if resp_ps.status_code == 200:
+                data_ps = resp_ps.json()
+                for m in data_ps.get("models", []):
                     vram_bytes = m.get("size_vram", 0) or m.get("size", 0)
                     vram_models.append({
                         "name": m.get("name") or m.get("model"),
@@ -288,14 +260,54 @@ def get_system_metrics():
                         "vram_gb": round(vram_bytes / (1024 * 1024 * 1024), 2),
                         "expires_at": m.get("expires_at")
                     })
-    except Exception:
-        ollama_online = False
+            OLLAMA_CACHE["vram_models"] = vram_models
+    except Exception as e:
+        OLLAMA_CACHE["status"] = f"offline ({str(e)})"
+        OLLAMA_CACHE["ollama_online"] = False
+
+    OLLAMA_CACHE["last_check"] = now
+    return OLLAMA_CACHE
+
+@app.get("/api/health")
+async def health_check():
+    config = get_config()
+    ollama_url = config.get("ollama_url", "http://localhost:11434")
+    cache = await update_ollama_cache(ollama_url)
+        
+    db_file = Path(config.get("db_path", "database/sdr_engineers.db"))
+    qdrant_path = Path(config.get("qdrant_db_path", "qdrant_sdr"))
+
+    return {
+        "status": "ok",
+        "port": 3456,
+        "ollama_status": cache["status"],
+        "ollama_url": ollama_url,
+        "available_models": cache["available_models"],
+        "sqlite_exists": db_file.exists(),
+        "qdrant_exists": qdrant_path.exists(),
+        "config": config
+    }
+
+@app.get("/api/system/metrics")
+async def get_system_metrics():
+    config = get_config()
+    ollama_url = config.get("ollama_url", "http://localhost:11434")
+    cache = await update_ollama_cache(ollama_url)
+    
+    cpu_percent = psutil.cpu_percent(interval=None)
+    vm = psutil.virtual_memory()
+    mem_info = {
+        "total_mb": round(vm.total / (1024 * 1024), 1),
+        "used_mb": round(vm.used / (1024 * 1024), 1),
+        "available_mb": round(vm.available / (1024 * 1024), 1),
+        "percent": vm.percent
+    }
 
     return {
         "cpu_percent": cpu_percent,
         "memory": mem_info,
-        "ollama_online": ollama_online,
-        "vram_models": vram_models
+        "ollama_online": cache["ollama_online"],
+        "vram_models": cache["vram_models"]
     }
 
 @app.get("/api/config")
