@@ -20,14 +20,26 @@ class DatasetBuilder:
         self.dataset_name_tr = self.config.get("dataset_name_tr", "Döküman")
 
     def _save_jsonl_and_parquet(self, file_path: Path, records: list):
+        valid_records = []
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            inst = rec.get("instruction") or rec.get("prompt") or ""
+            out = rec.get("output") or rec.get("chosen") or ""
+            if isinstance(rec.get("messages"), list) and len(rec["messages"]) >= 2:
+                valid_records.append(rec)
+            elif (isinstance(inst, str) and inst.strip()) and (isinstance(out, str) and out.strip()):
+                valid_records.append(rec)
+
         with open(file_path, "w", encoding="utf-8") as f:
-            for rec in records:
+            for rec in valid_records:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        if records:
+
+        if valid_records:
             try:
                 import pandas as pd
                 parquet_path = file_path.with_suffix(".parquet")
-                df = pd.DataFrame(records)
+                df = pd.DataFrame(valid_records)
                 df.to_parquet(parquet_path, engine="pyarrow", index=False)
             except Exception as e:
                 print(f"Warning: Parquet conversion error for {file_path.name}: {e}")
