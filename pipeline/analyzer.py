@@ -294,12 +294,27 @@ class ArchiveAnalyzer:
         text_block.append(f"Title: {title}")
         text_block.append(f"Summary: {summary}")
         for idx, item in enumerate(sft_qa_list):
-            text_block.append(f"Q{idx+1}: {item.get('question', '')}")
-            text_block.append(f"A{idx+1}: {item.get('answer', '')}")
+            if isinstance(item, dict):
+                q_txt = item.get('question', '')
+                a_txt = item.get('answer', '')
+            else:
+                q_txt = str(item)
+                a_txt = ""
+            text_block.append(f"Q{idx+1}: {q_txt}")
+            text_block.append(f"A{idx+1}: {a_txt}")
+            
         for idx, item in enumerate(dpo_pairs_list):
-            text_block.append(f"DPO_Q: {item.get('question', '')}")
-            text_block.append(f"DPO_Chosen: {item.get('chosen', '')}")
-            text_block.append(f"DPO_Rejected: {item.get('rejected', '')}")
+            if isinstance(item, dict):
+                q_txt = item.get('question', '')
+                c_txt = item.get('chosen', '')
+                r_txt = item.get('rejected', '')
+            else:
+                q_txt = str(item)
+                c_txt = ""
+                r_txt = ""
+            text_block.append(f"DPO_Q: {q_txt}")
+            text_block.append(f"DPO_Chosen: {c_txt}")
+            text_block.append(f"DPO_Rejected: {r_txt}")
             
         full_text = "\n\n".join(text_block)
         
@@ -784,7 +799,9 @@ class ArchiveAnalyzer:
                         self.conn.commit()
                         count2 += 1
                     except Exception as e:
-                        print(f"Error in Pass 2 for article {article_id}: {e}")
+                        err_msg = f"Error in Pass 2 for article {article_id}: {e}"
+                        print(f"  {err_msg}")
+                        self.logger.error(err_msg, module="analyzer")
                         self.conn.rollback()
                         
                 print(f"Pass 2 complete. Translated {count2} articles into Turkish using TranslateGemma.")
