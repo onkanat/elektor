@@ -739,7 +739,10 @@ def simulate_pre_finetuning_impact(payload: Dict[str, Any] = Body(...)):
 
     # 2. Call BASE Model (Zero-Shot - Ham Model)
     base_response = ""
+    base_elapsed = 0.0
+    base_res = None
     try:
+        b_start = time.time()
         client = ollama.Client(host=ollama_url, timeout=300.0)
         base_res = client.chat(
             model=model,
@@ -749,13 +752,20 @@ def simulate_pre_finetuning_impact(payload: Dict[str, Any] = Body(...)):
             ],
             keep_alive="60m"
         )
-        base_response = base_res.get("message", {}).get("content", "")
+        base_elapsed = round(time.time() - b_start, 2)
+        if isinstance(base_res, dict):
+            base_response = base_res.get("message", {}).get("content", "")
+        else:
+            base_response = getattr(getattr(base_res, "message", None), "content", "")
     except Exception as e:
         base_response = f"[Ham Model Hatası]: {str(e)}"
 
     # 3. Call SIMULATED FT Model (RAG & SFT/DPO Context Injected)
     simulated_response = ""
+    sim_elapsed = 0.0
+    sim_res = None
     try:
+        s_start = time.time()
         client = ollama.Client(host=ollama_url, timeout=300.0)
         sim_system_prompt = f"{system_prompt}\n\n=== RELEVANT DOMAIN KNOWLEDGE & SFT CONTEXT ===\n{full_context_str}"
         sim_res = client.chat(
@@ -766,12 +776,24 @@ def simulate_pre_finetuning_impact(payload: Dict[str, Any] = Body(...)):
             ],
             keep_alive="60m"
         )
-        simulated_response = sim_res.get("message", {}).get("content", "")
+        sim_elapsed = round(time.time() - s_start, 2)
+        if isinstance(sim_res, dict):
+            simulated_response = sim_res.get("message", {}).get("content", "")
+        else:
+            simulated_response = getattr(getattr(sim_res, "message", None), "content", "")
     except Exception as e:
         simulated_response = f"[Simüle Model Hatası]: {str(e)}"
 
     # 4. Evaluate Delta (Knowledge Gain & Fine-Tuning Impact)
     eval_result = evaluate_knowledge_gap(base_response, simulated_response, full_context_str)
+
+    base_words = len(base_response.split()) if base_response else 0
+    base_eval_count = getattr(base_res, "eval_count", None) if hasattr(base_res, "eval_count") else (base_res.get("eval_count") if isinstance(base_res, dict) else None)
+    base_tokens = base_eval_count if base_eval_count else int(base_words * 1.35)
+
+    sim_words = len(simulated_response.split()) if simulated_response else 0
+    sim_eval_count = getattr(sim_res, "eval_count", None) if hasattr(sim_res, "eval_count") else (sim_res.get("eval_count") if isinstance(sim_res, dict) else None)
+    sim_tokens = sim_eval_count if sim_eval_count else int(sim_words * 1.35)
 
     return {
         "prompt": user_prompt,
@@ -779,7 +801,17 @@ def simulate_pre_finetuning_impact(payload: Dict[str, Any] = Body(...)):
         "base_response": base_response,
         "simulated_response": simulated_response,
         "tool_logs": tool_logs,
-        "evaluation": eval_result
+        "evaluation": eval_result,
+        "base_stats": {
+            "elapsed_seconds": base_elapsed,
+            "word_count": base_words,
+            "token_count": base_tokens
+        },
+        "simulated_stats": {
+            "elapsed_seconds": sim_elapsed,
+            "word_count": sim_words,
+            "token_count": sim_tokens
+        }
     }
 
 @app.get("/api/readme")

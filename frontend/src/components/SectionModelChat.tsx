@@ -365,6 +365,12 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
                         <div style={{ fontSize: '0.83rem', color: '#cbd5e1', lineHeight: 1.6 }}>
                           {renderHighlightedText(sim.base_response)}
                         </div>
+                        {/* Ham Model Footnote Stats */}
+                        <div style={{ marginTop: '0.75rem', paddingTop: '0.4rem', borderTop: '1px solid rgba(239, 68, 68, 0.2)', fontSize: '0.72rem', color: '#94a3b8', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                          <span>⏱️ <strong>{sim.base_stats?.elapsed_seconds || 0}</strong> sn</span>
+                          <span>📝 <strong>{sim.base_stats?.word_count || 0}</strong> kelime</span>
+                          <span>🔤 ~<strong>{sim.base_stats?.token_count || 0}</strong> token</span>
+                        </div>
                       </div>
 
                       {/* Right: Simulated FT Model */}
@@ -375,6 +381,12 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
                         </div>
                         <div style={{ fontSize: '0.83rem', color: '#f8fafc', lineHeight: 1.6 }}>
                           {renderHighlightedText(sim.simulated_response)}
+                        </div>
+                        {/* Simüle Model Footnote Stats */}
+                        <div style={{ marginTop: '0.75rem', paddingTop: '0.4rem', borderTop: '1px solid rgba(16, 185, 129, 0.2)', fontSize: '0.72rem', color: '#94a3b8', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                          <span>⏱️ <strong>{sim.simulated_stats?.elapsed_seconds || 0}</strong> sn</span>
+                          <span>📝 <strong>{sim.simulated_stats?.word_count || 0}</strong> kelime</span>
+                          <span>🔤 ~<strong>{sim.simulated_stats?.token_count || 0}</strong> token</span>
                         </div>
                       </div>
                     </div>
