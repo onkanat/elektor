@@ -71,3 +71,6 @@ graph TD
 ### 📌 FAZ 6: Proje Gezgini Entegre System Prompt & Persona Editörü - [TAMAMLANDI]
 - **Görsel Editör Arayüzü (`prompt.html`)**: `/Users/hakankilicaslan/taslak/prompt.html` şablonu "Proje Gezgini & Çoklu Veri Setleri" modalı içerisinden çağrılabilir interaktif bir **Developer System Prompt, Persona & Tool Schema Editörüne** dönüştürülmüştür.
 - **Şablon Kütüphanesi & Persona Motoru (`system_prompts`)**: `/Users/hakankilicaslan/Git/system_prompts` reposundaki `persona_map.yaml` ve `prompts.json` yapısı backend uç noktası (`/api/personas`) ile bağlanarak hazır uzmanlık personoları (Octave Matematik, C++ Algoritma Uzmanı, Mekanik Mühendisi, SDR Uzmanı) seçilebilir ve proje bazlı düzenlenebilir hale getirilmiştir.
+
+### 📌 FAZ 7: HF Serverless Inference & ZeroGPU Hibrit Fallback Motoru - [GELECEK VİZYONU]
+- **Sıfır Donanım Maliyeti**: Yerel GPU sunucusu (`192.168.1.14:11434`) çevrimdışı veya yoğun olduğunda, sentezleme isteklerini otomatik olarak ücretsiz Hugging Face Serverless Inference API uç noktalarına (`Qwen/Qwen2.5-72B-Instruct`, `Llama-3.3-70B-Instruct`) veya HF Spaces ZeroGPU (A100/H100) ortamına yönlendirerek kesintisizsentetik veri üretimi sağlama.

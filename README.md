@@ -16,6 +16,7 @@ Originally built for the Elektor Magazine Archive (1974–2025), the pipeline ha
 | **FAZ 4** | **Hugging Face Otomatik Dağıtım & Cloud GPU Offloading**: Birleştirilmiş master veri setlerinin Hugging Face Hub ortamına 2 aşamalı güvenlik denetimi ile aktarımı ve RunPod/Unsloth/Axolotl bulut GPU paket üreticisi. | ✅ **Tamamlandı** |
 | **FAZ 5** | **Proje Bazlı İzole Hata & Uyarı Log Sistemi**: Her proje ihraç dizininde (`exports/<project_id>/errors_and_warnings.log`) yalnızca `WARNING` ve `ERROR` seviyelerindeki günlükleri tutan hafif log motoru. | ✅ **Tamamlandı** |
 | **FAZ 6** | **Proje Gezgini Entegre System Prompt & Persona Editörü**: `prompt.html` şablonunun Proje Gezgini modalına entegrasyonu ve `system_prompts` (`persona_map.yaml`) şablon motoru. | ✅ **Tamamlandı** |
+| **FAZ 7** | **HF Serverless Inference & ZeroGPU Hibrit Fallback Motoru**: Yerel GPU (`192.168.1.14`) çevrimdışı/yoğun olduğunda HF Serverless Inference API ve ZeroGPU Spaces üzerine otomatik istek yönlendirme. | 💡 **Gelecek Vizyonu** |
 
 ---
 
