@@ -145,6 +145,11 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
   const handleSendMessage = async () => {
     if (!inputPrompt.trim() || isSending) return;
 
+    const targetModel = (selectedModel || config.model_analyzer || 'qwen3.6:27b-mtp-q4_K_M').trim();
+    if (!selectedModel) {
+      setSelectedModel(targetModel);
+    }
+
     const userMsg: ChatMessage = { role: 'user', content: inputPrompt };
     const updatedMessages = [...messages, userMsg];
     setMessages(updatedMessages);
@@ -158,7 +163,7 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: selectedModel,
+          model: targetModel,
           messages: apiMessages,
           system_prompt: systemPrompt,
         }),
@@ -187,6 +192,11 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
   const handleRunSimulation = async () => {
     if (!inputPrompt.trim() || isSimulating) return;
 
+    const targetModel = (selectedModel || config.model_analyzer || 'qwen3.6:27b-mtp-q4_K_M').trim();
+    if (!selectedModel) {
+      setSelectedModel(targetModel);
+    }
+
     const promptText = inputPrompt;
     setInputPrompt('');
     setIsSimulating(true);
@@ -196,7 +206,7 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: selectedModel,
+          model: targetModel,
           prompt: promptText,
           system_prompt: systemPrompt,
         }),

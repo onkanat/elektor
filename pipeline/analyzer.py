@@ -27,6 +27,8 @@ class ArchiveAnalyzer:
         self.generate_multi_turn_chat = self.config.get("generate_multi_turn_chat", True)
         
         # Connect to Ollama with 300s timeout for 35B models
+        from pipeline.project_logger import get_project_logger
+        self.logger = get_project_logger()
         self.client = ollama.Client(host=self.ollama_url, timeout=300.0)
         
         # Connect/Initialize SQLite database with WAL mode and timeout
@@ -36,8 +38,9 @@ class ArchiveAnalyzer:
     def call_ollama_chat_with_retry(self, model, messages, options=None, format=None, keep_alive="30m", max_retries=3):
         """Executes an Ollama chat request with automatic retry and exponential backoff on timeouts/failures"""
         import time
+        target_model = (model or self.model_name or "qwen3.6:27b-mtp-q4_K_M").strip()
         chat_kwargs = {
-            "model": model,
+            "model": target_model,
             "messages": messages,
             "keep_alive": keep_alive
         }
@@ -51,13 +54,24 @@ class ArchiveAnalyzer:
                 response = self.client.chat(**chat_kwargs)
                 return response
             except Exception as e:
-                print(f"  Ollama Chat Warning (Attempt {attempt}/{max_retries} for model '{model}'): {e}")
+                warn_msg = f"Ollama Chat Warning (Attempt {attempt}/{max_retries} for model '{target_model}'): {e}"
+                print(f"  {warn_msg}")
+                self.logger.warning(warn_msg, module="analyzer")
+                
+                # Re-create client connection on failure to handle server reconnects/restarts
+                try:
+                    self.client = ollama.Client(host=self.ollama_url, timeout=300.0)
+                except Exception as c_err:
+                    self.logger.error(f"Failed to recreate Ollama client: {c_err}", module="analyzer")
+                    
                 if attempt < max_retries:
                     sleep_sec = attempt * 5
                     print(f"  Retrying in {sleep_sec} seconds...")
                     time.sleep(sleep_sec)
                 else:
-                    print(f"  Ollama Chat Failed for '{model}' after {max_retries} attempts.")
+                    err_msg = f"Ollama Chat Failed for '{target_model}' after {max_retries} attempts."
+                    print(f"  {err_msg}")
+                    self.logger.error(err_msg, module="analyzer")
                     return None
 
 

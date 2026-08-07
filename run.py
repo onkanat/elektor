@@ -8,6 +8,7 @@ from pipeline.extractor import ArchiveExtractor
 from pipeline.analyzer import ArchiveAnalyzer
 from pipeline.vector_store import ArchiveVectorStore
 from pipeline.dataset_builder import DatasetBuilder
+from pipeline.project_logger import setup_global_project_logging, get_project_logger
 
 def parse_limit(limit_str):
     """Parses limit parameter. Supports integer (e.g. 5), range (e.g. '1000:2000'), or 'all'/'none' for no limit."""
@@ -137,6 +138,8 @@ Examples:
     if not args.command:
         parser.print_help()
         sys.exit(1)
+        
+    setup_global_project_logging()
         
     if getattr(args, "reset", False):
         reset_pipeline_data()

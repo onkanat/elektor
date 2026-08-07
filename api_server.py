@@ -237,7 +237,7 @@ async def update_ollama_cache(ollama_url: str):
         return OLLAMA_CACHE
 
     try:
-        async with httpx.AsyncClient(timeout=1.0) as client:
+        async with httpx.AsyncClient(timeout=3.0) as client:
             resp_tags = await client.get(f"{ollama_url}/api/tags")
             available_models = []
             if resp_tags.status_code == 200:
@@ -338,13 +338,17 @@ def update_config(data: Dict[str, Any] = Body(...)):
 def run_pipeline_process(cmd: str, limit: Optional[str] = None, reset: bool = False):
     global pipeline_state
     
+    current_cfg = get_config()
+    current_pid = current_cfg.get("project_id", "default_project")
+    setup_global_project_logging(current_pid)
+
     with pipeline_lock:
         pipeline_state["status"] = "running"
         pipeline_state["command"] = cmd
         pipeline_state["start_time"] = time.time()
         pipeline_state["end_time"] = None
         pipeline_state["exit_code"] = None
-        pipeline_state["logs"] = [f"=== Starting pipeline subcommand: '{cmd}' (Limit: {limit}, Reset: {reset}) ==="]
+        pipeline_state["logs"] = [f"=== Starting pipeline subcommand: '{cmd}' (Limit: {limit}, Reset: {reset}, Project: {current_pid}) ==="]
 
     args = ["python3.11", "run.py", cmd]
     if limit:
@@ -648,7 +652,11 @@ def search_qdrant(payload: Dict[str, Any] = Body(...)):
 def chat_with_analyzer(payload: Dict[str, Any] = Body(...)):
     config = get_config()
     ollama_url = config.get("ollama_url", "http://localhost:11434")
-    model = payload.get("model") or config.get("model_analyzer", "qwen3.6:27b-mtp-q4_K_M")
+    raw_model = payload.get("model") or config.get("model_analyzer")
+    if not raw_model or not str(raw_model).strip():
+        raw_model = "qwen3.6:27b-mtp-q4_K_M"
+    model = str(raw_model).strip()
+    
     messages = payload.get("messages", [])
     system_prompt = payload.get("system_prompt") or config.get("llm_persona", "")
 
@@ -675,14 +683,20 @@ def chat_with_analyzer(payload: Dict[str, Any] = Body(...)):
             "message": {"role": "assistant", "content": reply_content}
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ollama chat error: {str(e)}")
+        err_detail = f"Ollama chat error (Model '{model}'): {str(e)}"
+        get_project_logger().error(err_detail, module="api_chat")
+        raise HTTPException(status_code=500, detail=err_detail)
 
 # Section C: Pre-Fine-Tuning Impact Simulator Uç Noktası
 @app.post("/api/chat/simulate")
 def simulate_pre_finetuning_impact(payload: Dict[str, Any] = Body(...)):
     config = get_config()
     ollama_url = config.get("ollama_url", "http://localhost:11434")
-    model = payload.get("model") or config.get("model_analyzer", "qwen3.6:27b-mtp-q4_K_M")
+    raw_model = payload.get("model") or config.get("model_analyzer")
+    if not raw_model or not str(raw_model).strip():
+        raw_model = "qwen3.6:27b-mtp-q4_K_M"
+    model = str(raw_model).strip()
+
     user_prompt = payload.get("prompt", "").strip()
     system_prompt = payload.get("system_prompt") or config.get("llm_persona", "")
     
