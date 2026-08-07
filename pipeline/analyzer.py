@@ -174,13 +174,7 @@ class ArchiveAnalyzer:
         result = self.call_ollama_json(system_prompt, user_prompt, model=self.model_name, num_predict=8192)
         
         if not result:
-            print(f"  Warning: Failed to parse/receive Qwen response for article {article_id}. Using default/fallback.")
-            result = {
-                "summary": "Summary unavailable.",
-                "topics": [],
-                "sft_qa": [],
-                "dpo_pair": {"question": "", "chosen": "", "rejected": ""}
-            }
+            raise RuntimeError(f"Ollama model '{self.model_name}' failed to generate analysis for article {article_id}.")
             
         sft_qa = result.get("sft_qa", [])
         dpo_pair = result.get("dpo_pair", {})
@@ -692,7 +686,7 @@ class ArchiveAnalyzer:
         if self.direct_tr_generation:
             where_cond = "(e.id IS NULL OR e.tr_sft_qa IS NULL OR e.tr_sft_qa = '')"
         else:
-            where_cond = "e.id IS NULL"
+            where_cond = "(e.id IS NULL OR e.sft_qa IS NULL OR e.sft_qa = '' OR e.sft_qa = '[]' OR e.summary = 'Summary unavailable.')"
 
         cursor.execute(f"""
             SELECT a.id, a.title, a.extracted_text 
