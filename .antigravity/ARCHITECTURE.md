@@ -51,6 +51,7 @@ graph TD
 - `chat_dataset.jsonl` / `.parquet`: İngilizce çok turlu teknik diyaloglar (`messages`).
 - `tr_chat_dataset.jsonl` / `.parquet`: Türkçe çok turlu teknik diyaloglar.
 - `cloud_payload/`: JupyterLab `.ipynb` notebook ve Unsloth fine-tuning betikleri.
+- `errors_and_warnings.log`: Projeye özel izole `WARNING` ve `ERROR` günlük dosyası (Faz 5).
 
 ---
 
@@ -59,3 +60,14 @@ graph TD
 - **Taban Model**: `Qwen/Qwen3.5-2B` (BF16 LoRA & GGUF export) veya `unsloth/Qwen2.5-Coder-7B-Instruct`.
 - **Hız Optimizasyonu**: `lora_dropout = 0`, `target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]`.
 - **Güvenlik**: `remove_columns=dataset.column_names`, `dataset_num_proc=1`, `packing=False`.
+
+---
+
+## 🔮 5. Gelecek Yol Haritası (Roadmap & Planned Phases)
+
+### 📌 FAZ 5: Proje Bazlı İzole Hata & Uyarı Günlük Sistemi (`pipeline/project_logger.py`) - [PLANLANDI]
+- **Proje Dizin İzolasyonu**: Tüm iş akışı (verbose logs) yerine **sadece hata (`ERROR`) ve uyarı (`WARNING`)** seviyesindeki olayları her projenin kendi ihraç klasöründe (`exports/<project_id>/errors_and_warnings.log`) saklayan modüler günlükleme altyapısı.
+
+### 📌 FAZ 6: Proje Gezgini Entegre System Prompt & Persona Editörü - [PLANLANDI]
+- **Görsel Editör Arayüzü (`prompt.html`)**: `/Users/hakankilicaslan/taslak/prompt.html` şablonu "Proje Gezgini & Çoklu Veri Setleri" modalı içerisinden çağrılabilir interaktif bir **Developer System Prompt, Persona & Tool Schema Editörüne** dönüştürülecektir.
+- **Şablon Kütüphanesi & Persona Motoru (`system_prompts`)**: `/Users/hakankilicaslan/Git/system_prompts` reposundaki `persona_map.yaml` ve `prompts.json` yapısı backend uç noktası (`/api/personas`) ile bağlanarak hazır uzmanlık personoları (Octave Matematik, C++ Algoritma Uzmanı, Mekanik Mühendisi, SDR Uzmanı) seçilebilir ve proje bazlı düzenlenebilir hale getirilecektir.
