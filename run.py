@@ -1,5 +1,9 @@
 import argparse
 import sys
+import os
+import json
+import shutil
+from pathlib import Path
 from pipeline.extractor import ArchiveExtractor
 from pipeline.analyzer import ArchiveAnalyzer
 from pipeline.vector_store import ArchiveVectorStore
@@ -27,6 +31,53 @@ def parse_limit(limit_str):
         except ValueError:
             raise argparse.ArgumentTypeError(f"Invalid limit: {limit_str}. Must be an integer, range 'start:end', or 'all'.")
 
+def reset_pipeline_data(config_path="config.json"):
+    """Resets SQLite DB, Qdrant DB folder, and all exported files (.jsonl, .parquet, .log, payloads)."""
+    print("\n--- Resetting pipeline data (clean wipe) ---")
+    if not Path(config_path).exists():
+        print(f"Warning: Config file '{config_path}' not found. Skipping reset.")
+        return
+        
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+        
+    # 1. Delete SQLite Database file
+    db_file_str = config.get("db_path")
+    if db_file_str:
+        db_file = Path(db_file_str)
+        if db_file.exists():
+            print(f"Deleting SQLite database: {db_file}")
+            try:
+                db_file.unlink()
+            except Exception as e:
+                print(f"Warning: Could not delete SQLite database: {e}")
+                
+    # 2. Delete Qdrant Database folder
+    qdrant_dir_str = config.get("qdrant_db_path")
+    if qdrant_dir_str:
+        qdrant_dir = Path(qdrant_dir_str)
+        if qdrant_dir.exists():
+            print(f"Deleting Qdrant database folder: {qdrant_dir}")
+            try:
+                shutil.rmtree(qdrant_dir)
+            except Exception as e:
+                print(f"Warning: Could not delete Qdrant folder: {e}")
+            
+    # 3. Clear Export Directory (JSONL, Parquet, Logs, Subdirectories)
+    db_name = Path(config.get("db_path", "database/elektor_archive.db")).stem
+    export_dir = Path("exports") / db_name
+    if export_dir.exists():
+        print(f"Clearing exports/{db_name} directory (JSONL, Parquet, Logs)...")
+        for item in export_dir.glob("*"):
+            try:
+                if item.is_file() or item.is_symlink():
+                    item.unlink()
+                elif item.is_dir():
+                    shutil.rmtree(item)
+            except Exception as e:
+                print(f"Warning: Could not delete export item {item.name}: {e}")
+    print("Reset completed successfully. Starting pipeline from clean state.\n")
+
 def main():
     parser = argparse.ArgumentParser(
         description="Universal PDF & RAG Dataset Processing Pipeline CLI",
@@ -39,8 +90,7 @@ Examples:
   python run.py embed --limit 5
   python run.py query "ESP32 bluetooth low energy"
   python run.py export
-  python run.py pipeline --limit 5
-  python run.py pipeline --limit 1000:2000
+  python run.py pipeline --limit 5 --reset
 """
     )
     
@@ -49,23 +99,27 @@ Examples:
     # Extract subcommand
     extract_parser = subparsers.add_parser("extract", help="Extract text and metadata from PDFs")
     extract_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit the number of files to process (supports range 'start:end')")
-    
+    extract_parser.add_argument("--reset", action="store_true", help="Reset all databases and exported datasets before running")
+
     # Enrich subcommand
     enrich_parser = subparsers.add_parser("enrich", help="Enrich text using local Ollama model (Summary, Q&A, DPO, Turkish)")
     enrich_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit the number of articles to enrich (supports range 'start:end')")
-    
+    enrich_parser.add_argument("--reset", action="store_true", help="Reset all databases and exported datasets before running")
+
     # Embed subcommand
     embed_parser = subparsers.add_parser("embed", help="Chunk text, generate embeddings, and load to local Qdrant Vector DB")
     embed_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit the number of articles to embed (supports range 'start:end')")
-    
+    embed_parser.add_argument("--reset", action="store_true", help="Reset all databases and exported datasets before running")
+
     # Query subcommand
     query_parser = subparsers.add_parser("query", help="Query the local Qdrant Vector DB (RAG search)")
     query_parser.add_argument("query_text", type=str, help="The search query string")
     query_parser.add_argument("--top_k", type=int, default=3, help="Number of results to return")
     
     # Export subcommand
-    subparsers.add_parser("export", help="Compile and export SFT, DPO, and Chat datasets to JSONL")
-    
+    export_parser = subparsers.add_parser("export", help="Compile and export SFT, DPO, and Chat datasets to JSONL & Parquet")
+    export_parser.add_argument("--reset", action="store_true", help="Reset all exported datasets before running")
+
     # HF Upload subcommand
     hf_parser = subparsers.add_parser("hf_upload", help="Upload exported dataset to Hugging Face Hub")
     hf_parser.add_argument("--repo_id", type=str, required=True, help="Target Hugging Face repo ID (e.g. username/repo-name)")
@@ -84,6 +138,9 @@ Examples:
         parser.print_help()
         sys.exit(1)
         
+    if getattr(args, "reset", False):
+        reset_pipeline_data()
+
     if args.command == "extract":
         print("=== Step 1: Extraction & Preprocessing ===")
         extractor = ArchiveExtractor()
@@ -148,50 +205,6 @@ Examples:
     elif args.command == "pipeline":
         print("=== RUNNING FULL PIPELINE ===")
         limit = args.limit
-        
-        if args.reset:
-            print("\n--- Resetting pipeline data (clean wipe) ---")
-            import os
-            from pathlib import Path
-            import json
-            
-            config_path = "config.json"
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-                
-            # 1. Delete SQLite Database file
-            db_file = Path(config["db_path"])
-            if db_file.exists():
-                print(f"Deleting SQLite database: {db_file}")
-                try:
-                    db_file.unlink()
-                except Exception as e:
-                    print(f"Warning: Could not delete SQLite database: {e}")
-                    
-            # 2. Delete Qdrant Database folder
-            import shutil
-            qdrant_dir = Path(config["qdrant_db_path"])
-            if qdrant_dir.exists():
-                print(f"Deleting Qdrant database folder: {qdrant_dir}")
-                try:
-                    shutil.rmtree(qdrant_dir)
-                except Exception as e:
-                    print(f"Warning: Could not delete Qdrant folder: {e}")
-                
-            # 3. Clear Export JSONL files
-            with open("config.json", "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            db_name = Path(cfg.get("db_path", "database/elektor_archive.db")).stem
-            export_dir = Path("exports") / db_name
-            if export_dir.exists():
-                print(f"Clearing exports/{db_name} directory...")
-                for file in export_dir.glob("*.jsonl"):
-                    try:
-                        file.unlink()
-                    except Exception as e:
-                        print(f"Warning: Could not delete export file {file.name}: {e}")
-            print("Reset completed successfully. Starting pipeline from clean state.\n")
-            
         print(f"Processing sample limit: {limit} articles...\n")
         
         # 1. Extract
