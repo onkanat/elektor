@@ -19,7 +19,7 @@ from pipeline.mcp_tools import search_vector_rag, query_sqlite_knowledge, inject
 from pipeline.project_merger import ProjectMerger
 from pipeline.hf_deployer import HFDeployer
 from pipeline.cloud_gpu_offloader import CloudGPUOffloader
-from pipeline.project_logger import get_project_logger
+from pipeline.project_logger import get_project_logger, setup_global_project_logging
 from pipeline.persona_manager import get_persona_manager
 
 app = FastAPI(title="Elektor Universal PDF Pipeline Backend API", version="1.0.0")
@@ -340,7 +340,10 @@ def run_pipeline_process(cmd: str, limit: Optional[str] = None, reset: bool = Fa
     
     current_cfg = get_config()
     current_pid = current_cfg.get("project_id", "default_project")
-    setup_global_project_logging(current_pid)
+    try:
+        setup_global_project_logging(current_pid)
+    except Exception as log_err:
+        print(f"Warning: Failed to setup global project logging: {log_err}")
 
     with pipeline_lock:
         pipeline_state["status"] = "running"
