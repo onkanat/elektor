@@ -332,89 +332,87 @@ class ArchiveAnalyzer:
             f"{full_text}"
         )
         
-        try:
-            chat_kwargs = {
-                "model": self.translator_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "options": {
-                    "temperature": 0.2,
-                    "num_predict": 8192
-                }
-            }
-            response = self.client.chat(**chat_kwargs)
-            content = response['message']['content']
+        response = self.call_ollama_chat_with_retry(
+            model=self.translator_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            options={"temperature": 0.2, "num_predict": 8192},
+            keep_alive="30m"
+        )
+
+        if not response:
+            raise RuntimeError(f"TranslateGemma model '{self.translator_model}' did not return a response.")
+
+        content = ""
+        if isinstance(response, dict) and "message" in response:
+            content = response["message"].get("content", "")
+        elif hasattr(response, "message"):
+            content = getattr(response.message, "content", "")
+
+        if not content:
+            raise ValueError(f"Empty translation output for article '{title}'.")
+
+        # Regex Parsing
+        content_norm = content.replace('\r\n', '\n')
+        
+        # Extract title
+        title_match = re.search(r'^Title:\s*(.*)', content_norm, re.IGNORECASE | re.MULTILINE)
+        turkish_title = title_match.group(1).strip() if title_match else title
+        
+        # Extract summary
+        summary_match = re.search(r'^Summary:\s*(.*?)(?=\n\n|\n[Q|D])', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+        turkish_summary = summary_match.group(1).strip() if summary_match else summary
+        
+        # Extract SFT QA
+        tr_sft_qa = []
+        for i in range(1, len(sft_qa_list) + 1):
+            q_pattern = rf'^Q{i}:\s*(.*?)(?=\nA{i}:|\nQ{i+1}:|\nDPO_|$)'
+            a_pattern = rf'^A{i}:\s*(.*?)(?=\nQ{i+1}:|\nA{i+1}:|\nDPO_|$)'
             
-            # Regex Parsing
-            content_norm = content.replace('\r\n', '\n')
+            q_match = re.search(q_pattern, content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+            a_match = re.search(a_pattern, content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
             
-            # Extract title
-            title_match = re.search(r'^Title:\s*(.*)', content_norm, re.IGNORECASE | re.MULTILINE)
-            turkish_title = title_match.group(1).strip() if title_match else title
+            if q_match and a_match:
+                tr_sft_qa.append({
+                    "question": q_match.group(1).strip(),
+                    "answer": a_match.group(1).strip()
+                })
+            else:
+                # Fallback to original English item if parse fails for this specific item
+                orig_item = sft_qa_list[i-1]
+                tr_sft_qa.append(orig_item)
+        
+        # Extract DPO pairs
+        tr_dpo_pairs = []
+        for i in range(1, len(dpo_pairs_list) + 1):
+            dpo_q_match = re.search(r'^DPO_Q:\s*(.*?)(?=\nDPO_|$)', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+            dpo_chosen_match = re.search(r'^DPO_Chosen:\s*(.*?)(?=\nDPO_|$)', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+            dpo_rej_match = re.search(r'^DPO_Rejected:\s*(.*?)(?=\nDPO_|$)', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
             
-            # Extract summary
-            summary_match = re.search(r'^Summary:\s*(.*?)(?=\n\n|\n[Q|D])', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-            turkish_summary = summary_match.group(1).strip() if summary_match else summary
+            if dpo_q_match and dpo_chosen_match and dpo_rej_match:
+                tr_dpo_pairs.append({
+                    "question": dpo_q_match.group(1).strip(),
+                    "chosen": dpo_chosen_match.group(1).strip(),
+                    "rejected": dpo_rej_match.group(1).strip()
+                })
+            else:
+                # Fallback
+                tr_dpo_pairs.append(dpo_pairs_list[i-1])
+        
+        # Check if we parsed anything at all. If empty, trigger fallback
+        if not tr_sft_qa:
+            tr_sft_qa = sft_qa_list
+        if not tr_dpo_pairs:
+            tr_dpo_pairs = dpo_pairs_list
             
-            # Extract SFT QA
-            tr_sft_qa = []
-            for i in range(1, len(sft_qa_list) + 1):
-                q_pattern = rf'^Q{i}:\s*(.*?)(?=\nA{i}:|\nQ{i+1}:|\nDPO_|$)'
-                a_pattern = rf'^A{i}:\s*(.*?)(?=\nQ{i+1}:|\nA{i+1}:|\nDPO_|$)'
-                
-                q_match = re.search(q_pattern, content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-                a_match = re.search(a_pattern, content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-                
-                if q_match and a_match:
-                    tr_sft_qa.append({
-                        "question": q_match.group(1).strip(),
-                        "answer": a_match.group(1).strip()
-                    })
-                else:
-                    # Fallback to original English item if parse fails for this specific item
-                    orig_item = sft_qa_list[i-1]
-                    tr_sft_qa.append(orig_item)
-            
-            # Extract DPO pairs
-            tr_dpo_pairs = []
-            for i in range(1, len(dpo_pairs_list) + 1):
-                dpo_q_match = re.search(r'^DPO_Q:\s*(.*?)(?=\nDPO_|$)', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-                dpo_chosen_match = re.search(r'^DPO_Chosen:\s*(.*?)(?=\nDPO_|$)', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-                dpo_rej_match = re.search(r'^DPO_Rejected:\s*(.*?)(?=\nDPO_|$)', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-                
-                if dpo_q_match and dpo_chosen_match and dpo_rej_match:
-                    tr_dpo_pairs.append({
-                        "question": dpo_q_match.group(1).strip(),
-                        "chosen": dpo_chosen_match.group(1).strip(),
-                        "rejected": dpo_rej_match.group(1).strip()
-                    })
-                else:
-                    # Fallback
-                    tr_dpo_pairs.append(dpo_pairs_list[i-1])
-            
-            # Check if we parsed anything at all. If empty, trigger fallback
-            if not tr_sft_qa:
-                tr_sft_qa = sft_qa_list
-            if not tr_dpo_pairs:
-                tr_dpo_pairs = dpo_pairs_list
-                
-            return {
-                "turkish_title": turkish_title if turkish_title else title,
-                "turkish_summary": turkish_summary if turkish_summary else summary,
-                "tr_sft_qa": json.dumps(tr_sft_qa, ensure_ascii=False),
-                "tr_dpo_pairs": json.dumps(tr_dpo_pairs, ensure_ascii=False)
-            }
-            
-        except Exception as e:
-            print(f"  Warning: Translation failed/errored for article '{title}': {e}. Using fallback structure.")
-            return {
-                "turkish_title": title,
-                "turkish_summary": summary,
-                "tr_sft_qa": json.dumps(sft_qa_list, ensure_ascii=False),
-                "tr_dpo_pairs": json.dumps(dpo_pairs_list, ensure_ascii=False)
-            }
+        return {
+            "turkish_title": turkish_title if turkish_title else title,
+            "turkish_summary": turkish_summary if turkish_summary else summary,
+            "tr_sft_qa": json.dumps(tr_sft_qa, ensure_ascii=False),
+            "tr_dpo_pairs": json.dumps(tr_dpo_pairs, ensure_ascii=False)
+        }
 
     def translate_to_turkish(self, title, summary):
         """Backwards compatible title/summary translator method"""
