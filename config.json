@@ -15,7 +15,7 @@
   "dataset_name": "Raspberry-Pi-Pico-All",
   "dataset_name_tr": "Raspberry-Pi-Pico-All",
   "qdrant_collection_name": "rapberry_pi_pico_all_articles",
-  "direct_tr_generation": false,
+  "direct_tr_generation": true,
   "enable_dpo_verification": true,
   "generate_multi_turn_chat": true,
   "code_cat_explanation": true,
