@@ -76,4 +76,9 @@ graph TD
 - **Sıfır Donanım Maliyeti**: Yerel GPU sunucusu (`192.168.1.14:11434`) çevrimdışı veya yoğun olduğunda, sentezleme isteklerini otomatik olarak ücretsiz Hugging Face Serverless Inference API uç noktalarına (`Qwen/Qwen2.5-72B-Instruct`, `Llama-3.3-70B-Instruct`) veya HF Spaces ZeroGPU (A100/H100) ortamına yönlendirerek kesintisizsentetik veri üretimi sağlama.
 
 ### 📌 FAZ 8: Chat Arenası Tam Markdown & LaTeX Matematik Formül Desteği - [GELECEK VİZYONU (DÜŞÜK ÖNCELİK)]
-- **Zengin İfadeler**: Mevcut hafif metin & kod renklendiricisi tam ve yeterli olmakla birlikte, ileride karmaşık LaTeX matris/denklem gösterimleri ve Markdown tabloları için tam rendering motoru entegrasyonu.
+- **Zengin İfadeler**: Mevcut hafif metin & kod renklendiricisi tam ve yeterli olmakla birlikte, ileride karmaşık LaTeX matris/denklem gösterimleri me Markdown tabloları için tam rendering motoru entegrasyonu.
+
+### 🔥 FAZ 9: OpenAI-Uyumlu API Standardına Geçiş & Sunucu Performans / Hata Ayıklama Oturumu - [YÜKSEK ÖNCELİK]
+- **Evrensel OpenAI SDK Standardı (`v1/chat/completions`)**: Özel ham `ollama` Python istemcisi yerine sektör standardı `openai` SDK (`from openai import OpenAI / AsyncOpenAI`) ve `base_url` mimarisine geçiş.
+- **Sunucu & Donanım Bağımsızlığı**: Tek bir istemci mimarisi ile yerel Ollama (`http://192.168.1.14:11434/v1`), vLLM, SGLang, LM Studio, DeepSeek, Groq, OpenRouter ve Hugging Face Inference API uç noktalarına sıfır kod değişikliği ile tak-çalıştır erişim.
+- **Hata Ayıklama, Kod İyileştirme & Performans Oturumu**: Yeni özellik eklemek yerine mevcut sunucu bağlantı yönetimi (connection pooling), soket zaman aşımları, bellek sızıntısı önleme ve boru hattı paralel kilitlenme (deadlock) hata ayıklama / refactoring odaklı sistem oturumu.

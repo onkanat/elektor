@@ -18,6 +18,7 @@ Originally built for the Elektor Magazine Archive (1974–2025), the pipeline ha
 | **FAZ 6** | **Proje Gezgini Entegre System Prompt & Persona Editörü**: `prompt.html` şablonunun Proje Gezgini modalına entegrasyonu ve `system_prompts` (`persona_map.yaml`) şablon motoru. | ✅ **Tamamlandı** |
 | **FAZ 7** | **HF Serverless Inference & ZeroGPU Hibrit Fallback Motoru**: Yerel GPU (`192.168.1.14`) çevrimdışı/yoğun olduğunda HF Serverless Inference API ve ZeroGPU Spaces üzerine otomatik istek yönlendirme. | 💡 **Gelecek Vizyonu** |
 | **FAZ 8** | **Chat Arenası Tam Markdown & LaTeX Matematik Formül Desteği**: İleride karmaşık LaTeX denklem, tablo ve tam Markdown rendering motoru entegrasyonu (Düşük öncelikli). | 💡 **Gelecek Vizyonu (Düşük Öncelik)** |
+| **FAZ 9** | **OpenAI-Uyumlu API Standardına Geçiş & Sunucu Performans / Hata Ayıklama Oturumu**: Ham Ollama istemcisinden evrensel `OpenAI` (`v1/chat/completions`) SDK standardına geçiş; vLLM, Ollama v1, SGLang ve Cloud API tak-çalıştır desteği; sunucu soket/zaman aşımı iyileştirmeleri, bellek sızıntısı ve kod refactoring oturumu. | 🔥 **YÜKSEK ÖNCELİKLİ (YOL HARİTASI)** |
 
 ---
 
