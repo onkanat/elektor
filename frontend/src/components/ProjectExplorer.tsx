@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ProjectMergerModal } from './ProjectMergerModal';
+import { PromptEditorModal } from './PromptEditorModal';
 
 export interface ProjectItem {
   project_id: string;
@@ -30,6 +31,7 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({
 }) => {
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [showMergerModal, setShowMergerModal] = useState<boolean>(false);
+  const [showPromptModal, setShowPromptModal] = useState<boolean>(false);
   const [newProjectId, setNewProjectId] = useState<string>('');
   const [newProjectName, setNewProjectName] = useState<string>('');
   const [newInputMode, setNewInputMode] = useState<'book' | 'folder' | 'rendergit'>('book');
@@ -82,6 +84,18 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({
         zIndex: 999,
       }}
     >
+      <PromptEditorModal
+        isOpen={showPromptModal}
+        initialPersona={newPersona}
+        initialSubject={newSubject}
+        onClose={() => setShowPromptModal(false)}
+        onApplyPrompt={(persona, subject) => {
+          setNewPersona(persona);
+          setNewSubject(subject);
+          setShowPromptModal(false);
+        }}
+      />
+
       <ProjectMergerModal
         isOpen={showMergerModal}
         projects={projects}
@@ -197,7 +211,25 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({
             </div>
 
             <div className="form-group">
-              <label>Hedef Uzmanlık Personası (Persona)</label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                <label style={{ margin: 0 }}>Hedef Uzmanlık Personası (Persona)</label>
+                <button
+                  type="button"
+                  onClick={() => setShowPromptModal(true)}
+                  style={{
+                    background: 'rgba(56, 189, 248, 0.15)',
+                    border: '1px solid #38bdf8',
+                    color: '#38bdf8',
+                    borderRadius: '0.35rem',
+                    padding: '0.2rem 0.5rem',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ✨ Persona & Prompt Editörü Aç
+                </button>
+              </div>
               <input
                 type="text"
                 className="form-control"

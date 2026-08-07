@@ -19,6 +19,8 @@ from pipeline.mcp_tools import search_vector_rag, query_sqlite_knowledge, inject
 from pipeline.project_merger import ProjectMerger
 from pipeline.hf_deployer import HFDeployer
 from pipeline.cloud_gpu_offloader import CloudGPUOffloader
+from pipeline.project_logger import get_project_logger
+from pipeline.persona_manager import get_persona_manager
 
 app = FastAPI(title="Elektor Universal PDF Pipeline Backend API", version="1.0.0")
 
@@ -1101,6 +1103,20 @@ def download_cloud_notebook(project_id: str = Query(...)):
         filename=f"unsloth_finetune_{project_id}.ipynb",
         media_type="application/x-ipynb+json"
     )
+
+@app.get("/api/projects/logs")
+def get_project_error_logs(project_id: str = Query(...), max_lines: int = Query(100)):
+    logger = get_project_logger(project_id)
+    return {
+        "project_id": project_id,
+        "log_file": str(logger.log_file),
+        "content": logger.get_log_content(max_lines=max_lines)
+    }
+
+@app.get("/api/personas")
+def list_system_personas():
+    pm = get_persona_manager()
+    return {"personas": pm.get_all_personas()}
 
 # Mount React frontend static build
 
