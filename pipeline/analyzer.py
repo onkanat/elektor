@@ -691,11 +691,16 @@ class ArchiveAnalyzer:
         placeholders = ",".join(["?"] * len(active_ids))
         
         # --- PASS 1: Technical Analysis (Direct Turkish vs English) ---
+        if self.direct_tr_generation:
+            where_cond = "(e.id IS NULL OR e.tr_sft_qa IS NULL OR e.tr_sft_qa = '')"
+        else:
+            where_cond = "e.id IS NULL"
+
         cursor.execute(f"""
             SELECT a.id, a.title, a.extracted_text 
             FROM articles a
             LEFT JOIN enrichments e ON a.id = e.article_id
-            WHERE e.id IS NULL AND a.extracted_text IS NOT NULL AND a.extracted_text != ''
+            WHERE {where_cond} AND a.extracted_text IS NOT NULL AND a.extracted_text != ''
             AND a.id IN ({placeholders})
         """, active_ids)
         pass1_rows = cursor.fetchall()
