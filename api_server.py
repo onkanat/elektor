@@ -661,8 +661,8 @@ def chat_with_analyzer(payload: Dict[str, Any] = Body(...)):
     full_messages.extend(messages)
 
     try:
-        client = ollama.Client(host=ollama_url)
-        response = client.chat(model=model, messages=full_messages, stream=False)
+        client = ollama.Client(host=ollama_url, timeout=300.0)
+        response = client.chat(model=model, messages=full_messages, stream=False, keep_alive="60m")
         
         reply_content = ""
         if isinstance(response, dict) and "message" in response:
@@ -693,39 +693,45 @@ def simulate_pre_finetuning_impact(payload: Dict[str, Any] = Body(...)):
     
     # 1. Execute RAG & MCP Tools
     rag_result = search_vector_rag(user_prompt, top_k=4)
+    rag_results_list = rag_result.get("results", [])
     tool_logs.append({
         "name": "search_vector_rag",
         "description": "Qdrant Vektör Veritabanı Arama",
         "status": rag_result["status"],
         "count": rag_result.get("count", 0),
-        "snippets": [r.get("text", "")[:180] for r in rag_result.get("results", [])]
+        "snippets": [r.get("text", "")[:180] for r in rag_results_list],
+        "details": [f"Vektör Parçası #{i+1}: '{r.get('title', 'Doküman')}' ({r.get('year', '2026')}) - Skor: {r.get('score', 0.0):.2f}" for i, r in enumerate(rag_results_list)]
     })
     
     sqlite_result = query_sqlite_knowledge(user_prompt, limit=3)
+    sqlite_articles_list = sqlite_result.get("articles", [])
     tool_logs.append({
         "name": "query_sqlite_knowledge",
         "description": "SQLite Döküman & SFT Q&A Çifti Arama",
         "status": sqlite_result["status"],
         "articles_found": sqlite_result.get("articles_found", 0),
-        "enrichments_found": sqlite_result.get("enrichments_found", 0)
+        "enrichments_found": sqlite_result.get("enrichments_found", 0),
+        "details": [f"SQLite Kaydı #{i+1}: '{a.get('title', 'Makale')}' - Yıl: {a.get('year', '2026')}" for i, a in enumerate(sqlite_articles_list)]
     })
     
     sft_dpo_result = inject_sft_dpo_context(user_prompt, limit=2)
+    sft_samples_list = sft_dpo_result.get("samples", [])
     tool_logs.append({
         "name": "inject_sft_dpo_context",
         "description": "JSONL Veri Seti Örnek Enjeksiyonu",
         "status": sft_dpo_result["status"],
-        "count": sft_dpo_result.get("count", 0)
+        "count": sft_dpo_result.get("count", 0),
+        "details": [f"JSONL Örneği #{i+1}: Dosya '{s.get('file', 'veri_seti.jsonl')}'" for i, s in enumerate(sft_samples_list)]
     })
 
     # Construct RAG Context string
     context_chunks = []
-    for r in rag_result.get("results", []):
+    for r in rag_results_list:
         context_chunks.append(f"--- Döküman Parçası ({r.get('title')}, {r.get('year')}) ---\n{r.get('text')}")
-    for a in sqlite_result.get("articles", []):
+    for a in sqlite_articles_list:
         if "extracted_text_snippet" in a:
             context_chunks.append(f"--- SQLite Döküman ({a.get('title')}) ---\n{a.get('extracted_text_snippet')}")
-    for s in sft_dpo_result.get("samples", []):
+    for s in sft_samples_list:
         rec = s.get("record", {})
         context_chunks.append(f"--- SFT/DPO Örnek ({s.get('file')}) ---\n{json.dumps(rec, ensure_ascii=False)}")
         
@@ -734,13 +740,14 @@ def simulate_pre_finetuning_impact(payload: Dict[str, Any] = Body(...)):
     # 2. Call BASE Model (Zero-Shot - Ham Model)
     base_response = ""
     try:
-        client = ollama.Client(host=ollama_url, timeout=90.0)
+        client = ollama.Client(host=ollama_url, timeout=300.0)
         base_res = client.chat(
             model=model,
             messages=[
                 {"role": "system", "content": "You are a general AI assistant. Answer directly using general knowledge without specific domain files."},
                 {"role": "user", "content": user_prompt}
-            ]
+            ],
+            keep_alive="60m"
         )
         base_response = base_res.get("message", {}).get("content", "")
     except Exception as e:
@@ -749,14 +756,15 @@ def simulate_pre_finetuning_impact(payload: Dict[str, Any] = Body(...)):
     # 3. Call SIMULATED FT Model (RAG & SFT/DPO Context Injected)
     simulated_response = ""
     try:
-        client = ollama.Client(host=ollama_url, timeout=90.0)
+        client = ollama.Client(host=ollama_url, timeout=300.0)
         sim_system_prompt = f"{system_prompt}\n\n=== RELEVANT DOMAIN KNOWLEDGE & SFT CONTEXT ===\n{full_context_str}"
         sim_res = client.chat(
             model=model,
             messages=[
                 {"role": "system", "content": sim_system_prompt},
                 {"role": "user", "content": user_prompt}
-            ]
+            ],
+            keep_alive="60m"
         )
         simulated_response = sim_res.get("message", {}).get("content", "")
     except Exception as e:

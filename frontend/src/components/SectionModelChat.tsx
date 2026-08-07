@@ -46,6 +46,101 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
     simEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, simulationHistory]);
 
+  const renderHighlightedText = (text: string) => {
+    if (!text) return null;
+
+    const lines = text.split('\n');
+    let inCodeBlock = false;
+    let codeBuffer: string[] = [];
+    const elements: React.ReactNode[] = [];
+
+    lines.forEach((line, idx) => {
+      if (line.trim().startsWith('```')) {
+        if (inCodeBlock) {
+          elements.push(
+            <pre
+              key={`code-${idx}`}
+              style={{
+                backgroundColor: '#0f172a',
+                border: '1px solid #334155',
+                borderRadius: '0.4rem',
+                padding: '0.6rem 0.8rem',
+                color: '#34d399',
+                fontFamily: 'Consolas, Monaco, monospace',
+                fontSize: '0.8rem',
+                overflowX: 'auto',
+                margin: '0.4rem 0',
+              }}
+            >
+              <code>{codeBuffer.join('\n')}</code>
+            </pre>
+          );
+          codeBuffer = [];
+          inCodeBlock = false;
+        } else {
+          inCodeBlock = true;
+        }
+        return;
+      }
+
+      if (inCodeBlock) {
+        codeBuffer.push(line);
+        return;
+      }
+
+      if (line.startsWith('#')) {
+        elements.push(
+          <div key={`h-${idx}`} style={{ fontWeight: 700, color: '#38bdf8', marginTop: '0.4rem', fontSize: '0.88rem' }}>
+            {line.replace(/^#+\s*/, '')}
+          </div>
+        );
+        return;
+      }
+
+      if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
+        elements.push(
+          <div key={`bullet-${idx}`} style={{ paddingLeft: '0.8rem', color: '#f1f5f9', margin: '0.15rem 0' }}>
+            <span style={{ color: '#c084fc' }}>•</span> {line.trim().substring(2)}
+          </div>
+        );
+        return;
+      }
+
+      if (line.trim()) {
+        elements.push(
+          <div key={`line-${idx}`} style={{ margin: '0.2rem 0', color: '#f1f5f9' }}>
+            {line}
+          </div>
+        );
+      } else {
+        elements.push(<div key={`br-${idx}`} style={{ height: '0.35rem' }} />);
+      }
+    });
+
+    if (inCodeBlock && codeBuffer.length > 0) {
+      elements.push(
+        <pre
+          key={`code-end`}
+          style={{
+            backgroundColor: '#0f172a',
+            border: '1px solid #334155',
+            borderRadius: '0.4rem',
+            padding: '0.6rem 0.8rem',
+            color: '#34d399',
+            fontFamily: 'Consolas, Monaco, monospace',
+            fontSize: '0.8rem',
+            overflowX: 'auto',
+            margin: '0.4rem 0',
+          }}
+        >
+          <code>{codeBuffer.join('\n')}</code>
+        </pre>
+      );
+    }
+
+    return <div>{elements}</div>;
+  };
+
   // Standard Chat Handler
   const handleSendMessage = async () => {
     if (!inputPrompt.trim() || isSending) return;
@@ -233,13 +328,30 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
                       </div>
                     </div>
 
-                    {/* Tool Call Badges */}
+                    {/* Tool Call Badges with Hover Tooltips */}
                     <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      {sim.tool_logs?.map((tool: any, tIdx: number) => (
-                        <div key={tIdx} className="badge online" style={{ fontSize: '0.75rem', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#34d399' }}>
-                          🛠️ {tool.name}: {tool.count !== undefined ? `${tool.count} sonuç` : (tool.articles_found ? `${tool.articles_found} döküman` : 'Başarılı')}
-                        </div>
-                      ))}
+                      {sim.tool_logs?.map((tool: any, tIdx: number) => {
+                        const tooltipText = tool.details && tool.details.length > 0
+                          ? `🔍 ${tool.description}\n• ` + tool.details.join('\n• ')
+                          : `🛠️ ${tool.description}: ${tool.count !== undefined ? `${tool.count} sonuç` : 'Başarılı'}`;
+
+                        return (
+                          <div
+                            key={tIdx}
+                            className="badge online"
+                            title={tooltipText}
+                            style={{
+                              fontSize: '0.75rem',
+                              background: 'rgba(16, 185, 129, 0.15)',
+                              border: '1px solid rgba(16, 185, 129, 0.3)',
+                              color: '#34d399',
+                              cursor: 'help'
+                            }}
+                          >
+                            🛠️ {tool.name}: {tool.count !== undefined ? `${tool.count} sonuç` : (tool.articles_found ? `${tool.articles_found} döküman` : 'Başarılı')} ℹ️
+                          </div>
+                        );
+                      })}
                     </div>
 
                     {/* Side-by-Side Comparison Columns */}
@@ -250,8 +362,8 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
                           <span>🛡️ Ham Model (Zero-Shot)</span>
                           <span style={{ fontSize: '0.72rem', opacity: 0.7 }}>Eğitimsiz / RAG'sız</span>
                         </div>
-                        <div style={{ fontSize: '0.83rem', color: '#cbd5e1', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                          {sim.base_response}
+                        <div style={{ fontSize: '0.83rem', color: '#cbd5e1', lineHeight: 1.6 }}>
+                          {renderHighlightedText(sim.base_response)}
                         </div>
                       </div>
 
@@ -261,8 +373,8 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
                           <span>⚡ Simüle Edilmiş FT Model</span>
                           <span style={{ fontSize: '0.72rem', opacity: 0.7 }}>RAG + SFT Context</span>
                         </div>
-                        <div style={{ fontSize: '0.83rem', color: '#f8fafc', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                          {sim.simulated_response}
+                        <div style={{ fontSize: '0.83rem', color: '#f8fafc', lineHeight: 1.6 }}>
+                          {renderHighlightedText(sim.simulated_response)}
                         </div>
                       </div>
                     </div>
