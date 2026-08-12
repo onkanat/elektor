@@ -1,8 +1,8 @@
 import sqlite3
 import json
-import ollama
 from pathlib import Path
 from datetime import datetime
+from pipeline.llm_client import get_openai_client
 
 class ArchiveAnalyzer:
     def __init__(self, config_path="config.json"):
@@ -25,51 +25,66 @@ class ArchiveAnalyzer:
         self.direct_tr_generation = self.config.get("direct_tr_generation", True)
         self.enable_dpo_verification = self.config.get("enable_dpo_verification", True)
         self.generate_multi_turn_chat = self.config.get("generate_multi_turn_chat", True)
+        self.analyzer_max_chars = self.config.get("analyzer_max_chars", 4000)
+        self.analyzer_max_tokens = self.config.get("analyzer_max_tokens", 8192)
         
-        # Connect to Ollama with 300s timeout for 35B models
+        # Connect to LLM client with 300s timeout limit
         from pipeline.project_logger import get_project_logger
         self.logger = get_project_logger()
-        self.client = ollama.Client(host=self.ollama_url, timeout=300.0)
+        self.openai_client = get_openai_client(self.config)
         
         # Connect/Initialize SQLite database with WAL mode and timeout
         self.conn = sqlite3.connect(self.db_path, timeout=30.0)
         self.create_tables()
 
     def call_ollama_chat_with_retry(self, model, messages, options=None, format=None, keep_alive="30m", max_retries=3):
-        """Executes an Ollama chat request with automatic retry and exponential backoff on timeouts/failures"""
+        """Executes a chat completion request with automatic retry and exponential backoff on timeouts/failures"""
         import time
         target_model = (model or self.model_name or "qwen3.6:27b-mtp-q4_K_M").strip()
+        
+        temperature = 0.7
+        max_tokens = None
+        if options:
+            if "temperature" in options:
+                temperature = options["temperature"]
+            if "num_predict" in options:
+                max_tokens = options["num_predict"]
+
         chat_kwargs = {
             "model": target_model,
             "messages": messages,
-            "keep_alive": keep_alive
+            "temperature": temperature
         }
-        if options:
-            chat_kwargs["options"] = options
-        if format:
-            chat_kwargs["format"] = format
+        if max_tokens:
+            chat_kwargs["max_tokens"] = max_tokens
+        if format == "json":
+            chat_kwargs["response_format"] = {"type": "json_object"}
 
         for attempt in range(1, max_retries + 1):
             try:
-                response = self.client.chat(**chat_kwargs)
-                return response
+                # Re-fetch pooled client
+                client = get_openai_client(self.config)
+                response = client.chat.completions.create(**chat_kwargs)
+                
+                reply_content = response.choices[0].message.content or ""
+                # Return standard dict format to keep compatibility with existing parsing
+                return {
+                    "message": {
+                        "role": "assistant",
+                        "content": reply_content
+                    }
+                }
             except Exception as e:
-                warn_msg = f"Ollama Chat Warning (Attempt {attempt}/{max_retries} for model '{target_model}'): {e}"
+                warn_msg = f"LLM Chat Warning (Attempt {attempt}/{max_retries} for model '{target_model}'): {e}"
                 print(f"  {warn_msg}")
                 self.logger.warning(warn_msg, module="analyzer")
                 
-                # Re-create client connection on failure to handle server reconnects/restarts
-                try:
-                    self.client = ollama.Client(host=self.ollama_url, timeout=300.0)
-                except Exception as c_err:
-                    self.logger.error(f"Failed to recreate Ollama client: {c_err}", module="analyzer")
-                    
                 if attempt < max_retries:
                     sleep_sec = attempt * 5
                     print(f"  Retrying in {sleep_sec} seconds...")
                     time.sleep(sleep_sec)
                 else:
-                    err_msg = f"Ollama Chat Failed for '{target_model}' after {max_retries} attempts."
+                    err_msg = f"LLM Chat Failed for '{target_model}' after {max_retries} attempts."
                     print(f"  {err_msg}")
                     self.logger.error(err_msg, module="analyzer")
                     return None
@@ -77,7 +92,10 @@ class ArchiveAnalyzer:
 
     def create_tables(self):
         cursor = self.conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL;")
+        except sqlite3.OperationalError:
+            pass
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS enrichments (
 
@@ -107,39 +125,36 @@ class ArchiveAnalyzer:
         self.conn.commit()
 
     def call_ollama_json(self, system_prompt, user_prompt, model=None, keep_alive=None, num_predict=8192):
-        """Helper to call Ollama model and expect a JSON output, optimized with token limit and temp"""
+        """Helper to call LLM model and expect a JSON output, optimized with token limit and temp"""
         if model is None:
             model = self.model_name
         try:
+            client = get_openai_client(self.config)
             chat_kwargs = {
                 "model": model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                "format": "json",
-                "think": False,
-                "options": {
-                    "temperature": 0.2,
-                    "num_predict": num_predict
-                }
+                "response_format": {"type": "json_object"},
+                "temperature": 0.2
             }
-            if keep_alive is not None:
-                chat_kwargs["keep_alive"] = keep_alive
+            if num_predict:
+                chat_kwargs["max_tokens"] = num_predict
                 
-            response = self.client.chat(**chat_kwargs)
-            content = response['message']['content']
+            response = client.chat.completions.create(**chat_kwargs)
+            content = response.choices[0].message.content or ""
             return json.loads(content)
         except Exception as e:
-            print(f"  Ollama JSON call error (Model: {model}): {e}")
+            print(f"  LLM JSON call error (Model: {model}): {e}")
             return None
 
     def analyze_article_english(self, article_id, title, text):
         """Performs English technical analysis (summary, topics, 10 detailed Q&As, DPO) using self.model_name"""
         print(f"Analyzing article [{article_id}] (English - {self.qa_count} Q&As): {title}...")
         
-        # Limit text size to 4000 characters to reduce prompt ingestion time and RAM usage
-        truncated_text = text[:4000] if len(text) > 4000 else text
+        # Limit text size to self.analyzer_max_chars characters to reduce prompt ingestion time and RAM usage
+        truncated_text = text[:self.analyzer_max_chars] if len(text) > self.analyzer_max_chars else text
         
         system_prompt = (
             f"{self.llm_persona} "
@@ -171,7 +186,7 @@ class ArchiveAnalyzer:
             "5. Return ONLY the valid JSON object. Do not include markdown code block formatting."
         )
         
-        result = self.call_ollama_json(system_prompt, user_prompt, model=self.model_name, num_predict=8192)
+        result = self.call_ollama_json(system_prompt, user_prompt, model=self.model_name, num_predict=self.analyzer_max_tokens)
         
         if not result:
             raise RuntimeError(f"Ollama model '{self.model_name}' failed to generate analysis for article {article_id}.")
@@ -201,7 +216,7 @@ class ArchiveAnalyzer:
         """Performs DIRECT Turkish technical analysis (summary, topics, Q&As, DPO pair, multi-turn chat) without translation pass"""
         print(f"Analyzing article [{article_id}] (Direct Turkish Mode - {self.qa_count} Q&As): {title}...")
         
-        truncated_text = text[:4000] if len(text) > 4000 else text
+        truncated_text = text[:self.analyzer_max_chars] if len(text) > self.analyzer_max_chars else text
         
         system_prompt = (
             f"Sen uzman bir gömülü sistemler mimarı, teknik yazar ve Türkçe yapay zeka eğitmenisin. ({self.llm_persona})\n"
@@ -239,7 +254,7 @@ class ArchiveAnalyzer:
             "5. SADECE geçerli JSON formatı döndürün."
         )
         
-        result = self.call_ollama_json(system_prompt, user_prompt, model=self.model_name, num_predict=8192)
+        result = self.call_ollama_json(system_prompt, user_prompt, model=self.model_name, num_predict=self.analyzer_max_tokens)
         if not result:
             result = {
                 "turkish_title": title,
@@ -332,7 +347,7 @@ class ArchiveAnalyzer:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            options={"temperature": 0.2, "num_predict": 8192},
+            options={"temperature": 0.2, "num_predict": self.analyzer_max_tokens},
             keep_alive="30m"
         )
 
@@ -351,27 +366,43 @@ class ArchiveAnalyzer:
         # Regex Parsing
         content_norm = content.replace('\r\n', '\n')
         
+        # Helper to clean up matched groups (strip spaces and markdown bold/italic asterisks)
+        def clean_val(match, group_idx=1):
+            if not match:
+                return None
+            val = match.group(group_idx)
+            if not val:
+                return ""
+            return val.strip().strip('*').strip()
+
         # Extract title
-        title_match = re.search(r'^Title:\s*(.*)', content_norm, re.IGNORECASE | re.MULTILINE)
-        turkish_title = title_match.group(1).strip() if title_match else title
-        
+        title_match = re.search(r'^\**\s*(?:Title|Başlık|Title\s*\(Turkish\))\s*(?::\**|\**:)\s*(.*)', content_norm, re.IGNORECASE | re.MULTILINE)
+        turkish_title = clean_val(title_match) if title_match else title
+        if not turkish_title:
+            turkish_title = title
+            
         # Extract summary
-        summary_match = re.search(r'^Summary:\s*(.*?)(?=\n\n|\n[Q|D])', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-        turkish_summary = summary_match.group(1).strip() if summary_match else summary
-        
+        summary_match = re.search(r'^\**\s*(?:Summary|Özet)\s*(?::\**|\**:)\s*(.*?)(?=\n\**\s*(?:Q|S|D|C|Soru|Cevap|A\d|C\d|DPO_))', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+        turkish_summary = clean_val(summary_match) if summary_match else summary
+        if not turkish_summary:
+            turkish_summary = summary
+
         # Extract SFT QA
         tr_sft_qa = []
         for i in range(1, len(sft_qa_list) + 1):
-            q_pattern = rf'^Q{i}:\s*(.*?)(?=\nA{i}:|\nQ{i+1}:|\nDPO_|$)'
-            a_pattern = rf'^A{i}:\s*(.*?)(?=\nQ{i+1}:|\nA{i+1}:|\nDPO_|$)'
+            q_pattern = rf'^\**\s*(?:Q{i}|S{i}|Soru\s*{i})\s*(?::\**|\**:)\s*(.*?)(?=\n\**\s*(?:A{i}|C{i}|Cevap\s*{i})\s*(?::\**|\**:)|\n\**\s*(?:Q{i+1}|S{i+1}|Soru\s*{i+1})\s*(?::\**|\**:)|\n\**\s*DPO_|$)'
+            a_pattern = rf'^\**\s*(?:A{i}|C{i}|Cevap\s*{i})\s*(?::\**|\**:)\s*(.*?)(?=\n\**\s*(?:Q{i+1}|S{i+1}|Soru\s*{i+1})\s*(?::\**|\**:)|\n\**\s*(?:A{i+1}|C{i+1}|Cevap\s*{i+1})\s*(?::\**|\**:)|\n\**\s*DPO_|$)'
             
             q_match = re.search(q_pattern, content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
             a_match = re.search(a_pattern, content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
             
-            if q_match and a_match:
+            cleaned_q = clean_val(q_match)
+            cleaned_a = clean_val(a_match)
+            
+            if cleaned_q and cleaned_a:
                 tr_sft_qa.append({
-                    "question": q_match.group(1).strip(),
-                    "answer": a_match.group(1).strip()
+                    "question": cleaned_q,
+                    "answer": cleaned_a
                 })
             else:
                 # Fallback to original English item if parse fails for this specific item
@@ -381,15 +412,19 @@ class ArchiveAnalyzer:
         # Extract DPO pairs
         tr_dpo_pairs = []
         for i in range(1, len(dpo_pairs_list) + 1):
-            dpo_q_match = re.search(r'^DPO_Q:\s*(.*?)(?=\nDPO_|$)', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-            dpo_chosen_match = re.search(r'^DPO_Chosen:\s*(.*?)(?=\nDPO_|$)', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-            dpo_rej_match = re.search(r'^DPO_Rejected:\s*(.*?)(?=\nDPO_|$)', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+            dpo_q_match = re.search(r'^\**\s*(?:DPO_Q|DPO_Soru|DPO_S)\s*(?::\**|\**:)\s*(.*?)(?=\n\**\s*(?:DPO_Chosen|DPO_Seçilen|DPO_Tercih_Edilen|DPO_Reddedilen|DPO_Rejected|DPO_|$))', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+            dpo_chosen_match = re.search(r'^\**\s*(?:DPO_Chosen|DPO_Seçilen|DPO_Tercih_Edilen)\s*(?::\**|\**:)\s*(.*?)(?=\n\**\s*(?:DPO_Rejected|DPO_Reddedilen|DPO_|$))', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+            dpo_rej_match = re.search(r'^\**\s*(?:DPO_Rejected|DPO_Reddedilen)\s*(?::\**|\**:)\s*(.*?)(?=\n\**\s*(?:DPO_|$))', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
             
-            if dpo_q_match and dpo_chosen_match and dpo_rej_match:
+            cleaned_dq = clean_val(dpo_q_match)
+            cleaned_dc = clean_val(dpo_chosen_match)
+            cleaned_dr = clean_val(dpo_rej_match)
+            
+            if cleaned_dq and cleaned_dc and cleaned_dr:
                 tr_dpo_pairs.append({
-                    "question": dpo_q_match.group(1).strip(),
-                    "chosen": dpo_chosen_match.group(1).strip(),
-                    "rejected": dpo_rej_match.group(1).strip()
+                    "question": cleaned_dq,
+                    "chosen": cleaned_dc,
+                    "rejected": cleaned_dr
                 })
             else:
                 # Fallback
@@ -596,10 +631,8 @@ class ArchiveAnalyzer:
 
             # Unload main analyzer model from VRAM to make room for TranslateGemma
             print(f"Unloading code analyzer model ('{self.model_name}') from VRAM...")
-            try:
-                self.client.generate(model=self.model_name, prompt="", keep_alive=0)
-            except Exception as e:
-                print(f"Warning: Failed to unload code analyzer model: {e}")
+            from pipeline.llm_client import unload_ollama_model
+            unload_ollama_model(self.config, self.model_name)
         else:
             print("Code Pass 1: No un-processed AST code units found.")
 
@@ -647,19 +680,18 @@ class ArchiveAnalyzer:
 
             # Unload translator model from VRAM
             print(f"Unloading translation model ('{self.translator_model}') from VRAM...")
-            try:
-                self.client.generate(model=self.translator_model, prompt="", keep_alive=0)
-            except Exception as e:
-                print(f"Warning: Failed to unload code translator model: {e}")
+            from pipeline.llm_client import unload_ollama_model
+            unload_ollama_model(self.config, self.translator_model)
         else:
             print("Code Pass 2: No code pairs require translation.")
 
         print("Code Enrichment Complete.")
 
 
-    def enrich_all(self, limit=None):
+    def enrich_all(self, limit=None, enrich_pass="all"):
         """Enriches extracted articles and AST code units in SQLite DB using a two-pass batch optimization"""
-        self.enrich_code_units(limit=limit)
+        if enrich_pass in ["all", "english"]:
+            self.enrich_code_units(limit=limit)
 
         cursor = self.conn.cursor()
 
@@ -683,19 +715,22 @@ class ArchiveAnalyzer:
         placeholders = ",".join(["?"] * len(active_ids))
         
         # --- PASS 1: Technical Analysis (Direct Turkish vs English) ---
-        if self.direct_tr_generation:
-            where_cond = "(e.id IS NULL OR e.tr_sft_qa IS NULL OR e.tr_sft_qa = '')"
+        if enrich_pass not in ["all", "english"]:
+            pass1_rows = []
         else:
-            where_cond = "(e.id IS NULL OR e.sft_qa IS NULL OR e.sft_qa = '' OR e.sft_qa = '[]' OR e.summary = 'Summary unavailable.')"
+            if self.direct_tr_generation:
+                where_cond = "(e.id IS NULL OR e.tr_sft_qa IS NULL OR e.tr_sft_qa = '')"
+            else:
+                where_cond = "(e.id IS NULL OR e.sft_qa IS NULL OR e.sft_qa = '' OR e.sft_qa = '[]' OR e.summary = 'Summary unavailable.')"
 
-        cursor.execute(f"""
-            SELECT a.id, a.title, a.extracted_text 
-            FROM articles a
-            LEFT JOIN enrichments e ON a.id = e.article_id
-            WHERE {where_cond} AND a.extracted_text IS NOT NULL AND a.extracted_text != ''
-            AND a.id IN ({placeholders})
-        """, active_ids)
-        pass1_rows = cursor.fetchall()
+            cursor.execute(f"""
+                SELECT a.id, a.title, a.extracted_text 
+                FROM articles a
+                LEFT JOIN enrichments e ON a.id = e.article_id
+                WHERE {where_cond} AND a.extracted_text IS NOT NULL AND a.extracted_text != ''
+                AND a.id IN ({placeholders})
+            """, active_ids)
+            pass1_rows = cursor.fetchall()
         
         if pass1_rows:
             mode_str = "Direct Turkish" if self.direct_tr_generation else "English"
@@ -750,16 +785,14 @@ class ArchiveAnalyzer:
             print(f"Pass 1 complete. Enriched {count1} articles ({mode_str} Mode) with {self.qa_count} Q&A pairs each.")
             
             # Unload main model from VRAM/RAM
-            print("Unloading main analyzer model from server memory...")
-            try:
-                self.client.generate(model=self.model_name, prompt="", keep_alive=0)
-            except Exception as e:
-                print(f"Warning: Failed to unload main model: {e}")
+            print(f"Unloading main analyzer model ('{self.model_name}') from server memory...")
+            from pipeline.llm_client import unload_ollama_model
+            unload_ollama_model(self.config, self.model_name)
         else:
             print("Pass 1: No articles require enrichment in the specified range.")
             
         # --- PASS 2: Turkish Translation (Only executed if direct_tr_generation is False) ---
-        if not self.direct_tr_generation:
+        if not self.direct_tr_generation and enrich_pass in ["all", "turkish"]:
             cursor.execute(f"""
                 SELECT e.article_id, a.title, e.summary, e.sft_qa, e.dpo_pairs, e.turkish_summary
                 FROM enrichments e
@@ -804,11 +837,9 @@ class ArchiveAnalyzer:
                 print(f"Pass 2 complete. Translated {count2} articles into Turkish using TranslateGemma.")
                 
                 # Unload TranslateGemma model from VRAM/RAM
-                print("Unloading translation model (TranslateGemma) from server memory...")
-                try:
-                    self.client.generate(model=self.translator_model, prompt="", keep_alive=0)
-                except Exception as e:
-                    print(f"Warning: Failed to unload translation model: {e}")
+                print(f"Unloading translation model ('{self.translator_model}') from server memory...")
+                from pipeline.llm_client import unload_ollama_model
+                unload_ollama_model(self.config, self.translator_model)
             else:
                 print("Pass 2: No articles require translation.")
         else:

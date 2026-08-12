@@ -18,7 +18,8 @@ Originally built for the Elektor Magazine Archive (1974–2025), the pipeline ha
 | **FAZ 6** | **Proje Gezgini Entegre System Prompt & Persona Editörü**: `prompt.html` şablonunun Proje Gezgini modalına entegrasyonu ve `system_prompts` (`persona_map.yaml`) şablon motoru. | ✅ **Tamamlandı** |
 | **FAZ 7** | **HF Serverless Inference & ZeroGPU Hibrit Fallback Motoru**: Yerel GPU (`192.168.1.14`) çevrimdışı/yoğun olduğunda HF Serverless Inference API ve ZeroGPU Spaces üzerine otomatik istek yönlendirme. | 💡 **Gelecek Vizyonu** |
 | **FAZ 8** | **Chat Arenası Tam Markdown & LaTeX Matematik Formül Desteği**: İleride karmaşık LaTeX denklem, tablo ve tam Markdown rendering motoru entegrasyonu (Düşük öncelikli). | 💡 **Gelecek Vizyonu (Düşük Öncelik)** |
-| **FAZ 9** | **OpenAI-Uyumlu API Standardına Geçiş & Sunucu Performans / Hata Ayıklama Oturumu**: Ham Ollama istemcisinden evrensel `OpenAI` (`v1/chat/completions`) SDK standardına geçiş; vLLM, Ollama v1, SGLang ve Cloud API tak-çalıştır desteği; sunucu soket/zaman aşımı iyileştirmeleri, bellek sızıntısı ve kod refactoring oturumu. | 🔥 **YÜKSEK ÖNCELİKLİ (YOL HARİTASI)** |
+| **FAZ 9** | **OpenAI-Uyumlu API Standardına Geçiş & Sunucu Performans / Hata Ayıklama Oturumu**: Ham Ollama istemcisinden evrensel `OpenAI` (`v1/chat/completions`) SDK standardına geçiş; vLLM, Ollama v1, SGLang ve Cloud API tak-çalıştır desteği; sunucu soket/zaman aşımı iyileştirmeleri, bellek sızıntısı ve kod refactoring oturumu. Ön uç terminal panelinde akıllı kaydırma kilidi (auto-scroll-lock) ile canlı log akışında sayfa yenilense dahi geçmiş okuma kolaylığı sağlandı. | ✅ **Tamamlandı** |
+| **FAZ 10** | **Multimodal Tarama & Çizim / Grafik Anlamlandırma Motoru (DeepSeek-OCR)**: Taralı PDF'lerdeki teknik çizimleri, devre şemalarını, grafik şemaları ve görsel tabloları anlamlandırmak için `deepseek-ocr:3b-bf16` vizyon modeli entegrasyonu, akıllı yerleşim/kutu filtreleme (smart bounding box filtering) ve otomatik VRAM offload mekanizması. 2x 16GB GPU üzerinde Paralel Sharding (Port 11434 & 11435) ile SQLite WAL modunda eşzamanlı çalışma desteği. | ✅ **Tamamlandı** |
 
 ---
 
@@ -93,7 +94,7 @@ elektor/
 ### Python & Frontend Setup
 1. **Python Environment**:
    ```bash
-   pip install pypdf pypdfium2 ollama qdrant-client pandas pytest fastapi uvicorn
+    pip install pypdf pypdfium2 ollama openai qdrant-client pandas pytest fastapi uvicorn
    ```
 2. **Frontend Web UI Build**:
    ```bash
@@ -136,6 +137,13 @@ elektor/
   "project_id": "rendergit_01"
 }
 ```
+
+* **OpenAI Uyumlu Yapılandırma Seçenekleri (Opsiyonel)**:
+  * `"openai_base_url"`: LLM / Embedding istekleri için temel OpenAI API URL'i (Örn: `http://192.168.1.14:11434/v1`, vLLM, SGLang, Groq). Tanımlanmazsa varsayılan olarak `"ollama_url"` parametresi sonuna otomatik `/v1` eklenerek çözümlenir.
+  * `"openai_api_key"`: Groq, DeepSeek vb. harici sağlayıcılar için API anahtarı. Varsayılan: `"ollama"`.
+  * `"openai_timeout"`: Soket bağlantı zaman aşımı süresi (saniye). Varsayılan: `600.0`.
+  * `"analyzer_max_chars"`: LLM zenginleştirme aşamasına gönderilen döküman segmentlerinin maksimum karakter uzunluğu. Daha güçlü donanım ve geniş bağlam penceresine (context window) sahip modeller için artırılabilir. Varsayılan: `4000`.
+  * `"analyzer_max_tokens"`: Üretilecek yanıtın maksimum token sınırı (`num_predict` / `max_tokens`). Varsayılan: `8192`.
 
 ---
 

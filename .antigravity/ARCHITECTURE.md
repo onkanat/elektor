@@ -78,7 +78,30 @@ graph TD
 ### 📌 FAZ 8: Chat Arenası Tam Markdown & LaTeX Matematik Formül Desteği - [GELECEK VİZYONU (DÜŞÜK ÖNCELİK)]
 - **Zengin İfadeler**: Mevcut hafif metin & kod renklendiricisi tam ve yeterli olmakla birlikte, ileride karmaşık LaTeX matris/denklem gösterimleri me Markdown tabloları için tam rendering motoru entegrasyonu.
 
-### 🔥 FAZ 9: OpenAI-Uyumlu API Standardına Geçiş & Sunucu Performans / Hata Ayıklama Oturumu - [YÜKSEK ÖNCELİK]
+### 📌 FAZ 9: OpenAI-Uyumlu API Standardına Geçiş & Sunucu Performans / Hata Ayıklama Oturumu - [TAMAMLANDI]
 - **Evrensel OpenAI SDK Standardı (`v1/chat/completions`)**: Özel ham `ollama` Python istemcisi yerine sektör standardı `openai` SDK (`from openai import OpenAI / AsyncOpenAI`) ve `base_url` mimarisine geçiş.
 - **Sunucu & Donanım Bağımsızlığı**: Tek bir istemci mimarisi ile yerel Ollama (`http://192.168.1.14:11434/v1`), vLLM, SGLang, LM Studio, DeepSeek, Groq, OpenRouter ve Hugging Face Inference API uç noktalarına sıfır kod değişikliği ile tak-çalıştır erişim.
-- **Hata Ayıklama, Kod İyileştirme & Performans Oturumu**: Yeni özellik eklemek yerine mevcut sunucu bağlantı yönetimi (connection pooling), soket zaman aşımları, bellek sızıntısı önleme ve boru hattı paralel kilitlenme (deadlock) hata ayıklama / refactoring odaklı sistem oturumu.
+- **Hata Ayıklama, Kod İyileştirme & Performans Oturumu**: Yeni özellik eklemek yerine mevcut sunucu bağlantı yönetimi (connection pooling), soket zaman aşımları, bellek sızıntısı önleme ve boru hattı paralel kilitlenme (deadlock) hata ayıklama / refactoring odaklı sistem oturumu. Ön uç terminal panelinde akıllı kaydırma kilidi (auto-scroll-lock) ile canlı log akışında sayfa yenilense dahi geçmiş okuma kolaylığı sağlandı.
+
+### 📌 FAZ 10: Multimodal Tarama & Çizim / Grafik Anlamlandırma Motoru (DeepSeek-OCR) - [TAMAMLANDI]
+- **DeepSeek-OCR Entegrasyonu (`deepseek-ocr:3b-bf16`)**: [deepseek-ocr](https://ollama.com/library/deepseek-ocr) ve [arxiv.org/abs/2510.18234](https://arxiv.org/abs/2510.18234) vizyon mimarisi entegre edilmiştir. PDF'lerde yer alan devre şemaları, pinout diyagramları, grafikler ve basılı şemalar `VisionOCRManager` üzerinden otomatik anlamlandırılır.
+- **Akıllı Düzen Filtreleme (Smart Layout Analysis)**: `layout_analyzer.py` içerisindeki akıllı bounding box filtreleme algoritması (sayfa boyutu oran denetimi, çizgi ayraç eleme, IOU birleştirmesi) ile anlamsız vektör gürültüsü elenmiş ve yalnızca gerçek teknik çizimler VLM'e aktarılmıştır.
+- **Otomatik VRAM Offload & 2x GPU Sharding**: Vizyon OCR adımı biter bitmez `unload_ollama_model` çağrılarak VRAM boşaltılır. 2x 16GB GPU donanımı (Port 11434 & 11435) üzerinde SQLite WAL modunda (`PRAGMA journal_mode=WAL;`) çakışmasız paralel zenginleştirme sağlanmıştır.
+
+---
+
+## 📊 Ollama Cloud Model Benchmark Referansı
+
+İleride boru hattı (pipeline) ve sentezleme aşamalarında kullanılmak üzere Ollama Cloud üzerindeki aktif modellerin performans test sonuçları:
+
+| Model | Prompt Tokens | Gen Tokens | Eval Speed (t/s) | Wall Time (s) | Durum |
+|---|---|---|---|---|---|
+| `nemotron-3-nano:30b` | 28 | 129 | **130.03** | 0.99s | ✅ |
+| `gpt-oss:20b` | 77 | 131 | **57.78** | 2.27s | ✅ |
+| `gpt-oss:120b` | 77 | 102 | **54.34** | 1.88s | ✅ |
+| `minimax-m3` | 186 | 51 | **42.93** | 1.19s | ✅ |
+| `gemma4:31b` | 23 | 20 | **18.15** | 1.10s | ✅ |
+| `nemotron-3-ultra` | 28 | 60 | **15.41** | 3.89s | ✅ |
+| `nemotron-3-super` | 28 | 113 | **6.65** | 16.99s | ✅ |
+
+*Not: `nemotron-3-super` modelindeki 16.99s süresi, modelin üretime başlamadan önceki yüksek içsel düşünme (reasoning/CoT) adımından kaynaklanmaktadır.*

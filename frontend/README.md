@@ -29,4 +29,11 @@ If you are developing a production application, we recommend enabling type-aware
 }
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Elektor Web Dashboard Components
+
+This React + TypeScript + Vite frontend provides the interactive control suite for the **Elektor Universal PDF & Rendergit Synthetic Dataset Pipeline**:
+
+- **SectionConfig**: Handles pipeline parameters, generation language, persona selection, vision OCR settings (`deepseek-ocr:3b-bf16`), and **Parallel Sharding** controls (shards count, GPU ports like `11434,11435`).
+- **SectionTerminal**: Live streaming console log output with intelligent **Auto-Scroll-Lock** capability to preserve scroll position during active execution.
+- **ProjectExplorer Modal**: Integrated System Prompt, Persona Editor, and multi-project dataset merger.
+- **HF & Cloud GPU Modal**: 2-stage Dry-Run audit and Hugging Face Hub dataset uploader + RunPod/Unsloth cloud payload generator.

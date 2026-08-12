@@ -79,6 +79,127 @@ def reset_pipeline_data(config_path="config.json"):
                 print(f"Warning: Could not delete export item {item.name}: {e}")
     print("Reset completed successfully. Starting pipeline from clean state.\n")
 
+def run_sharded_enrichment(config_path, limit, shards_count, shard_ports_str, enrich_pass="all"):
+    import sqlite3
+    import subprocess
+    import shutil
+    import tempfile
+    import urllib.parse
+    import threading
+    
+    ports = [p.strip() for p in shard_ports_str.split(",") if p.strip()]
+    if not ports:
+        print("Error: No ports provided for sharding.")
+        sys.exit(1)
+        
+    with open(config_path, "r", encoding="utf-8") as f:
+        base_config = json.load(f)
+        
+    db_path = base_config.get("db_path", "database/rapberry_pi_pico_all.db")
+    
+    # Get all article IDs to split range logically
+    conn = sqlite3.connect(db_path, timeout=60.0)
+    cur = conn.cursor()
+    try:
+        cur.execute("PRAGMA journal_mode=WAL;")
+        cur.execute("PRAGMA busy_timeout=60000;")
+    except sqlite3.OperationalError:
+        pass
+    cur.execute("SELECT id FROM articles ORDER BY id")
+    all_ids = [r[0] for r in cur.fetchall()]
+    conn.close()
+    
+    start, end = 0, len(all_ids)
+    if isinstance(limit, tuple):
+        start, end = limit
+    elif isinstance(limit, int):
+        start, end = 0, limit
+    active_ids = all_ids[start:end]
+    
+    total_count = len(active_ids)
+    if total_count == 0:
+        print("No articles to process in the specified range.")
+        return
+        
+    chunk_size = (total_count + shards_count - 1) // shards_count
+    print(f"Parallel Sharding: Splitting {total_count} articles into {shards_count} shards (chunk size ~{chunk_size})...")
+    
+    # Determine passes to run
+    passes_to_run = []
+    if enrich_pass == "all":
+        passes_to_run = ["english", "turkish"]
+    else:
+        passes_to_run = [enrich_pass]
+        
+    for p_mode in passes_to_run:
+        print(f"\n--- Starting Sharded Enrichment Phase: {p_mode.upper()} ---")
+        processes = []
+        temp_files = []
+        
+        try:
+            for i in range(shards_count):
+                shard_start_idx = start + i * chunk_size
+                shard_end_idx = min(start + (i + 1) * chunk_size, end)
+                
+                if shard_start_idx >= shard_end_idx:
+                    break
+                    
+                port = ports[i % len(ports)]
+                shard_config = base_config.copy()
+                
+                # Update Ollama URL port
+                original_url = shard_config.get("ollama_url", "http://localhost:11434")
+                parsed = urllib.parse.urlparse(original_url)
+                netloc_parts = parsed.netloc.split(":")
+                ip = netloc_parts[0]
+                shard_config["ollama_url"] = f"{parsed.scheme}://{ip}:{port}"
+                
+                fd, temp_cfg_path = tempfile.mkstemp(suffix=f"_shard_{i}.json")
+                temp_files.append(temp_cfg_path)
+                with os.fdopen(fd, "w", encoding="utf-8") as tf:
+                    json.dump(shard_config, tf, indent=2)
+                    
+                cmd_args = [
+                    sys.executable, "run.py",
+                    "--config", temp_cfg_path,
+                    "enrich",
+                    "--limit", f"{shard_start_idx}:{shard_end_idx}",
+                    "--pass", p_mode
+                ]
+                print(f"Starting Shard {i} ({p_mode.upper()} on Port {port}): Range {shard_start_idx}:{shard_end_idx}...")
+                p = subprocess.Popen(
+                    cmd_args,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1
+                )
+                processes.append((i, p))
+                
+            def log_stream(shard_idx, proc):
+                for line in iter(proc.stdout.readline, ''):
+                    print(f"[Shard {shard_idx}] {line.rstrip()}")
+                    
+            threads = []
+            for shard_idx, p in processes:
+                t = threading.Thread(target=log_stream, args=(shard_idx, p))
+                t.start()
+                threads.append(t)
+                
+            for t in threads:
+                t.join()
+                
+            for shard_idx, p in processes:
+                p.wait()
+                print(f"Shard {shard_idx} ({p_mode.upper()} Phase) completed with exit code: {p.returncode}")
+                
+        finally:
+            for tf in temp_files:
+                try:
+                    os.unlink(tf)
+                except Exception:
+                    pass
+
 def main():
     parser = argparse.ArgumentParser(
         description="Universal PDF & RAG Dataset Processing Pipeline CLI",
@@ -95,6 +216,13 @@ Examples:
 """
     )
     
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config.json",
+        help="Path to custom configuration JSON file (default: config.json)",
+    )
+    
     subparsers = parser.add_subparsers(dest="command", help="Pipeline commands")
     
     # Extract subcommand
@@ -106,6 +234,9 @@ Examples:
     enrich_parser = subparsers.add_parser("enrich", help="Enrich text using local Ollama model (Summary, Q&A, DPO, Turkish)")
     enrich_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit the number of articles to enrich (supports range 'start:end')")
     enrich_parser.add_argument("--reset", action="store_true", help="Reset all databases and exported datasets before running")
+    enrich_parser.add_argument("--shards", type=int, default=1, help="Number of parallel shards to run")
+    enrich_parser.add_argument("--shard-ports", type=str, default=None, help="Comma-separated list of Ollama port numbers (e.g. 11434,11435)")
+    enrich_parser.add_argument("--pass", dest="enrich_pass", type=str, choices=["all", "english", "turkish"], default="all", help="Enrichment pass to run (all, english, turkish)")
 
     # Embed subcommand
     embed_parser = subparsers.add_parser("embed", help="Chunk text, generate embeddings, and load to local Qdrant Vector DB")
@@ -132,6 +263,14 @@ Examples:
     pipeline_parser = subparsers.add_parser("pipeline", help="Run extract, enrich, embed, and export in a single run")
     pipeline_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit the number of sample articles to process (default: all articles, supports range 'start:end' or integer)")
     pipeline_parser.add_argument("--reset", action="store_true", help="Reset all databases and exported datasets before running the pipeline")
+    pipeline_parser.add_argument("--shards", type=int, default=1, help="Number of parallel shards to run")
+    pipeline_parser.add_argument("--shard-ports", type=str, default=None, help="Comma-separated list of Ollama port numbers (e.g. 11434,11435)")
+    pipeline_parser.add_argument("--pass", dest="enrich_pass", type=str, choices=["all", "english", "turkish"], default="all", help="Enrichment pass to run (all, english, turkish)")
+    
+    # API subcommand
+    api_parser = subparsers.add_parser("api", help="Launch the unified web dashboard (FastAPI + React)")
+    api_parser.add_argument("--port", type=int, default=3456, help="Port to run the API server on")
+    api_parser.add_argument("--host", type=str, default="127.0.0.1", help="Host to run the API server on")
     
     args = parser.parse_args()
     
@@ -142,11 +281,11 @@ Examples:
     setup_global_project_logging()
         
     if getattr(args, "reset", False):
-        reset_pipeline_data()
+        reset_pipeline_data(args.config)
 
     if args.command == "extract":
         print("=== Step 1: Extraction & Preprocessing ===")
-        extractor = ArchiveExtractor()
+        extractor = ArchiveExtractor(config_path=args.config)
         try:
             extractor.process_all_articles(limit=args.limit)
         finally:
@@ -154,20 +293,27 @@ Examples:
             
     elif args.command == "enrich":
         print("=== Step 2: Analysis & AI Model Enrichment ===")
-        analyzer = ArchiveAnalyzer()
-        try:
-            analyzer.enrich_all(limit=args.limit)
-        finally:
-            analyzer.close()
+        shards = getattr(args, "shards", 1)
+        shard_ports = getattr(args, "shard_ports", None)
+        enrich_pass = getattr(args, "enrich_pass", "all")
+        
+        if shards > 1 and shard_ports:
+            run_sharded_enrichment(args.config, args.limit, shards, shard_ports, enrich_pass)
+        else:
+            analyzer = ArchiveAnalyzer(config_path=args.config)
+            try:
+                analyzer.enrich_all(limit=args.limit, enrich_pass=enrich_pass)
+            finally:
+                analyzer.close()
             
     elif args.command == "embed":
         print("=== Step 3: Embed & Load to Qdrant Vector DB ===")
-        store = ArchiveVectorStore()
+        store = ArchiveVectorStore(config_path=args.config)
         store.load_to_vector_db(limit=args.limit)
         
     elif args.command == "query":
         print(f"=== Querying Vector DB for: '{args.query_text}' ===")
-        store = ArchiveVectorStore()
+        store = ArchiveVectorStore(config_path=args.config)
         results = store.search(args.query_text, top_k=args.top_k)
         if not results:
             print("No matching documents found.")
@@ -179,7 +325,7 @@ Examples:
             
     elif args.command == "export":
         print("=== Step 4: Compiling and Exporting Datasets ===")
-        builder = DatasetBuilder()
+        builder = DatasetBuilder(config_path=args.config)
         builder.export_datasets()
 
     elif args.command == "hf_upload":
@@ -190,7 +336,7 @@ Examples:
         project_id = args.project_id
         if not project_id:
             try:
-                with open("config.json", "r", encoding="utf-8") as f:
+                with open(args.config, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
                     project_id = cfg.get("project_id", "sdr_engineers")
             except Exception:
@@ -212,7 +358,7 @@ Examples:
         
         # 1. Extract
         print("\n--- Step 1: Extracting text ---")
-        extractor = ArchiveExtractor()
+        extractor = ArchiveExtractor(config_path=args.config)
         try:
             extractor.process_all_articles(limit=limit)
         finally:
@@ -220,23 +366,34 @@ Examples:
             
         # 2. Enrich
         print("\n--- Step 2: Generating Q&A, DPO, and Turkish translation ---")
-        analyzer = ArchiveAnalyzer()
-        try:
-            analyzer.enrich_all(limit=limit)
-        finally:
-            analyzer.close()
+        shards = getattr(args, "shards", 1)
+        shard_ports = getattr(args, "shard_ports", None)
+        enrich_pass = getattr(args, "enrich_pass", "all")
+        if shards > 1 and shard_ports:
+            run_sharded_enrichment(args.config, limit, shards, shard_ports, enrich_pass)
+        else:
+            analyzer = ArchiveAnalyzer(config_path=args.config)
+            try:
+                analyzer.enrich_all(limit=limit, enrich_pass=enrich_pass)
+            finally:
+                analyzer.close()
             
         # 3. Embed
         print("\n--- Step 3: Generating embeddings and loading to Qdrant ---")
-        store = ArchiveVectorStore()
+        store = ArchiveVectorStore(config_path=args.config)
         store.load_to_vector_db(limit=limit)
         
         # 4. Export
         print("\n--- Step 4: Exporting datasets ---")
-        builder = DatasetBuilder()
+        builder = DatasetBuilder(config_path=args.config)
         builder.export_datasets()
         
         print("\nPipeline execution complete!")
+
+    elif args.command == "api":
+        print(f"=== Starting Web UI Dashboard on http://{args.host}:{args.port} ===")
+        import uvicorn
+        uvicorn.run("api_server:app", host=args.host, port=args.port, reload=True)
 
 if __name__ == "__main__":
     main()

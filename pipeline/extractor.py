@@ -41,12 +41,24 @@ class ArchiveExtractor:
         self.ocr_threshold = self.config.get("ocr_threshold_chars", 100)
         self.tesseract_cmd = self.config.get("tesseract_cmd", "tesseract")
         
-        # Connect/Initialize SQLite database
-        self.conn = sqlite3.connect(self.db_path)
+        self.enable_vision_ocr = self.config.get("enable_vision_ocr", False)
+        if self.enable_vision_ocr:
+            from pipeline.layout_analyzer import DocumentLayoutAnalyzer
+            from pipeline.vision_ocr import VisionOCRManager
+            self.layout_analyzer = DocumentLayoutAnalyzer()
+            self.vision_ocr = VisionOCRManager(config_path=config_path)
+            
+        # Connect/Initialize SQLite database with WAL mode and 60s timeout
+        self.conn = sqlite3.connect(self.db_path, timeout=60.0)
         self.create_tables()
 
     def create_tables(self):
         cursor = self.conn.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL;")
+            cursor.execute("PRAGMA busy_timeout=60000;")
+        except sqlite3.OperationalError:
+            pass
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS articles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -275,7 +287,13 @@ class ArchiveExtractor:
                 if ocr_success:
                     extracted_text = ocr_text
                     is_ocr = True
-            
+                    
+            if self.enable_vision_ocr:
+                num_pages = len(reader.pages)
+                vision_text = self._process_vision_ocr_for_pages(pdf_path, 0, num_pages - 1)
+                if vision_text:
+                    extracted_text += vision_text
+                    
             return extracted_text, is_ocr
         except Exception as e:
             print(f"Error extracting text from {pdf_path}: {e}")
@@ -325,10 +343,41 @@ class ArchiveExtractor:
                     extracted_text = ocr_text
                     is_ocr = True
                     
+            if self.enable_vision_ocr:
+                vision_text = self._process_vision_ocr_for_pages(pdf_path, start_page, end_page)
+                if vision_text:
+                    extracted_text += vision_text
+                    
             return extracted_text, is_ocr
         except Exception as e:
             print(f"Error extracting range {start_page}-{end_page} from {pdf_path}: {e}")
             return "", False
+
+    def _process_vision_ocr_for_pages(self, pdf_path, start_page, end_page):
+        if not self.enable_vision_ocr:
+            return ""
+            
+        print(f"  [Vision OCR: {self.vision_ocr.model_vision}] Analyzing visual layout on pages {start_page+1}-{end_page+1} of {Path(pdf_path).name}...")
+        vision_descriptions = []
+        
+        for page_idx in range(start_page, end_page + 1):
+            elements = self.layout_analyzer.analyze_page(str(pdf_path), page_idx)
+            for el in elements:
+                img_path = el.get("image_path")
+                if img_path and os.path.exists(img_path):
+                    context = el.get("context", "")
+                    print(f"    [VLM / DeepSeek-OCR] Describing visual zone {el['id']} (caption context: '{context[:45].strip()}...')...")
+                    desc = self.vision_ocr.describe_image(img_path, caption_context=context)
+                    
+                    block_md = (
+                        f"\n\n--- [VISUAL & SCHEMATIC CONTENT: Page {page_idx+1} ({el['id']})] ---\n"
+                        f"**Element Type**: {el['type'].upper()}\n"
+                        f"**Bounding Box**: {el['bbox']}\n"
+                        f"**Visual OCR & Diagram Analysis**:\n{desc}\n"
+                    )
+                    vision_descriptions.append(block_md)
+                    
+        return "".join(vision_descriptions)
 
     def ocr_pdf_pages(self, pdf_path, start_page, end_page):
         """Renders specific pages of a PDF and runs OCR on them"""
@@ -613,6 +662,10 @@ class ArchiveExtractor:
         print(f"Extraction step completed. Processed {count} new chapters/documents.")
 
     def close(self):
+        if self.enable_vision_ocr and hasattr(self, "vision_ocr") and self.vision_ocr:
+            print(f"Unloading vision model ('{self.vision_ocr.model_vision}') from VRAM...")
+            from pipeline.llm_client import unload_ollama_model
+            unload_ollama_model(self.config, self.vision_ocr.model_vision)
         self.conn.close()
 
 if __name__ == "__main__":

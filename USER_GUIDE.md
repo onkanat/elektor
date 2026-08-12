@@ -12,6 +12,8 @@ Bu kılavuz, **Elektor Universal PDF & Rendergit Code Dataset Generator Platform
 4. [💬 Bölüm C: Analyzer Chat & Model Sandbox](#4-bölüm-c-analyzer-chat--model-sandbox)
 5. [🗂️ Proje Gezgini & Veri Seti Birleştirme Motoru (Faz 3)](#5-proje-gezgini--veri-seti-birleştirme-motoru-faz-3)
 6. [🤗 Hugging Face Hub & Bulut GPU Dağıtım Kiti (Faz 4)](#6-hugging-face-hub--bulut-gpu-dağıtım-kiti-faz-4)
+7. [🚀 OpenAI-Uyumlu API & Performans Oturumu (Faz 9)](#7-openai-uyumlu-api--performans-oturumu-faz-9)
+8. [👁️ Multimodal Vizyon (DeepSeek-OCR) & 2x GPU Paralel Sharding (Faz 10)](#8-multimodal-vizyon-deepseek-ocr--2x-gpu-paralel-sharding-faz-10)
 
 ---
 
@@ -25,6 +27,38 @@ Platform; teknik dökümanları (PDF kitaplar, veri kâğıtları, dergi arşivl
 - **🗂️ Proje Etiketi**: Aktif çalışılan projeyi gösterir. Tıklandığında Proje Gezgini açılır.
 - **🤗 HF & Bulut GPU**: Faz 4 Hugging Face ve Cloud GPU aktarım modalını açar.
 - **Ollama Durumu**: Yerel Ollama LLM sunucusunun bağlantı durumunu gösterir.
+
+---
+
+## 🚀 Kurulum & Çalıştırma (Venv & API Server)
+
+### 📦 Sanal Ortam Kurulumu (Python Virtual Environment)
+Projenin bağımlılıklarını izole ve kararlı bir şekilde çalıştırmak için sanal ortam (venv) kullanılması şiddetle tavsiye edilir:
+```bash
+# 1. Sanal ortamı oluşturun (Python 3.11+)
+python3.11 -m venv .venv
+
+# 2. Sanal ortamı aktif edin
+# macOS/Linux:
+source .venv/bin/activate
+# Windows:
+.venv\Scripts\activate
+
+# 3. Bağımlılıkları yükleyin
+pip install -r requirements.txt
+```
+
+### 🖥️ Web UI Dashboard'u Başlatma (FastAPI + React)
+Platformun birleşik web arayüzünü ve API sunucusunu iki şekilde başlatabilirsiniz:
+* **run.py Üzerinden (Önerilen):**
+  ```bash
+  python run.py api
+  ```
+* **Uvicorn ile Doğrudan:**
+  ```bash
+  python -m uvicorn api_server:app --reload --port 3456
+  ```
+Sunucu başladığında tarayıcınızda `http://localhost:3456` adresini açarak sentetik veri platformunu kullanmaya başlayabilirsiniz.
 
 ---
 
@@ -142,4 +176,22 @@ Yüzlerce saatlik GPU emeğini korumak için 2 aşamalı güvenlik akışı suna
 
 ---
 
-*Rehber Son Güncelleme: 2026-08-05 | Elektor Universal Pipeline v4.0*
+## 7. 🚀 OpenAI-Uyumlu API & Performans Oturumu (Faz 9)
+
+- **Evrensel Client Standardı**: Ham Ollama istemcisinden `openai` SDK (`v1/chat/completions`) mimarisine geçilmiştir.
+- **Sunucu & Donanım Bağımsızlığı**: Tek bir kod tabanı ile yerel Ollama, vLLM, SGLang, Groq ve Hugging Face uç noktalarına tak-çalıştır erişim.
+- **Canlı Log Akışı Kaydırma Kilidi**: Ön uç terminal panelinde akıllı kaydırma kilidi (auto-scroll-lock) ile canlı günlük akışında sayfa yenilense dahi geçmiş okuma kolaylaştırılmıştır.
+
+---
+
+## 8. 👁️ Multimodal Vizyon (DeepSeek-OCR) & 2x GPU Paralel Sharding (Faz 10)
+
+- **`deepseek-ocr:3b-bf16` Vizyon Entegrasyonu**: PDF belgelerindeki devre şemaları, pinout diyagramları, grafik şemaları ve görsel tablolar `<image>\n<|grounding|>` istem formatı ile anlamlandırılır.
+- **Akıllı Çerçeve & Düzen Analizi (Smart Layout Filtering)**: Ince ayraç çizgileri, küçük ikonlar ve sayfa kenarlıkları otomatik elenerek yalnızca gerçek teknik görseller VLM'e gönderilir.
+- **VRAM Offloading & 2x 16GB GPU Sharding**: 
+  - Vizyon taraması tüm döküman çıkarma aşaması boyunca VRAM'de sabit kalır ve extraction adımı bitince `extractor.close()` ile VRAM'den kaldırılır.
+  - 2 fiziksel 16GB GPU (Port 11434 & 11435) üzerinde SQLite WAL modunda (`PRAGMA journal_mode=WAL;`) kilitlenmesiz paralel zenginleştirme sağlanır.
+
+---
+
+*Rehber Son Güncelleme: 2026-08-12 | Elektor Universal Pipeline v10.0*
