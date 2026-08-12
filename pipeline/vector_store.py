@@ -1,11 +1,11 @@
 import sqlite3
 import json
 import uuid
-import ollama
 import time
 from pathlib import Path
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
+from pipeline.llm_client import get_openai_client
 
 class ArchiveVectorStore:
     def __init__(self, config_path="config.json"):
@@ -23,9 +23,6 @@ class ArchiveVectorStore:
         self.chunk_size = self.config.get("chunk_size", 800)
         self.chunk_overlap = self.config.get("chunk_overlap", 150)
         self.collection_name = self.config.get("qdrant_collection_name", "elektor_articles")
-        
-        # Connect to Ollama
-        self.ollama_client = ollama.Client(host=self.ollama_url, timeout=180.0)
         
         # Connect to local Qdrant Vector DB on disk (with retry loop for lock resolution)
         self.qdrant_client = None
@@ -45,16 +42,17 @@ class ArchiveVectorStore:
         
         # Ensure collection exists
         self.ensure_collection()
-
+        
     def get_embedding_dimension(self):
         """Get embedding dimension by running a test vector"""
         try:
-            res = self.ollama_client.embeddings(model=self.model_embedding, prompt="test")
-            return len(res["embedding"])
+            client = get_openai_client(self.config)
+            res = client.embeddings.create(model=self.model_embedding, input=["test"])
+            return len(res.data[0].embedding)
         except Exception as e:
             print(f"Error testing embedding model dimension: {e}. Defaulting to 768.")
             return 768 # nomic-embed-text standard dimension
-
+            
     def ensure_collection(self):
         """Creates the Qdrant collection if it does not already exist"""
         collections = [col.name for col in self.qdrant_client.get_collections().collections]
@@ -139,8 +137,9 @@ class ArchiveVectorStore:
             for chunk_idx, chunk in enumerate(chunks):
                 try:
                     # Get embedding vector
-                    res = self.ollama_client.embeddings(model=self.model_embedding, prompt=chunk)
-                    vector = res["embedding"]
+                    client = get_openai_client(self.config)
+                    res = client.embeddings.create(model=self.model_embedding, input=[chunk])
+                    vector = res.data[0].embedding
                     
                     point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{filename}_chunk_{chunk_idx}"))
                     
@@ -182,23 +181,35 @@ class ArchiveVectorStore:
     def search(self, query, top_k=5):
         """Performs semantic search over the vectorized articles"""
         try:
-            res = self.ollama_client.embeddings(model=self.model_embedding, prompt=query)
-            query_vector = res["embedding"]
+            client = get_openai_client(self.config)
+            res = client.embeddings.create(model=self.model_embedding, input=[query])
+            query_vector = res.data[0].embedding
             
-            search_results = self.qdrant_client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector,
-                limit=top_k
-            )
+            if hasattr(self.qdrant_client, 'query_points'):
+                q_res = self.qdrant_client.query_points(
+                    collection_name=self.collection_name,
+                    query=query_vector,
+                    limit=top_k
+                )
+                search_results = getattr(q_res, 'points', q_res)
+            elif hasattr(self.qdrant_client, 'search'):
+                search_results = self.qdrant_client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_vector,
+                    limit=top_k
+                )
+            else:
+                raise AttributeError("QdrantClient has neither 'query_points' nor 'search' method.")
             
             results = []
             for hit in search_results:
+                payload = getattr(hit, 'payload', {}) or {}
                 results.append({
-                    "score": hit.score,
-                    "title": hit.payload["title"],
-                    "year": hit.payload["year"],
-                    "filename": hit.payload["filename"],
-                    "text": hit.payload["text"]
+                    "score": getattr(hit, 'score', 0.0),
+                    "title": payload.get("title", ""),
+                    "year": payload.get("year", ""),
+                    "filename": payload.get("filename", ""),
+                    "text": payload.get("text", "")
                 })
             return results
         except Exception as e:
