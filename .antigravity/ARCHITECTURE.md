@@ -90,6 +90,10 @@ graph TD
 - **Akıllı Düzen Filtreleme (Smart Layout Analysis)**: `layout_analyzer.py` içerisindeki akıllı bounding box filtreleme algoritması (sayfa boyutu oran denetimi, çizgi ayraç eleme, IOU birleştirmesi) ile anlamsız vektör gürültüsü elenmiş ve yalnızca gerçek teknik çizimler VLM'e aktarılmıştır.
 - **Otomatik VRAM Offload & 2x GPU Sharding**: Vizyon OCR adımı biter bitmez `unload_ollama_model` çağrılarak VRAM boşaltılır. 2x 16GB GPU donanımı (Port 11434 & 11435) üzerinde SQLite WAL modunda (`PRAGMA journal_mode=WAL;`) çakışmasız paralel zenginleştirme sağlanmıştır.
 
+### 📌 FAZ 11: Otomatik Multimodal Görsel İnce-Ayar Veri Seti Motoru (Visual Instruction Tuning / LLaVA Format) - [GELECEK VİZYONU (PLANLANAN)]
+- **Görsel Otomatik Etiketleme & Kırpma Motoru (`downloads/extracted_images/`)**: PDF kırpma motorunun ürettiği bağımsız görsel ve şema dosyalarını (`.png`) `deepseek-ocr:3b-bf16` veya `qwen2.5-vl` ile otomatik etiketleyip görsel grounding, teknik devre açıklamaları ve soru-cevap çiftleri oluşturma.
+- **LLaVA / Qwen-VL Formatında İhraç (`multimodal_visual_dataset.jsonl`)**: Üretilen görsel ve metin eşleşmelerinin multimodal LLM eğitimlerine (LLaVA, Qwen2-VL, InstructBLIP) uygun `"image": "path/to/img.png"`, `"conversations": [...]` şemasında otomatik paketlenmesi.
+
 ---
 
 ## 📊 Ollama Cloud Model Benchmark Referansı
