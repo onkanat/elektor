@@ -122,6 +122,12 @@ class ArchiveAnalyzer:
             cursor.execute("ALTER TABLE enrichments ADD COLUMN tr_sft_qa TEXT")
         if "tr_dpo_pairs" not in existing_cols:
             cursor.execute("ALTER TABLE enrichments ADD COLUMN tr_dpo_pairs TEXT")
+        if "human_rating" not in existing_cols:
+            cursor.execute("ALTER TABLE enrichments ADD COLUMN human_rating INTEGER DEFAULT 0")
+        if "is_excluded" not in existing_cols:
+            cursor.execute("ALTER TABLE enrichments ADD COLUMN is_excluded INTEGER DEFAULT 0")
+        if "human_feedback" not in existing_cols:
+            cursor.execute("ALTER TABLE enrichments ADD COLUMN human_feedback TEXT")
         self.conn.commit()
 
     def call_ollama_json(self, system_prompt, user_prompt, model=None, keep_alive=None, num_predict=8192):

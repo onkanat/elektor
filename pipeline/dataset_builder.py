@@ -73,23 +73,38 @@ class DatasetBuilder:
         cursor.execute("PRAGMA table_info(enrichments)")
         cols = [c[1] for c in cursor.fetchall()]
         has_tr_qa = "tr_sft_qa" in cols and "tr_dpo_pairs" in cols
+        has_is_excluded = "is_excluded" in cols
+
+        where_clause = "WHERE (e.is_excluded IS NULL OR e.is_excluded = 0)" if has_is_excluded else ""
 
         if has_tr_qa:
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT a.title, a.year, e.summary, e.turkish_title, e.turkish_summary, 
                        e.sft_qa, e.dpo_pairs, e.tr_sft_qa, e.tr_dpo_pairs
                 FROM enrichments e
                 JOIN articles a ON a.id = e.article_id
+                {where_clause}
             """)
         else:
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT a.title, a.year, e.summary, e.turkish_title, e.turkish_summary, 
                        e.sft_qa, e.dpo_pairs, NULL, NULL
                 FROM enrichments e
                 JOIN articles a ON a.id = e.article_id
+                {where_clause}
             """)
         rows = cursor.fetchall()
         
+        def safe_str(val):
+            if val is None:
+                return ""
+            if isinstance(val, dict):
+                # If it's a dict, try to extract logical string fields or fallback to string representation
+                val = val.get("text", val.get("question", val.get("answer", val.get("chosen", val.get("rejected", str(val))))))
+            elif isinstance(val, list):
+                val = " ".join(str(i) for i in val)
+            return str(val).strip()
+
         sft_records = []
         dpo_records = []
         chat_records = []
@@ -115,8 +130,8 @@ class DatasetBuilder:
                         for item in sft_qa:
                             if not isinstance(item, dict):
                                 continue
-                            q = item.get("question", "").strip()
-                            a = item.get("answer", "").strip()
+                            q = safe_str(item.get("question", ""))
+                            a = safe_str(item.get("answer", ""))
                             if q and a:
                                 sft_records.append({
                                     "instruction": q,
@@ -142,9 +157,9 @@ class DatasetBuilder:
                         for item in dpo_pairs:
                             if not isinstance(item, dict):
                                 continue
-                            q = item.get("question", "").strip()
-                            chosen = item.get("chosen", "").strip()
-                            rej = item.get("rejected", "").strip()
+                            q = safe_str(item.get("question", ""))
+                            chosen = safe_str(item.get("chosen", ""))
+                            rej = safe_str(item.get("rejected", ""))
                             if q and chosen and rej:
                                 dpo_records.append({
                                     "prompt": q,
@@ -165,8 +180,8 @@ class DatasetBuilder:
                         for item in tr_sft_qa:
                             if not isinstance(item, dict):
                                 continue
-                            q = item.get("question", "").strip()
-                            a = item.get("answer", "").strip()
+                            q = safe_str(item.get("question", ""))
+                            a = safe_str(item.get("answer", ""))
                             if q and a:
                                 tr_sft_records.append({
                                     "instruction": q,
@@ -191,9 +206,9 @@ class DatasetBuilder:
                         for item in tr_dpo_pairs:
                             if not isinstance(item, dict):
                                 continue
-                            q = item.get("question", "").strip()
-                            chosen = item.get("chosen", "").strip()
-                            rej = item.get("rejected", "").strip()
+                            q = safe_str(item.get("question", ""))
+                            chosen = safe_str(item.get("chosen", ""))
+                            rej = safe_str(item.get("rejected", ""))
                             qual_status = item.get("quality_status", "validated")
                             if q and chosen and rej:
                                 tr_dpo_records.append({

@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import sqlite3
 import subprocess
@@ -12,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import pydantic
-import ollama
+from pipeline.llm_client import get_openai_client
 import psutil
 import httpx
 from pipeline.mcp_tools import search_vector_rag, query_sqlite_knowledge, inject_sft_dpo_context, evaluate_knowledge_gap
@@ -236,11 +237,28 @@ async def update_ollama_cache(ollama_url: str):
     if now - OLLAMA_CACHE["last_check"] < 5.0:
         return OLLAMA_CACHE
 
+    config = get_config()
+    # Resolve OpenAI base URL
+    base_url = config.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL")
+    if not base_url:
+        base_url = ollama_url
+        if not base_url.endswith("/v1") and not base_url.endswith("/v1/"):
+            base_url = f"{base_url.rstrip('/')}/v1"
+            
+    api_key = config.get("openai_api_key") or os.environ.get("OPENAI_API_KEY") or "ollama"
+
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            resp_tags = await client.get(f"{ollama_url}/api/tags")
+            resp_tags = None
+            try:
+                resp_tags = await client.get(f"{ollama_url}/api/tags")
+            except Exception:
+                pass
+
             available_models = []
-            if resp_tags.status_code == 200:
+            vram_models = []
+
+            if resp_tags and resp_tags.status_code == 200:
                 data = resp_tags.json()
                 for m in data.get("models", []):
                     available_models.append(m.get("name") or m.get("model"))
@@ -248,21 +266,40 @@ async def update_ollama_cache(ollama_url: str):
                 OLLAMA_CACHE["ollama_online"] = True
                 OLLAMA_CACHE["available_models"] = available_models
 
-            vram_models = []
-            resp_ps = await client.get(f"{ollama_url}/api/ps")
-            if resp_ps.status_code == 200:
-                data_ps = resp_ps.json()
-                for m in data_ps.get("models", []):
-                    vram_bytes = m.get("size_vram", 0) or m.get("size", 0)
-                    vram_models.append({
-                        "name": m.get("name") or m.get("model"),
-                        "param_size": m.get("details", {}).get("parameter_size", "-"),
-                        "quant": m.get("details", {}).get("quantization_level", "-"),
-                        "vram_mb": round(vram_bytes / (1024 * 1024), 1),
-                        "vram_gb": round(vram_bytes / (1024 * 1024 * 1024), 2),
-                        "expires_at": m.get("expires_at")
-                    })
-            OLLAMA_CACHE["vram_models"] = vram_models
+                try:
+                    resp_ps = await client.get(f"{ollama_url}/api/ps")
+                    if resp_ps.status_code == 200:
+                        data_ps = resp_ps.json()
+                        for m in data_ps.get("models", []):
+                            vram_bytes = m.get("size_vram", 0) or m.get("size", 0)
+                            vram_models.append({
+                                "name": m.get("name") or m.get("model"),
+                                "param_size": m.get("details", {}).get("parameter_size", "-"),
+                                "quant": m.get("details", {}).get("quantization_level", "-"),
+                                "vram_mb": round(vram_bytes / (1024 * 1024), 1),
+                                "vram_gb": round(vram_bytes / (1024 * 1024 * 1024), 2),
+                                "expires_at": m.get("expires_at")
+                            })
+                except Exception:
+                    pass
+                OLLAMA_CACHE["vram_models"] = vram_models
+            else:
+                # Fallback to standard OpenAI /models check
+                headers = {}
+                if api_key and api_key != "ollama":
+                    headers["Authorization"] = f"Bearer {api_key}"
+                
+                resp_models = await client.get(f"{base_url}/models", headers=headers)
+                if resp_models.status_code == 200:
+                    data = resp_models.json()
+                    for m in data.get("data", []):
+                        available_models.append(m.get("id"))
+                    OLLAMA_CACHE["status"] = "online (OpenAI-compatible)"
+                    OLLAMA_CACHE["ollama_online"] = True
+                    OLLAMA_CACHE["available_models"] = available_models
+                    OLLAMA_CACHE["vram_models"] = []
+                else:
+                    raise httpx.HTTPStatusError("OpenAI healthcheck failed", request=resp_models.request, response=resp_models)
     except Exception as e:
         OLLAMA_CACHE["status"] = f"offline ({str(e)})"
         OLLAMA_CACHE["ollama_online"] = False
@@ -312,6 +349,32 @@ async def get_system_metrics():
         "vram_models": cache["vram_models"]
     }
 
+@app.get("/api/system/probe-ports")
+def probe_ports():
+    import urllib.parse
+    import httpx
+    
+    cfg = get_config()
+    ollama_url = cfg.get("ollama_url", "http://localhost:11434")
+    
+    parsed = urllib.parse.urlparse(ollama_url)
+    netloc_parts = parsed.netloc.split(":")
+    ip = netloc_parts[0]
+    
+    ports_to_check = [11434, 11435, 11436, 11437, 11438]
+    active_ports = []
+    
+    for port in ports_to_check:
+        url = f"{parsed.scheme}://{ip}:{port}/api/tags"
+        try:
+            res = httpx.get(url, timeout=1.5)
+            if res.status_code == 200:
+                active_ports.append(port)
+        except Exception:
+            pass
+            
+    return {"host_ip": ip, "active_ports": active_ports}
+
 @app.get("/api/config")
 def read_config():
     return get_config()
@@ -335,9 +398,8 @@ def update_config(data: Dict[str, Any] = Body(...)):
     return {"status": "success", "config": current}
 
 # Pipeline Execution Background Task
-def run_pipeline_process(cmd: str, limit: Optional[str] = None, reset: bool = False):
+def run_pipeline_process(cmd, limit, reset, shards=1, shard_ports=None, enrich_pass="all"):
     global pipeline_state
-    
     current_cfg = get_config()
     current_pid = current_cfg.get("project_id", "default_project")
     try:
@@ -351,13 +413,17 @@ def run_pipeline_process(cmd: str, limit: Optional[str] = None, reset: bool = Fa
         pipeline_state["start_time"] = time.time()
         pipeline_state["end_time"] = None
         pipeline_state["exit_code"] = None
-        pipeline_state["logs"] = [f"=== Starting pipeline subcommand: '{cmd}' (Limit: {limit}, Reset: {reset}, Project: {current_pid}) ==="]
+        pipeline_state["logs"] = [f"=== Starting pipeline subcommand: '{cmd}' (Limit: {limit}, Reset: {reset}, Shards: {shards}, Ports: {shard_ports}, Project: {current_pid}) ==="]
 
-    args = ["python3.11", "run.py", cmd]
+    args = [sys.executable, "run.py", "--config", str(CONFIG_PATH), cmd]
     if limit:
         args.extend(["--limit", str(limit)])
     if reset:
         args.append("--reset")
+    if cmd in ["enrich", "pipeline"] and shards > 1 and shard_ports:
+        args.extend(["--shards", str(shards), "--shard-ports", str(shard_ports)])
+    if enrich_pass and enrich_pass != "all":
+        args.extend(["--pass", enrich_pass])
 
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
@@ -407,6 +473,10 @@ def trigger_pipeline(payload: Dict[str, Any] = Body(...)):
     limit = payload.get("limit")
     reset = payload.get("reset", False)
     confirm_reset = payload.get("confirm_reset", False)
+    shards = payload.get("shards", 1)
+    shard_ports = payload.get("shard_ports")
+
+    enrich_pass = payload.get("enrich_pass", "all")
 
     if reset and not confirm_reset:
         raise HTTPException(
@@ -414,11 +484,11 @@ def trigger_pipeline(payload: Dict[str, Any] = Body(...)):
             detail="GÜVENLİK UYARISI: Veritabanı ve veri setlerinin sıfırlanması için confirm_reset=True onayı zorunludur."
         )
 
-    thread = threading.Thread(target=run_pipeline_process, args=(cmd, limit, reset))
+    thread = threading.Thread(target=run_pipeline_process, args=(cmd, limit, reset, shards, shard_ports, enrich_pass))
     thread.daemon = True
     thread.start()
 
-    return {"status": "started", "command": cmd, "limit": limit, "reset": reset}
+    return {"status": "started", "command": cmd, "limit": limit, "reset": reset, "shards": shards, "shard_ports": shard_ports, "enrich_pass": enrich_pass}
 
 @app.get("/api/pipeline/status")
 def get_pipeline_status():
@@ -591,6 +661,81 @@ def query_sqlite_table(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SQLite query error: {str(e)}")
 
+class RateDatasetRequest(BaseModel):
+    article_id: int
+    rating: int  # 1 for upvote (+1), -1 for downvote (-1), 0 for neutral
+    feedback: Optional[str] = None
+
+class ExcludeDatasetRequest(BaseModel):
+    article_id: int
+    exclude: bool
+
+@app.post("/api/dataset/rate")
+def rate_dataset_record(req: RateDatasetRequest):
+    config = get_config()
+    raw_path = config.get("db_path", "database/sdr_engineers.db")
+    db_path = resolve_db_path(raw_path)
+    if not os.path.exists(db_path):
+        raise HTTPException(status_code=404, detail="Database file not found")
+        
+    try:
+        conn = sqlite3.connect(db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL;")
+        except Exception:
+            pass
+            
+        cursor.execute("PRAGMA table_info(enrichments);")
+        cols = [c[1] for c in cursor.fetchall()]
+        if "human_rating" not in cols:
+            cursor.execute("ALTER TABLE enrichments ADD COLUMN human_rating INTEGER DEFAULT 0;")
+        if "human_feedback" not in cols:
+            cursor.execute("ALTER TABLE enrichments ADD COLUMN human_feedback TEXT;")
+            
+        cursor.execute("""
+            UPDATE enrichments 
+            SET human_rating = ?, human_feedback = ?
+            WHERE article_id = ? OR id = ?
+        """, (req.rating, req.feedback or "", req.article_id, req.article_id))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "article_id": req.article_id, "rating": req.rating}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update rating: {str(e)}")
+
+@app.post("/api/dataset/exclude")
+def exclude_dataset_record(req: ExcludeDatasetRequest):
+    config = get_config()
+    raw_path = config.get("db_path", "database/sdr_engineers.db")
+    db_path = resolve_db_path(raw_path)
+    if not os.path.exists(db_path):
+        raise HTTPException(status_code=404, detail="Database file not found")
+        
+    try:
+        conn = sqlite3.connect(db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL;")
+        except Exception:
+            pass
+            
+        cursor.execute("PRAGMA table_info(enrichments);")
+        cols = [c[1] for c in cursor.fetchall()]
+        if "is_excluded" not in cols:
+            cursor.execute("ALTER TABLE enrichments ADD COLUMN is_excluded INTEGER DEFAULT 0;")
+            
+        cursor.execute("""
+            UPDATE enrichments 
+            SET is_excluded = ?
+            WHERE article_id = ? OR id = ?
+        """, (1 if req.exclude else 0, req.article_id, req.article_id))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "article_id": req.article_id, "is_excluded": req.exclude}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update exclude status: {str(e)}")
+
 # Qdrant Lite Query Viewer
 @app.get("/api/db/qdrant/info")
 def get_qdrant_info():
@@ -672,21 +817,21 @@ def chat_with_analyzer(payload: Dict[str, Any] = Body(...)):
     full_messages.extend(messages)
 
     try:
-        client = ollama.Client(host=ollama_url, timeout=300.0)
-        response = client.chat(model=model, messages=full_messages, stream=False, keep_alive="60m")
+        openai_client = get_openai_client(config)
+        response = openai_client.chat.completions.create(
+            model=model,
+            messages=full_messages,
+            temperature=0.7
+        )
         
-        reply_content = ""
-        if isinstance(response, dict) and "message" in response:
-            reply_content = response["message"].get("content", "")
-        elif hasattr(response, "message"):
-            reply_content = getattr(response.message, "content", "")
+        reply_content = response.choices[0].message.content or ""
 
         return {
             "model": model,
             "message": {"role": "assistant", "content": reply_content}
         }
     except Exception as e:
-        err_detail = f"Ollama chat error (Model '{model}'): {str(e)}"
+        err_detail = f"LLM chat error (Model '{model}'): {str(e)}"
         get_project_logger().error(err_detail, module="api_chat")
         raise HTTPException(status_code=500, detail=err_detail)
 
@@ -760,20 +905,17 @@ def simulate_pre_finetuning_impact(payload: Dict[str, Any] = Body(...)):
     base_res = None
     try:
         b_start = time.time()
-        client = ollama.Client(host=ollama_url, timeout=300.0)
-        base_res = client.chat(
+        openai_client = get_openai_client(config)
+        base_res = openai_client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": "You are a general AI assistant. Answer directly using general knowledge without specific domain files."},
                 {"role": "user", "content": user_prompt}
             ],
-            keep_alive="60m"
+            temperature=0.7
         )
         base_elapsed = round(time.time() - b_start, 2)
-        if isinstance(base_res, dict):
-            base_response = base_res.get("message", {}).get("content", "")
-        else:
-            base_response = getattr(getattr(base_res, "message", None), "content", "")
+        base_response = base_res.choices[0].message.content or ""
     except Exception as e:
         base_response = f"[Ham Model Hatası]: {str(e)}"
 
@@ -783,21 +925,18 @@ def simulate_pre_finetuning_impact(payload: Dict[str, Any] = Body(...)):
     sim_res = None
     try:
         s_start = time.time()
-        client = ollama.Client(host=ollama_url, timeout=300.0)
+        openai_client = get_openai_client(config)
         sim_system_prompt = f"{system_prompt}\n\n=== RELEVANT DOMAIN KNOWLEDGE & SFT CONTEXT ===\n{full_context_str}"
-        sim_res = client.chat(
+        sim_res = openai_client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": sim_system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            keep_alive="60m"
+            temperature=0.7
         )
         sim_elapsed = round(time.time() - s_start, 2)
-        if isinstance(sim_res, dict):
-            simulated_response = sim_res.get("message", {}).get("content", "")
-        else:
-            simulated_response = getattr(getattr(sim_res, "message", None), "content", "")
+        simulated_response = sim_res.choices[0].message.content or ""
     except Exception as e:
         simulated_response = f"[Simüle Model Hatası]: {str(e)}"
 
@@ -805,11 +944,13 @@ def simulate_pre_finetuning_impact(payload: Dict[str, Any] = Body(...)):
     eval_result = evaluate_knowledge_gap(base_response, simulated_response, full_context_str)
 
     base_words = len(base_response.split()) if base_response else 0
-    base_eval_count = getattr(base_res, "eval_count", None) if hasattr(base_res, "eval_count") else (base_res.get("eval_count") if isinstance(base_res, dict) else None)
+    base_usage = getattr(base_res, "usage", None)
+    base_eval_count = base_usage.completion_tokens if base_usage else None
     base_tokens = base_eval_count if base_eval_count else int(base_words * 1.35)
 
     sim_words = len(simulated_response.split()) if simulated_response else 0
-    sim_eval_count = getattr(sim_res, "eval_count", None) if hasattr(sim_res, "eval_count") else (sim_res.get("eval_count") if isinstance(sim_res, dict) else None)
+    sim_usage = getattr(sim_res, "usage", None)
+    sim_eval_count = sim_usage.completion_tokens if sim_usage else None
     sim_tokens = sim_eval_count if sim_eval_count else int(sim_words * 1.35)
 
     return {
@@ -994,7 +1135,7 @@ def generate_code_dataset(payload: Dict[str, Any] = Body(...)):
         conn.close()
         raise HTTPException(status_code=404, detail=f"No code units found for project_id: {project_id}")
 
-    client = ollama.Client(host=ollama_url, timeout=120.0)
+    openai_client = get_openai_client(config)
     synthetic_pairs = []
 
     for row in rows:
@@ -1007,30 +1148,33 @@ def generate_code_dataset(payload: Dict[str, Any] = Body(...)):
         if "explanation" in categories:
             prompt = f"Analyze the following Python {unit_type} `{name}` and explain its exact logic, arguments, return values, and edge cases:\n\n```python\n{code}\n```"
             try:
-                res = client.chat(
+                res = openai_client.chat.completions.create(
                     model=model_analyzer,
                     messages=[
                         {"role": "system", "content": "You are an expert Python software architect and static analyzer."},
                         {"role": "user", "content": prompt}
-                    ]
+                    ],
+                    temperature=0.2
                 )
-                output_text = res.get("message", {}).get("content", "")
+                output_text = res.choices[0].message.content or ""
                 
                 tr_inst = ""
                 tr_out = ""
                 if translate_tr:
                     # Translate instruction and explanation into Turkish (do not translate raw code)
-                    tr_inst_res = client.chat(
+                    tr_inst_res = openai_client.chat.completions.create(
                         model=model_translator,
-                        messages=[{"role": "user", "content": f"Translate the following instruction into technical Turkish:\n\n{prompt}"}]
+                        messages=[{"role": "user", "content": f"Translate the following instruction into technical Turkish:\n\n{prompt}"}],
+                        temperature=0.2
                     )
-                    tr_inst = tr_inst_res.get("message", {}).get("content", "")
+                    tr_inst = tr_inst_res.choices[0].message.content or ""
 
-                    tr_out_res = client.chat(
+                    tr_out_res = openai_client.chat.completions.create(
                         model=model_translator,
-                        messages=[{"role": "user", "content": f"Translate the following code explanation into technical Turkish:\n\n{output_text}"}]
+                        messages=[{"role": "user", "content": f"Translate the following code explanation into technical Turkish:\n\n{output_text}"}],
+                        temperature=0.2
                     )
-                    tr_out = tr_out_res.get("message", {}).get("content", "")
+                    tr_out = tr_out_res.choices[0].message.content or ""
 
                 synthetic_pairs.append({
                     "code_unit_id": unit["id"],

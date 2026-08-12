@@ -75,8 +75,10 @@ graph TD
 ### 📌 FAZ 7: HF Serverless Inference & ZeroGPU Hibrit Fallback Motoru - [GELECEK VİZYONU]
 - **Sıfır Donanım Maliyeti**: Yerel GPU sunucusu (`192.168.1.14:11434`) çevrimdışı veya yoğun olduğunda, sentezleme isteklerini otomatik olarak ücretsiz Hugging Face Serverless Inference API uç noktalarına (`Qwen/Qwen2.5-72B-Instruct`, `Llama-3.3-70B-Instruct`) veya HF Spaces ZeroGPU (A100/H100) ortamına yönlendirerek kesintisizsentetik veri üretimi sağlama.
 
-### 📌 FAZ 8: Chat Arenası Tam Markdown & LaTeX Matematik Formül Desteği - [GELECEK VİZYONU (DÜŞÜK ÖNCELİK)]
-- **Zengin İfadeler**: Mevcut hafif metin & kod renklendiricisi tam ve yeterli olmakla birlikte, ileride karmaşık LaTeX matris/denklem gösterimleri me Markdown tabloları için tam rendering motoru entegrasyonu.
+### 📌 FAZ 8: Chat Arenası Tam Markdown & LaTeX Matematik Desteği + RLHF İnsan Onay Katmanı - [TAMAMLANDI]
+- **KaTeX Matematik & Matris Rendering (`MathMarkdownRenderer.tsx`)**: Chat Arenası (`SectionModelChat.tsx`) ve Veri Seti İnceleyicide (`SectionDatasetViewer.tsx`) karmaşık LaTeX denklemleri (`$e=mc^2$`, `$$\int ...$$`), matrisler (`\begin{matrix}`) ve HTML Markdown tablolarının KaTeX ile canlı görselleştirilmesi sağlandı.
+- **Render Aç/Kapa Anahtarı (Raw Text Debugging)**: Arayüze `👁️ KaTeX Render (Açık/Kapalı)` toggle anahtarı eklenerek hata analizi sırasında ham metnin doğrudan görüntülenebilmesi sağlandı.
+- **Tahribatsız İnsan Onay & Kalite Katmanı (RLHF / DPO Alignment)**: Ham veritabanı yapısını bozmadan `enrichments` tablosuna `human_rating` (+1 / -1), `is_excluded` (1 / 0) ve `human_feedback` alanları eklendi. `POST /api/dataset/rate` ve `POST /api/dataset/exclude` uç noktaları ile kullanıcının beğendiği/beğenmediği veya sildiği kayıtlar işaretlenir; veri seti ihraç motorları (`dataset_builder.py`) silinen kayıtları dışa aktarımdan otomatik süzer.
 
 ### 📌 FAZ 9: OpenAI-Uyumlu API Standardına Geçiş & Sunucu Performans / Hata Ayıklama Oturumu - [TAMAMLANDI]
 - **Evrensel OpenAI SDK Standardı (`v1/chat/completions`)**: Özel ham `ollama` Python istemcisi yerine sektör standardı `openai` SDK (`from openai import OpenAI / AsyncOpenAI`) ve `base_url` mimarisine geçiş.

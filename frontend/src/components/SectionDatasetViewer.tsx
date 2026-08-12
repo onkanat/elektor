@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { DatasetItem, SQLiteTableInfo, QdrantInfo } from '../types';
+import { MathMarkdownRenderer } from './MathMarkdownRenderer';
 
 interface SectionDatasetViewerProps {
   activeProjectId?: string;
@@ -13,6 +14,9 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
   activeDatasetName = 'rp2040_datasheet',
 }) => {
   const [subTab, setSubTab] = useState<'jsonl' | 'sqlite' | 'qdrant'>('jsonl');
+
+  // Render mode: KaTeX Math vs Raw Text
+  const [renderMathMode, setRenderMathMode] = useState<boolean>(true);
 
   // Filter Mode: 'active' (show active project files) vs 'all' (show all projects)
   const [projectFilterMode, setProjectFilterMode] = useState<'active' | 'all'>('active');
@@ -40,6 +44,47 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
   const [qdrantQuery, setQdrantQuery] = useState<string>('software defined radio');
   const [qdrantResults, setQdrantResults] = useState<any[]>([]);
   const [isSearchingQdrant, setIsSearchingQdrant] = useState<boolean>(false);
+
+  const handleRateItem = async (articleId: number, rating: number) => {
+    try {
+      const res = await fetch('/api/dataset/rate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ article_id: articleId, rating }),
+      });
+      if (res.ok) {
+        setSqliteRows((prev) =>
+          prev.map((r) => (r.article_id === articleId || r.id === articleId ? { ...r, human_rating: rating } : r))
+        );
+        if (selectedRowModal && (selectedRowModal.article_id === articleId || selectedRowModal.id === articleId)) {
+          setSelectedRowModal((prev: any) => ({ ...prev, human_rating: rating }));
+        }
+      }
+    } catch (e) {
+      console.error('Failed to rate item:', e);
+    }
+  };
+
+  const handleToggleExcludeItem = async (articleId: number, currentExcludeState: boolean) => {
+    const newExclude = !currentExcludeState;
+    try {
+      const res = await fetch('/api/dataset/exclude', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ article_id: articleId, exclude: newExclude }),
+      });
+      if (res.ok) {
+        setSqliteRows((prev) =>
+          prev.map((r) => (r.article_id === articleId || r.id === articleId ? { ...r, is_excluded: newExclude ? 1 : 0 } : r))
+        );
+        if (selectedRowModal && (selectedRowModal.article_id === articleId || selectedRowModal.id === articleId)) {
+          setSelectedRowModal((prev: any) => ({ ...prev, is_excluded: newExclude ? 1 : 0 }));
+        }
+      }
+    } catch (e) {
+      console.error('Failed to toggle exclude item:', e);
+    }
+  };
 
   // Robust project matching logic
   const isProjectMatch = (relativePath: string): boolean => {
@@ -486,19 +531,96 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
           {/* Full Extracted Text & Row Details Modal */}
           {selectedRowModal && (
             <div className="modal-backdrop" onClick={() => setSelectedRowModal(null)}>
-              <div className="modal-card" style={{ maxWidth: '800px', width: '90%' }} onClick={(e) => e.stopPropagation()}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
-                  <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-primary)' }}>
-                    📖 Metin Detayı: {selectedRowModal.title || selectedRowModal.filename || `ID #${selectedRowModal.id}`}
+              <div className="modal-card" style={{ maxWidth: '850px', width: '92%' }} onClick={(e) => e.stopPropagation()}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    📖 Metin Detayı: {selectedRowModal.title || selectedRowModal.filename || `ID #${selectedRowModal.id || selectedRowModal.article_id}`}
+                    {selectedRowModal.is_excluded === 1 && (
+                      <span className="badge offline" style={{ fontSize: '0.7rem', textDecoration: 'line-through' }}>🗑️ İhraç Dışı (Silindi)</span>
+                    )}
+                    {selectedRowModal.human_rating === 1 && (
+                      <span className="badge online" style={{ fontSize: '0.7rem' }}>👍 Beğenildi (Verified)</span>
+                    )}
+                    {selectedRowModal.human_rating === -1 && (
+                      <span className="badge warning" style={{ fontSize: '0.7rem' }}>👎 Beğenilmedi (Rejected)</span>
+                    )}
                   </h3>
-                  <button className="btn btn-secondary" style={{ padding: '0.2rem 0.6rem' }} onClick={() => setSelectedRowModal(null)}>✕ Kapat</button>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <label style={{ fontSize: '0.78rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', color: renderMathMode ? '#38bdf8' : 'var(--text-secondary)' }}>
+                      <input
+                        type="checkbox"
+                        checked={renderMathMode}
+                        onChange={(e) => setRenderMathMode(e.target.checked)}
+                      />
+                      👁️ KaTeX Render
+                    </label>
+                    <button className="btn btn-secondary" style={{ padding: '0.2rem 0.6rem' }} onClick={() => setSelectedRowModal(null)}>✕ Kapat</button>
+                  </div>
                 </div>
 
-                <div style={{ maxHeight: '60vh', overflowY: 'auto', background: 'var(--bg-primary)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', fontSize: '0.85rem', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-primary)' }}>
-                  {selectedRowModal.extracted_text || selectedRowModal.summary || selectedRowModal.tr_sft_qa || selectedRowModal.sft_qa || JSON.stringify(selectedRowModal, null, 2)}
+                <div style={{ maxHeight: '60vh', overflowY: 'auto', background: 'var(--bg-primary)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', fontSize: '0.85rem', lineHeight: 1.6, color: 'var(--text-primary)' }}>
+                  <MathMarkdownRenderer
+                    content={
+                      selectedRowModal.extracted_text ||
+                      selectedRowModal.summary ||
+                      selectedRowModal.tr_sft_qa ||
+                      selectedRowModal.sft_qa ||
+                      (typeof selectedRowModal === 'string' ? selectedRowModal : JSON.stringify(selectedRowModal, null, 2))
+                    }
+                    rawMode={!renderMathMode}
+                  />
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                {/* Human Feedback & Exclude Action Bar */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>İnsan Onay & Kalite Düzeltme:</span>
+                    
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => handleRateItem(selectedRowModal.article_id || selectedRowModal.id, 1)}
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        fontSize: '0.78rem',
+                        borderColor: selectedRowModal.human_rating === 1 ? '#10b981' : undefined,
+                        color: selectedRowModal.human_rating === 1 ? '#34d399' : undefined,
+                        backgroundColor: selectedRowModal.human_rating === 1 ? 'rgba(16, 185, 129, 0.15)' : undefined,
+                      }}
+                    >
+                      👍 Beğendim {selectedRowModal.human_rating === 1 ? '✓' : ''}
+                    </button>
+
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => handleRateItem(selectedRowModal.article_id || selectedRowModal.id, -1)}
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        fontSize: '0.78rem',
+                        borderColor: selectedRowModal.human_rating === -1 ? '#f43f5e' : undefined,
+                        color: selectedRowModal.human_rating === -1 ? '#fb7185' : undefined,
+                        backgroundColor: selectedRowModal.human_rating === -1 ? 'rgba(244, 63, 94, 0.15)' : undefined,
+                      }}
+                    >
+                      👎 Beğenmedim {selectedRowModal.human_rating === -1 ? '✓' : ''}
+                    </button>
+
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => handleToggleExcludeItem(selectedRowModal.article_id || selectedRowModal.id, selectedRowModal.is_excluded === 1)}
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        fontSize: '0.78rem',
+                        borderColor: selectedRowModal.is_excluded === 1 ? '#e11d48' : '#64748b',
+                        color: selectedRowModal.is_excluded === 1 ? '#fda4af' : '#cbd5e1',
+                        backgroundColor: selectedRowModal.is_excluded === 1 ? 'rgba(225, 29, 72, 0.2)' : undefined,
+                        textDecoration: selectedRowModal.is_excluded === 1 ? 'line-through' : 'none',
+                      }}
+                    >
+                      🗑️ {selectedRowModal.is_excluded === 1 ? 'Veri Setine Geri Al' : 'Veri Setinden Sil (İhraç Dışı Bırak)'}
+                    </button>
+                  </div>
+
                   <button className="btn btn-primary" onClick={() => setSelectedRowModal(null)}>Tamam</button>
                 </div>
               </div>

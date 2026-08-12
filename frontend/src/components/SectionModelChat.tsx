@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { PipelineConfig, ChatMessage } from '../types';
+import { MathMarkdownRenderer } from './MathMarkdownRenderer';
 
 interface SectionModelChatProps {
   config: PipelineConfig;
@@ -13,6 +14,9 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
   );
   const [inputPrompt, setInputPrompt] = useState<string>('');
   
+  // Render mode: KaTeX Math vs Raw Text
+  const [renderMathMode, setRenderMathMode] = useState<boolean>(true);
+
   // Chat Modes: 'standard' vs 'simulator'
   const [chatMode, setChatMode] = useState<'standard' | 'simulator'>('simulator');
   
@@ -45,101 +49,6 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     simEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, simulationHistory]);
-
-  const renderHighlightedText = (text: string) => {
-    if (!text) return null;
-
-    const lines = text.split('\n');
-    let inCodeBlock = false;
-    let codeBuffer: string[] = [];
-    const elements: React.ReactNode[] = [];
-
-    lines.forEach((line, idx) => {
-      if (line.trim().startsWith('```')) {
-        if (inCodeBlock) {
-          elements.push(
-            <pre
-              key={`code-${idx}`}
-              style={{
-                backgroundColor: '#0f172a',
-                border: '1px solid #334155',
-                borderRadius: '0.4rem',
-                padding: '0.6rem 0.8rem',
-                color: '#34d399',
-                fontFamily: 'Consolas, Monaco, monospace',
-                fontSize: '0.8rem',
-                overflowX: 'auto',
-                margin: '0.4rem 0',
-              }}
-            >
-              <code>{codeBuffer.join('\n')}</code>
-            </pre>
-          );
-          codeBuffer = [];
-          inCodeBlock = false;
-        } else {
-          inCodeBlock = true;
-        }
-        return;
-      }
-
-      if (inCodeBlock) {
-        codeBuffer.push(line);
-        return;
-      }
-
-      if (line.startsWith('#')) {
-        elements.push(
-          <div key={`h-${idx}`} style={{ fontWeight: 700, color: '#38bdf8', marginTop: '0.4rem', fontSize: '0.88rem' }}>
-            {line.replace(/^#+\s*/, '')}
-          </div>
-        );
-        return;
-      }
-
-      if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
-        elements.push(
-          <div key={`bullet-${idx}`} style={{ paddingLeft: '0.8rem', color: '#f1f5f9', margin: '0.15rem 0' }}>
-            <span style={{ color: '#c084fc' }}>•</span> {line.trim().substring(2)}
-          </div>
-        );
-        return;
-      }
-
-      if (line.trim()) {
-        elements.push(
-          <div key={`line-${idx}`} style={{ margin: '0.2rem 0', color: '#f1f5f9' }}>
-            {line}
-          </div>
-        );
-      } else {
-        elements.push(<div key={`br-${idx}`} style={{ height: '0.35rem' }} />);
-      }
-    });
-
-    if (inCodeBlock && codeBuffer.length > 0) {
-      elements.push(
-        <pre
-          key={`code-end`}
-          style={{
-            backgroundColor: '#0f172a',
-            border: '1px solid #334155',
-            borderRadius: '0.4rem',
-            padding: '0.6rem 0.8rem',
-            color: '#34d399',
-            fontFamily: 'Consolas, Monaco, monospace',
-            fontSize: '0.8rem',
-            overflowX: 'auto',
-            margin: '0.4rem 0',
-          }}
-        >
-          <code>{codeBuffer.join('\n')}</code>
-        </pre>
-      );
-    }
-
-    return <div>{elements}</div>;
-  };
 
   // Standard Chat Handler
   const handleSendMessage = async () => {
@@ -249,7 +158,17 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <label style={{ fontSize: '0.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.35rem', color: renderMathMode ? '#38bdf8' : 'var(--text-secondary)' }} title="Açık: KaTeX Formül ve Tablo Render | Kapalı: Ham Metin (Error Debugging)">
+            <input
+              type="checkbox"
+              checked={renderMathMode}
+              onChange={(e) => setRenderMathMode(e.target.checked)}
+              style={{ cursor: 'pointer' }}
+            />
+            👁️ KaTeX Math/Render {renderMathMode ? '(Açık)' : '(Kapalı - Ham)'}
+          </label>
+
           <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Aktif Model:</span>
           <select
             className="form-control"
@@ -373,7 +292,7 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
                           <span style={{ fontSize: '0.72rem', opacity: 0.7 }}>Eğitimsiz / RAG'sız</span>
                         </div>
                         <div style={{ fontSize: '0.83rem', color: '#cbd5e1', lineHeight: 1.6 }}>
-                          {renderHighlightedText(sim.base_response)}
+                          <MathMarkdownRenderer content={sim.base_response} rawMode={!renderMathMode} />
                         </div>
                         {/* Ham Model Footnote Stats */}
                         <div style={{ marginTop: '0.75rem', paddingTop: '0.4rem', borderTop: '1px solid rgba(239, 68, 68, 0.2)', fontSize: '0.72rem', color: '#94a3b8', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -390,7 +309,7 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
                           <span style={{ fontSize: '0.72rem', opacity: 0.7 }}>RAG + SFT Context</span>
                         </div>
                         <div style={{ fontSize: '0.83rem', color: '#f8fafc', lineHeight: 1.6 }}>
-                          {renderHighlightedText(sim.simulated_response)}
+                          <MathMarkdownRenderer content={sim.simulated_response} rawMode={!renderMathMode} />
                         </div>
                         {/* Simüle Model Footnote Stats */}
                         <div style={{ marginTop: '0.75rem', paddingTop: '0.4rem', borderTop: '1px solid rgba(16, 185, 129, 0.2)', fontSize: '0.72rem', color: '#94a3b8', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -471,7 +390,9 @@ export const SectionModelChat: React.FC<SectionModelChatProps> = ({ config, avai
                   <div style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.25rem', opacity: 0.8 }}>
                     {msg.role === 'user' ? 'Siz (User)' : 'Analyzer Model'}
                   </div>
-                  <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                  <div>
+                    <MathMarkdownRenderer content={msg.content} rawMode={!renderMathMode} />
+                  </div>
                 </div>
               ))}
               {isSending && (
