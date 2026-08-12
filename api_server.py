@@ -12,6 +12,7 @@ from starlette.background import BackgroundTask
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 import pydantic
 from pipeline.llm_client import get_openai_client
 import psutil
