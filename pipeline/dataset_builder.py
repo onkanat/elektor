@@ -69,6 +69,13 @@ class DatasetBuilder:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        # Check if enrichments table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='enrichments'")
+        if not cursor.fetchone():
+            print(f"Warning: No 'enrichments' table found in database ({self.db_path}). Skipping dataset export.")
+            conn.close()
+            return
+
         # Check column existence in enrichments table
         cursor.execute("PRAGMA table_info(enrichments)")
         cols = [c[1] for c in cursor.fetchall()]

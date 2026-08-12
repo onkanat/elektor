@@ -560,23 +560,24 @@ class ArchiveExtractor:
 
         # Gather target PDF files
         pdf_paths = []
+        raw_path_str = str(self.input_path)
+        candidate_paths = [p.strip() for p in raw_path_str.replace('\n', ',').replace(';', ',').split(',') if p.strip()]
 
-        if self.input_mode == "book":
-            # Support comma, semicolon, or newline separated list of PDF paths
-            raw_path_str = str(self.input_path)
-            candidate_paths = [p.strip() for p in raw_path_str.replace('\n', ',').replace(';', ',').split(',') if p.strip()]
-            for cp in candidate_paths:
-                p_obj = Path(cp)
-                if p_obj.is_file() and p_obj.suffix.lower() == '.pdf':
-                    pdf_paths.append(p_obj)
-                elif p_obj.is_dir():
-                    for root, dirs, files in os.walk(p_obj):
-                        for f in files:
-                            if f.lower().endswith('.pdf'):
-                                pdf_paths.append(Path(root) / f)
-        else:
-            # Mode: Folder (Recursive walking)
-            if self.articles_dir.exists():
+        for cp in candidate_paths:
+            p_obj = Path(cp)
+            if p_obj.is_file() and p_obj.suffix.lower() == '.pdf':
+                pdf_paths.append(p_obj)
+            elif p_obj.is_dir():
+                for root, dirs, files in os.walk(p_obj):
+                    for file in files:
+                        if file.lower().endswith('.pdf'):
+                            pdf_paths.append(Path(root) / file)
+
+        # Also fallback check self.articles_dir if separate
+        if not pdf_paths and hasattr(self, 'articles_dir') and self.articles_dir.exists():
+            if self.articles_dir.is_file() and self.articles_dir.suffix.lower() == '.pdf':
+                pdf_paths.append(self.articles_dir)
+            elif self.articles_dir.is_dir():
                 for root, dirs, files in os.walk(self.articles_dir):
                     for file in files:
                         if file.lower().endswith('.pdf'):
