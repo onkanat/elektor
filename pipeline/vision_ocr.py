@@ -20,20 +20,35 @@ class VisionOCRManager:
         except Exception as e:
             print(f"Warning: Failed to unload vision model '{self.model_vision}': {e}")
 
-    def describe_image(self, image_path: str, caption_context: str = "") -> str:
-        """
-        Uses a vision-language model (VLM) via the OpenAI-compatible API
-        to analyze a cropped drawing/chart image and return a detailed markdown description.
-        """
+    def _image_to_png_base64(self, image_path: str) -> Optional[str]:
+        """Loads an image (PNG, WebP, JPEG, etc.), converts to RGB, and returns base64 PNG string."""
         img_path = Path(image_path)
         if not img_path.exists():
-            return f"[Error: Image file not found at {image_path}]"
+            return None
+        try:
+            from PIL import Image
+            from io import BytesIO
+            with Image.open(img_path) as img:
+                buf = BytesIO()
+                img.convert("RGB").save(buf, format="PNG")
+                return base64.b64encode(buf.getvalue()).decode("utf-8")
+        except Exception:
+            try:
+                with open(img_path, "rb") as f:
+                    return base64.b64encode(f.read()).decode("utf-8")
+            except Exception:
+                return None
+
+    def describe_image(self, image_path: str, caption_context: str = "") -> str:
+        """Uses a vision-language model (VLM) via OpenAI API or native Ollama API
+
+        to analyze a cropped drawing/chart image and return a detailed markdown description.
+        """
+        base64_data = self._image_to_png_base64(image_path)
+        if not base64_data:
+            return f"[Error: Could not load image at {image_path}]"
             
         try:
-            # Base64 encode the image
-            with open(img_path, "rb") as img_file:
-                base64_data = base64.b64encode(img_file.read()).decode("utf-8")
-                
             if "deepseek" in self.model_vision.lower():
                 prompt = "<image>\n<|grounding|>Parse the technical figure/diagram in detail. Extract and convert all visible text, labels, pinouts, component values, signal paths, and schematics into clean markdown."
                 if caption_context:
@@ -50,44 +65,64 @@ class VisionOCRManager:
                 if caption_context:
                     prompt += f"\n\nContext/Caption from surrounding text:\n{caption_context}"
 
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{base64_data}"
+            # Try OpenAI SDK endpoint first
+            try:
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_data}"
+                                }
                             }
+                        ]
+                    }
+                ]
+                response = self.client.chat.completions.create(
+                    model=self.model_vision,
+                    messages=messages,
+                    max_tokens=2048,
+                    temperature=0.2
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as sdk_err:
+                # Native Ollama /api/chat fallback
+                import urllib.request
+                ollama_url = self.config.get("ollama_url", "http://localhost:11434").rstrip("/")
+                endpoint = f"{ollama_url}/api/chat"
+                payload = {
+                    "model": self.model_vision,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": prompt,
+                            "images": [base64_data]
                         }
-                    ]
+                    ],
+                    "stream": False
                 }
-            ]
-            
-            response = self.client.chat.completions.create(
-                model=self.model_vision,
-                messages=messages,
-                max_tokens=2048,
-                temperature=0.2
-            )
-            
-            description = response.choices[0].message.content
-            return description.strip()
-            
+                req = urllib.request.Request(
+                    endpoint,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(req, timeout=90) as resp:
+                    res_data = json.loads(resp.read().decode("utf-8"))
+                    return res_data.get("message", {}).get("content", "").strip()
+
         except Exception as e:
             return f"[VLM Extraction Error: {str(e)}]"
 
     def describe_cropped_image(self, image_path: str, caption_context: str = "") -> str:
         """FAZ-11: Analyzes cropped figure/diagram with official DeepSeek-OCR prompt (<image>\nParse the figure.)."""
-        img_path = Path(image_path)
-        if not img_path.exists():
-            return f"[Error: Image file not found at {image_path}]"
+        base64_data = self._image_to_png_base64(image_path)
+        if not base64_data:
+            return f"[Error: Could not load image at {image_path}]"
 
         try:
-            with open(img_path, "rb") as img_file:
-                base64_data = base64.b64encode(img_file.read()).decode("utf-8")
-
             if "deepseek" in self.model_vision.lower():
                 prompt = "<image>\nParse the figure."
                 if caption_context:
@@ -95,28 +130,53 @@ class VisionOCRManager:
             else:
                 prompt = f"Analyze and describe this technical figure/diagram in detail. Context: {caption_context}"
 
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{base64_data}"
+            try:
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_data}"
+                                }
                             }
+                        ]
+                    }
+                ]
+                response = self.client.chat.completions.create(
+                    model=self.model_vision,
+                    messages=messages,
+                    max_tokens=2048,
+                    temperature=0.2
+                )
+                return response.choices[0].message.content.strip()
+            except Exception:
+                # Native Ollama /api/chat fallback
+                import urllib.request
+                ollama_url = self.config.get("ollama_url", "http://localhost:11434").rstrip("/")
+                endpoint = f"{ollama_url}/api/chat"
+                payload = {
+                    "model": self.model_vision,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": prompt,
+                            "images": [base64_data]
                         }
-                    ]
+                    ],
+                    "stream": False
                 }
-            ]
+                req = urllib.request.Request(
+                    endpoint,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(req, timeout=90) as resp:
+                    res_data = json.loads(resp.read().decode("utf-8"))
+                    return res_data.get("message", {}).get("content", "").strip()
 
-            response = self.client.chat.completions.create(
-                model=self.model_vision,
-                messages=messages,
-                max_tokens=2048,
-                temperature=0.2
-            )
-            return response.choices[0].message.content.strip()
         except Exception as e:
             return f"[Vision Extraction Error: {str(e)}]"
 
@@ -125,37 +185,57 @@ class VisionOCRManager:
 
         (<image>\n<|grounding|>Convert the document to markdown.).
         """
-        img_path = Path(image_path)
-        if not img_path.exists():
+        base64_data = self._image_to_png_base64(image_path)
+        if not base64_data:
             return ""
 
         try:
-            with open(img_path, "rb") as img_file:
-                base64_data = base64.b64encode(img_file.read()).decode("utf-8")
-
             prompt = "<image>\n<|grounding|>Convert the document to markdown."
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{base64_data}"
+            try:
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_data}"
+                                }
                             }
+                        ]
+                    }
+                ]
+                response = self.client.chat.completions.create(
+                    model=self.model_vision,
+                    messages=messages,
+                    max_tokens=4096,
+                    temperature=0.1
+                )
+                return response.choices[0].message.content.strip()
+            except Exception:
+                import urllib.request
+                ollama_url = self.config.get("ollama_url", "http://localhost:11434").rstrip("/")
+                endpoint = f"{ollama_url}/api/chat"
+                payload = {
+                    "model": self.model_vision,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": prompt,
+                            "images": [base64_data]
                         }
-                    ]
+                    ],
+                    "stream": False
                 }
-            ]
-
-            response = self.client.chat.completions.create(
-                model=self.model_vision,
-                messages=messages,
-                max_tokens=4096,
-                temperature=0.1
-            )
-            return response.choices[0].message.content.strip()
+                req = urllib.request.Request(
+                    endpoint,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(req, timeout=90) as resp:
+                    res_data = json.loads(resp.read().decode("utf-8"))
+                    return res_data.get("message", {}).get("content", "").strip()
         except Exception as e:
             print(f"Warning: DeepSeek-OCR document to markdown conversion error: {e}")
             return ""
