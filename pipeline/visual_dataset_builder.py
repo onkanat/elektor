@@ -88,8 +88,9 @@ class VisualDatasetBuilder:
                 print(f"Warning: DeepSeek-OCR description failed for {webp_full_path.name}: {e}")
                 visual_description = f"Technical schematic figure ({webp_full_path.stem})."
 
-            if not visual_description or not visual_description.strip():
-                visual_description = f"Detailed technical schematic diagram for {webp_full_path.stem}."
+            if not visual_description or not visual_description.strip() or "Connection error" in visual_description or visual_description.startswith("[Vision Extraction Error"):
+                clean_name = webp_full_path.stem.replace("Booklist-the-mechatronics-handbook_", "").replace("_", " ")
+                visual_description = f"Technical schematic and architectural diagram representation ({clean_name})."
 
             # Construct LLaVA & Qwen2-VL standardized JSONL record
             record_id = f"vis_sample_{self.project_id}_{idx:04d}_{webp_full_path.stem}"
