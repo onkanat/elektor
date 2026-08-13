@@ -276,6 +276,9 @@ Examples:
     api_parser.add_argument("--port", type=int, default=3456, help="Port to run the API server on")
     api_parser.add_argument("--host", type=str, default="127.0.0.1", help="Host to run the API server on")
     
+    # Self-test subcommand
+    self_test_parser = subparsers.add_parser("self_test", help="Run comprehensive system health self-test & diagnostics")
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -404,6 +407,11 @@ Examples:
         print(f"=== Starting Web UI Dashboard on http://{args.host}:{args.port} ===")
         import uvicorn
         uvicorn.run("api_server:app", host=args.host, port=args.port, reload=True)
+
+    elif args.command == "self_test":
+        from pipeline.self_test import run_self_test
+        success = run_self_test(config_path=args.config)
+        sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
     main()

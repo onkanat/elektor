@@ -737,6 +737,17 @@ def exclude_dataset_record(req: ExcludeDatasetRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update exclude status: {str(e)}")
 
+@app.get("/api/system/self_test")
+def system_self_test():
+    """FAZ-11 / Health: Runs autonomous system self-test diagnostics across DB, Qdrant, Ollama, VLM, and pytest."""
+    try:
+        from pipeline.self_test import run_self_test
+        config = get_config()
+        passed = run_self_test(config_path="config.json")
+        return {"status": "success", "all_passed": passed, "message": "Self-test executed cleanly"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Self-test failed: {str(e)}")
+
 # Qdrant Lite Query Viewer
 @app.get("/api/db/qdrant/info")
 def get_qdrant_info():
@@ -1029,6 +1040,8 @@ def clone_and_extract_code(payload: Dict[str, Any] = Body(...)):
         repo_dir = Path(repo_url)
         if not repo_dir.exists() or not repo_dir.is_dir():
             raise HTTPException(status_code=400, detail=f"Local repo directory does not exist: {repo_url}")
+
+    from pipeline.code_extractor import flatten_repository_rendergit, extract_and_store_code_units, clone_repository
 
     # Flatten repository (rendergit format)
     rendergit_out_path = Path("exports") / f"{project_id}_rendergit.md"
