@@ -77,3 +77,85 @@ class VisionOCRManager:
             
         except Exception as e:
             return f"[VLM Extraction Error: {str(e)}]"
+
+    def describe_cropped_image(self, image_path: str, caption_context: str = "") -> str:
+        """FAZ-11: Analyzes cropped figure/diagram with official DeepSeek-OCR prompt (<image>\nParse the figure.)."""
+        img_path = Path(image_path)
+        if not img_path.exists():
+            return f"[Error: Image file not found at {image_path}]"
+
+        try:
+            with open(img_path, "rb") as img_file:
+                base64_data = base64.b64encode(img_file.read()).decode("utf-8")
+
+            if "deepseek" in self.model_vision.lower():
+                prompt = "<image>\nParse the figure."
+                if caption_context:
+                    prompt += f"\nContext: {caption_context}"
+            else:
+                prompt = f"Analyze and describe this technical figure/diagram in detail. Context: {caption_context}"
+
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64_data}"
+                            }
+                        }
+                    ]
+                }
+            ]
+
+            response = self.client.chat.completions.create(
+                model=self.model_vision,
+                messages=messages,
+                max_tokens=2048,
+                temperature=0.2
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            return f"[Vision Extraction Error: {str(e)}]"
+
+    def convert_document_to_markdown(self, image_path: str) -> str:
+        """FAZ-10 & FAZ-11: Converts scanned or complex PDF page image to Markdown with DeepSeek-OCR
+
+        (<image>\n<|grounding|>Convert the document to markdown.).
+        """
+        img_path = Path(image_path)
+        if not img_path.exists():
+            return ""
+
+        try:
+            with open(img_path, "rb") as img_file:
+                base64_data = base64.b64encode(img_file.read()).decode("utf-8")
+
+            prompt = "<image>\n<|grounding|>Convert the document to markdown."
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64_data}"
+                            }
+                        }
+                    ]
+                }
+            ]
+
+            response = self.client.chat.completions.create(
+                model=self.model_vision,
+                messages=messages,
+                max_tokens=4096,
+                temperature=0.1
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"Warning: DeepSeek-OCR document to markdown conversion error: {e}")
+            return ""

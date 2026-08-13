@@ -161,8 +161,9 @@ graph TD
 
 ---
 
-## 📊 7. Ollama Cloud Model Benchmark Referansı
+## 📊 7. Ollama Cloud & Vizyon Model Benchmark Referansı
 
+### Metin & Sentezleme Modelleri
 | Model | Prompt Tokens | Gen Tokens | Eval Speed (t/s) | Wall Time (s) | Durum |
 |---|---|---|---|---|---|
 | `nemotron-3-nano:30b` | 28 | 129 | **130.03** | 0.99s | ✅ |
@@ -171,3 +172,11 @@ graph TD
 | `minimax-m3` | 186 | 51 | **42.93** | 1.19s | ✅ |
 | `gemma4:31b` | 23 | 20 | **18.15** | 1.10s | ✅ |
 | `nemotron-3-super` | 28 | 113 | **6.65** | 16.99s | ✅ |
+
+### Multimodal Vizyon & Görsel OCR Modelleri (FAZ-10 & FAZ-11)
+| Model | Özel İstem Standardı | Kullanım Alanı | VRAM/Boyut | Durum |
+|---|---|---|---|---|
+| `deepseek-ocr:3b-bf16` | `<image>\nParse the figure.` / `<|grounding|>` | Şema/Devre Analizi & Tam Sayfa Markdown OCR | ~3.8 GB | ✅ **Varsayılan** |
+| `qwen2.5-vl:7b` | `<image>\nDescribe this image in detail.` | Genel Multimodal Görsel QA & Anlamsal Çıkarım | ~5.2 GB | ✅ Destekleniyor |
+| `llava-phi3:3.8b` | `<image>\nAnalyze image.` | Hafif Görsel İnce-Ayar Etiketleme | ~2.9 GB | ✅ Destekleniyor |
+| `minicpm-v:8b` | `<image>\nParse chart/table.` | Yüksek Çözünürlüklü Grafik & Tablo Okuma | ~6.1 GB | ✅ Destekleniyor |

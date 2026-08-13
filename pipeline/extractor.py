@@ -338,10 +338,25 @@ class ArchiveExtractor:
             
             # If text is too short, run OCR on these pages
             if len(extracted_text) < self.ocr_threshold:
-                ocr_text, ocr_success = self.ocr_pdf_pages(pdf_path, start_page, end_page)
-                if ocr_success:
-                    extracted_text = ocr_text
-                    is_ocr = True
+                if self.enable_vision_ocr and hasattr(self, 'vision_ocr') and self.vision_ocr:
+                    # DeepSeek-OCR Hybrid Mode: Convert scanned page image to Markdown
+                    print(f"  [DeepSeek-OCR Hybrid] Page text length below threshold ({len(extracted_text)} < {self.ocr_threshold}). Converting document page image to Markdown...")
+                    page_img_path = self.render_single_page_image(pdf_path, start_page)
+                    if page_img_path and os.path.exists(page_img_path):
+                        ds_md = self.vision_ocr.convert_document_to_markdown(page_img_path)
+                        if ds_md:
+                            extracted_text = ds_md
+                            is_ocr = True
+                        try:
+                            os.unlink(page_img_path)
+                        except Exception:
+                            pass
+                
+                if not is_ocr or not extracted_text:
+                    ocr_text, ocr_success = self.ocr_pdf_pages(pdf_path, start_page, end_page)
+                    if ocr_success:
+                        extracted_text = ocr_text
+                        is_ocr = True
                     
             if self.enable_vision_ocr:
                 vision_text = self._process_vision_ocr_for_pages(pdf_path, start_page, end_page)
@@ -378,6 +393,22 @@ class ArchiveExtractor:
                     vision_descriptions.append(block_md)
                     
         return "".join(vision_descriptions)
+
+    def render_single_page_image(self, pdf_path, page_idx):
+        """Renders a single PDF page at 300 DPI into a temporary PNG file for DeepSeek-OCR analysis."""
+        try:
+            doc = pdfium.PdfDocument(pdf_path)
+            if 0 <= page_idx < len(doc):
+                page = doc[page_idx]
+                bitmap = page.render(scale=300/72)
+                pil_img = bitmap.to_pil()
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
+                    tmp_img_path = tmp_img.name
+                    pil_img.save(tmp_img_path)
+                    return tmp_img_path
+        except Exception as e:
+            print(f"Warning: Failed to render page {page_idx+1} image from {pdf_path}: {e}")
+        return None
 
     def ocr_pdf_pages(self, pdf_path, start_page, end_page):
         """Renders specific pages of a PDF and runs OCR on them"""

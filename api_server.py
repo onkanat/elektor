@@ -796,6 +796,18 @@ def search_qdrant(payload: Dict[str, Any] = Body(...)):
         if store is not None:
             store.close()
 
+@app.post("/api/export/visual_dataset")
+def export_visual_dataset(payload: Dict[str, Any] = Body(default={})):
+    """FAZ-11: Exports multimodal visual instruction tuning dataset (LLaVA/Qwen2-VL format)."""
+    try:
+        from pipeline.visual_dataset_builder import VisualDatasetBuilder
+        clean_crops = payload.get("clean_raw_crops", True)
+        builder = VisualDatasetBuilder(config_path="config.json")
+        result = builder.export_multimodal_dataset(clean_raw_crops=clean_crops)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Visual dataset export error: {str(e)}")
+
 # Section C: Analyzer Model Chat Uç Noktası
 @app.post("/api/chat")
 def chat_with_analyzer(payload: Dict[str, Any] = Body(...)):

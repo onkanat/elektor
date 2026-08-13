@@ -252,6 +252,10 @@ Examples:
     export_parser = subparsers.add_parser("export", help="Compile and export SFT, DPO, and Chat datasets to JSONL & Parquet")
     export_parser.add_argument("--reset", action="store_true", help="Reset all exported datasets before running")
 
+    # Export Visual subcommand (FAZ-11)
+    export_visual_parser = subparsers.add_parser("export_visual", help="Export FAZ-11 Multimodal Visual Dataset (LLaVA/Qwen2-VL format)")
+    export_visual_parser.add_argument("--keep-raw", action="store_true", help="Keep raw PNG crops in downloads/extracted_images/ after WebP optimization")
+
     # HF Upload subcommand
     hf_parser = subparsers.add_parser("hf_upload", help="Upload exported dataset to Hugging Face Hub")
     hf_parser.add_argument("--repo_id", type=str, required=True, help="Target Hugging Face repo ID (e.g. username/repo-name)")
@@ -327,6 +331,12 @@ Examples:
         print("=== Step 4: Compiling and Exporting Datasets ===")
         builder = DatasetBuilder(config_path=args.config)
         builder.export_datasets()
+
+    elif args.command == "export_visual":
+        print("=== Step 4.5: Exporting Multimodal Visual Dataset (FAZ-11) ===")
+        from pipeline.visual_dataset_builder import VisualDatasetBuilder
+        builder = VisualDatasetBuilder(config_path=args.config)
+        builder.export_multimodal_dataset(clean_raw_crops=not getattr(args, "keep_raw", False))
 
     elif args.command == "hf_upload":
         print("=== Step 5: Uploading Dataset to Hugging Face Hub ===")
