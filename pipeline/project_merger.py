@@ -475,7 +475,7 @@ class ProjectMerger:
             "input_path": f"exports/{target_project_id}/",
             "db_path": f"database/{target_project_id}.db",
             "qdrant_db_path": f"qdrant_{target_project_id}",
-            "ollama_url": "http://192.168.1.14:11434",
+            "ollama_url": "http://127.0.0.1:11434",
             "model_embedding": "nomic-embed-text:latest",
             "model_analyzer": "ornith:35b-q4_K_M",
             "model_translator": "translategemma:12b-it-q4_K_M",
