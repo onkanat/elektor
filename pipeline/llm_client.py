@@ -79,18 +79,21 @@ def unload_ollama_model(config: dict, model_name: str):
         return
     ollama_url = config.get("ollama_url", "http://localhost:11434")
     # Clean the URL to get the base Ollama endpoint (remove /v1 if present)
-    base_url = ollama_url.replace("/v1", "").rstrip("/")
-    try:
-        url = f"{base_url}/api/chat"
-        data = json.dumps({"model": model_name, "keep_alive": 0}).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=10) as response:
-            if response.status == 200:
-                print(f"  [Ollama] Successfully unloaded model '{model_name}' from VRAM.")
-    except Exception as e:
-        print(f"  [Ollama] Note: Could not unload model '{model_name}' via API (might be non-Ollama backend): {e}")
+    base_url = ollama_url.split("/v1")[0].rstrip("/")
+    for endpoint in ["/api/generate", "/api/chat"]:
+        try:
+            url = f"{base_url}{endpoint}"
+            data = json.dumps({"model": model_name, "keep_alive": 0}).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status == 200:
+                    print(f"  [Ollama] Successfully unloaded model '{model_name}' from VRAM.")
+                    return
+        except Exception:
+            pass
+    print(f"  [Ollama Note] Unload model signal sent for '{model_name}'.")

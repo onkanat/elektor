@@ -491,7 +491,7 @@ class ArchiveAnalyzer:
             "tr_dpo_pairs": tr_res["tr_dpo_pairs"]
         }
 
-    def enrich_code_units(self, limit=None):
+    def enrich_code_units(self, limit=None, enrich_pass="all"):
         """Enriches extracted AST code_units into synthetic SFT instruction pairs in English and Turkish"""
         cursor = self.conn.cursor()
 

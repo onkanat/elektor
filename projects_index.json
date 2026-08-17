@@ -1,5 +1,5 @@
 {
-  "active_project_id": "test_vision",
+  "active_project_id": "extract",
   "projects": {
     "sdr_engineers": {
       "project_id": "sdr_engineers",
@@ -63,6 +63,13 @@
       "config_file": "projects_test_vision.json",
       "created_at": 1786475340.5133922,
       "last_accessed": 1786475340.5133922
+    },
+    "extract": {
+      "project_id": "extract",
+      "project_name": "test_extract",
+      "config_file": "projects_extract.json",
+      "created_at": 1786956430.5314078,
+      "last_accessed": 1786956430.5314088
     }
   }
 }
