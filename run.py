@@ -289,6 +289,7 @@ Examples:
     # LangExtract subcommand
     lx_parser = subparsers.add_parser("langextract", help="Run Google LangExtract grounded entity extraction on project articles")
     lx_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit number of articles to extract")
+    lx_parser.add_argument("--reset", action="store_true", help="Reset all databases and exported datasets before running")
     lx_parser.add_argument("--provider", type=str, choices=["ollama", "openai", "gemini"], default="ollama", help="Model provider (default: ollama)")
     lx_parser.add_argument("--preset", type=str, default="technical_components", help="Extraction schema preset (default: technical_components)")
     lx_parser.add_argument("--visualize", action="store_true", help="Generate interactive HTML visualizer reports")
@@ -364,35 +365,20 @@ Examples:
 
     elif args.command == "langextract":
         print(f"=== Grounded Entity Extraction (LangExtract | Provider: '{args.provider}', Preset: '{args.preset}') ===")
-        import sqlite3
         from pipeline.langextract_engine import LangExtractEngine
         
+        extractor = ArchiveExtractor(config_path=args.config)
+        conn = extractor.conn
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT COUNT(*) FROM articles")
+        if cursor.fetchone()[0] == 0:
+            print("No articles found in database. Extracting text from input documents first...")
+            extractor.process_all_articles(limit=args.limit)
+            
         with open(args.config, "r", encoding="utf-8") as f:
             cfg = json.load(f)
             
-        db_path = cfg.get("db_path", "database/elektor_archive.db")
-        if len(Path(db_path).parts) == 1:
-            db_path = str(Path("database") / db_path)
-            
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS langextract_extractions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                article_id INTEGER,
-                preset TEXT,
-                text_span TEXT,
-                start_char INTEGER,
-                end_char INTEGER,
-                attributes TEXT,
-                provider TEXT,
-                extracted_at TEXT,
-                FOREIGN KEY(article_id) REFERENCES articles(id)
-            )
-        """)
-        conn.commit()
-        
         limit_val = args.limit if isinstance(args.limit, int) else 100
         cursor.execute("SELECT id, title, extracted_text FROM articles WHERE extracted_text IS NOT NULL AND extracted_text != '' LIMIT ?", (limit_val,))
         articles = cursor.fetchall()
@@ -401,7 +387,7 @@ Examples:
         print(f"Processing {len(articles)} articles with LangExtract Engine...")
         
         total_extracted = 0
-        db_name = Path(db_path).stem
+        db_name = Path(extractor.db_path).stem
         vis_dir = Path("exports") / db_name / "langextract_visualizations"
         if args.visualize:
             vis_dir.mkdir(parents=True, exist_ok=True)

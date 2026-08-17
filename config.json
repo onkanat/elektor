@@ -32,8 +32,8 @@
   "project_id": "extract",
   "pragmatic_ratio": 50,
   "enable_vision_ocr": true,
-  "model_vision": "deepseek-ocr:3b-bf16",
+  "model_vision": "qwen3.5:4b",
   "enable_langextract": true,
   "langextract_provider": "ollama",
-  "langextract_schema_preset": "engineering_exercise_sheet"
+  "langextract_schema_preset": "generic_technical_qa"
 }

@@ -393,6 +393,7 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
                 <option value="software_units">Software Architecture & AST</option>
                 <option value="pinout_mappings">Pinout & Signal Mappings</option>
                 <option value="generic_technical_qa">Generic Technical Q&A</option>
+                <option value="engineering_exercise_sheet">Engineering Exercise Sheet</option>
               </select>
             </div>
 
@@ -408,6 +409,17 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
                 onChange={handleChange}
               />
             </div>
+          </div>
+
+          <div style={{ marginTop: '0.8rem', display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              className={`btn btn-primary ${isRunning ? 'btn-disabled' : ''}`}
+              style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem' }}
+              disabled={isRunning}
+              onClick={() => handleTrigger('langextract', limitInput)}
+            >
+              ⚡ Sadece LangExtract Çalıştır (Limit: {limitInput})
+            </button>
           </div>
         </div>
 
@@ -592,6 +604,16 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
               title="Sadece PDF metinlerini ve haritayı ayıklar"
             >
               📄 1. Metin Ayıkla (Extract)
+            </button>
+
+            <button
+              className={`btn btn-secondary ${isRunning ? 'btn-disabled' : ''}`}
+              style={{ fontSize: '0.78rem', padding: '0.45rem 0.6rem', textAlign: 'left', color: '#60a5fa', borderColor: '#3b82f6' }}
+              disabled={isRunning}
+              onClick={() => handleTrigger('langextract', limitInput)}
+              title="Google LangExtract ile kaynak offsetli teknik varlıkları çıkarır ve HTML visualizer raporu üretir"
+            >
+              🔍 1.5 LangExtract Çıkar (Grounded)
             </button>
 
             <button

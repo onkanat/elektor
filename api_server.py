@@ -421,6 +421,8 @@ def run_pipeline_process(cmd, limit, reset, shards=1, shard_ports=None, enrich_p
         args.extend(["--limit", str(limit)])
     if reset:
         args.append("--reset")
+    if cmd == "langextract":
+        args.append("--visualize")
     if cmd in ["enrich", "pipeline", "export_visual"] and shards > 1 and shard_ports:
         args.extend(["--shards", str(shards), "--shard-ports", str(shard_ports)])
     if enrich_pass and enrich_pass != "all":
@@ -467,7 +469,7 @@ def trigger_pipeline(payload: Dict[str, Any] = Body(...)):
             raise HTTPException(status_code=400, detail="A pipeline task is already running.")
 
     cmd = payload.get("command", "pipeline")
-    valid_commands = ["pipeline", "extract", "enrich", "embed", "export"]
+    valid_commands = ["pipeline", "extract", "enrich", "embed", "export", "langextract"]
     if cmd not in valid_commands:
         raise HTTPException(status_code=400, detail=f"Geçersiz komut: '{cmd}'. Geçerli komutlar: {valid_commands}")
 
