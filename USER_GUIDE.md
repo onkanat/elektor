@@ -14,6 +14,7 @@ Bu kılavuz, **Elektor Universal PDF & Rendergit Code Dataset Generator Platform
 6. [🤗 Hugging Face Hub & Bulut GPU Dağıtım Kiti (Faz 4)](#6-hugging-face-hub--bulut-gpu-dağıtım-kiti-faz-4)
 7. [🚀 OpenAI-Uyumlu API & Performans Oturumu (Faz 9)](#7-openai-uyumlu-api--performans-oturumu-faz-9)
 8. [👁️ Multimodal Vizyon (DeepSeek-OCR) & 2x GPU Paralel Sharding (Faz 10)](#8-multimodal-vizyon-deepseek-ocr--2x-gpu-paralel-sharding-faz-10)
+9. [🔍 Google LangExtract Entegrasyonu Kullanım Rehberi (Faz 12)](#9-🔍-google-langextract-entegrasyonu-kullanım-rehberi-faz-12)
 
 ---
 
@@ -194,4 +195,47 @@ Yüzlerce saatlik GPU emeğini korumak için 2 aşamalı güvenlik akışı suna
 
 ---
 
-*Rehber Son Güncelleme: 2026-08-12 | Elektor Universal Pipeline v10.0*
+## 9. 🔍 Google LangExtract Entegrasyonu Kullanım Rehberi (Faz 12)
+
+Platforma eklenen Google `langextract` kütüphanesi entegrasyonu, ham metin ve döküman içerisindeki teknik kavramları, bileşenleri ve parametreleri **karakter bazlı kaynak offset aralıkları (`start_char`, `end_char`)** ile tespit ederek doğrulanabilir (grounded) veri kümelerine dönüştürür.
+
+### 9.1 Web UI Üzerinden Yapılandırma (`SectionConfig.tsx`)
+
+Bölüm A (Parametreler) sekmesinde yer alan **🔍 Google LangExtract Entegrasyonu** kartından şu ayarları yönetebilirsiniz:
+
+1. **LangExtract Aktif Anahtarı**: Otomatik döküman alım adımlarında LangExtract modülünü aktif/pasif yapar.
+2. **Sağlayıcı Önceliği (Provider Selector)**:
+   - **`1. Ollama (Yerel Ücretsiz)` (Varsayılan)**: Yerel modeller üzerinde 0 maliyetle çalışır.
+   - **`2. OpenAI (API)`**: OpenAI API veya vLLM/Groq uyumlu uç noktaları kullanır.
+   - **`3. Gemini API (Google)`**: Google Vertex / Gemini API uç noktasını kullanır (`gemini-2.5-flash`).
+3. **Şema Şablonu (Preset Schema)**:
+   - `Hardware & Technical Components`: Entegreler, mikrodenetleyiciler, sensörler.
+   - `Circuit & Electrical Specs`: Voltaj, akım, frekans, empedans değerleri.
+   - `Software Architecture & AST`: Sınıflar, fonksiyonlar, bağımlılıklar.
+   - `Pinout & Signal Mappings`: Pin numaraları, sinyal yönleri, modlar.
+   - `Generic Technical Q&A`: Genel teknik tanımlar, formüller.
+   - `Engineering Exercise Sheet`: Üniversite ders kitapları, alıştırma föyleri, problem puanları ve GNURadio simülasyon parametreleri.
+4. **Gemini API Key Field**: Gemini API kullanıldığında API anahtarınızı güvenli şekilde girmenizi sağlar.
+
+### 9.2 Komut Satırından (CLI) Çalıştırma
+
+LangExtract çıkarma ve görselleştirme adımlarını CLI üzerinden doğrudan tetikleyebilirsiniz:
+
+```bash
+# Yerel Ollama ile Mühendislik Alıştırma Föyü Şablonunda Çıkarma ve HTML Görselleştirici Üretme
+python run.py langextract --provider ollama --preset engineering_exercise_sheet --limit 5 --visualize
+
+# Google Gemini API Kullanarak Donanım Şablonunda Çıkarma
+GEMINI_API_KEY="AIzaSy..." python run.py langextract --provider gemini --preset technical_components --limit 10 --visualize
+```
+
+### 9.3 Etkileşimli HTML Görselleştirici Raporlarını Görüntüleme
+
+LangExtract tarafından işlenen dökümanlar için `exports/<project_id>/langextract_visualizations/article_<doc_id>_grounded.html` konumunda self-contained HTML görselleştirici üretilir.
+
+- Tarayıcınızda doğrudan veya Web UI `/api/langextract/visualize/{project_id}/{doc_id}` uç noktası üzerinden açabilirsiniz.
+- Metin üzerindeki varlıklar sarı ve turuncu alt çizgilerle vurgulanır; üzerlerine gelindiğinde offset aralıkları ve öznitelik nesneleri (attributes) gösterilir.
+
+---
+
+*Rehber Son Güncelleme: 2026-08-17 | Elektor Universal Pipeline v12.0*

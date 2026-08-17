@@ -31,11 +31,38 @@ class HFDeployer:
         else:
             stats_md = "- Standart çoklu SFT, DPO ve Chat veri kümeleri içerir."
 
+        # Build dynamic file architecture list based on files actually existing
+        file_descriptions = {
+            "sft_dataset.jsonl": "English technical SFT Q&A.",
+            "dpo_dataset.jsonl": "English DPO chosen/rejected preference pairs.",
+            "chat_dataset.jsonl": "English multi-turn conversational dialogs.",
+            "tr_sft_dataset.jsonl": "Turkish SFT dataset (direct generation).",
+            "tr_chat_dataset.jsonl": "Turkish multi-turn technical dialogs.",
+            "tr_dpo_dataset.jsonl": "Turkish DPO preference pairs.",
+            "code_sft_dataset.jsonl": "Synthetic code diversity dataset (`explanation`, `completion`, `bug_fix`, `unit_test`).",
+            "tr_code_sft_dataset.jsonl": "Turkish synthetic code dataset.",
+            "langextract_grounded_dataset.jsonl": "Google LangExtract source grounded entity dataset with character offsets and attributes.",
+        }
+        
+        dynamic_file_arch = []
+        proj_export_dir = self.exports_dir / project_id
+        if proj_export_dir.exists():
+            for filename in sorted(file_descriptions.keys()):
+                base_name = filename.split(".")[0]
+                jsonl_file = proj_export_dir / f"{base_name}.jsonl"
+                parquet_file = proj_export_dir / f"{base_name}.parquet"
+                if jsonl_file.exists() or parquet_file.exists():
+                    dynamic_file_arch.append(f"- `{base_name}.jsonl` / `.parquet`: {file_descriptions[filename]}")
+                    
+        if not dynamic_file_arch:
+            dynamic_file_arch.append("- No datasets exported yet.")
+            
+        file_arch_md = "\n".join(dynamic_file_arch)
+
         card_content = f"""---
 license: mit
 task_categories:
 - text-generation
-- conversational
 - question-answering
 language:
 - tr
@@ -76,14 +103,7 @@ It contains high-quality synthetic code pairs, technical SFT Q&A, DPO (Direct Pr
 {stats_md}
 
 ### File Architecture (`exports/{project_id}/`)
-- `sft_dataset.jsonl` / `.parquet`: English technical SFT Q&A.
-- `dpo_dataset.jsonl` / `.parquet`: English DPO chosen/rejected preference pairs.
-- `chat_dataset.jsonl` / `.parquet`: English multi-turn conversational dialogs.
-- `tr_sft_dataset.jsonl` / `.parquet`: Turkish SFT dataset (direct generation).
-- `tr_chat_dataset.jsonl` / `.parquet`: Turkish multi-turn technical dialogs.
-- `tr_dpo_dataset.jsonl` / `.parquet`: Turkish DPO preference pairs.
-- `code_sft_dataset.jsonl` / `.parquet`: Synthetic code diversity dataset (`explanation`, `completion`, `bug_fix`, `unit_test`).
-- `tr_code_sft_dataset.jsonl` / `.parquet`: Turkish synthetic code dataset.
+{file_arch_md}
 
 ---
 
@@ -148,7 +168,7 @@ print(dpo_dataset['train'][0])
 
         if proj_export_dir.exists():
             for filepath in sorted(proj_export_dir.glob("*")):
-                if filepath.is_file() and not filepath.name.startswith("."):
+                if filepath.is_file() and not filepath.name.startswith(".") and not filepath.name.endswith(".log"):
                     size_kb = round(filepath.stat().st_size / 1024.0, 2)
                     total_bytes += filepath.stat().st_size
                     samples = 0
@@ -278,7 +298,8 @@ print(dpo_dataset['train'][0])
         api.upload_folder(
             folder_path=str(proj_export_dir),
             repo_id=repo_id,
-            repo_type="dataset"
+            repo_type="dataset",
+            ignore_patterns=["*.log"]
         )
 
         return {

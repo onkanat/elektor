@@ -254,7 +254,10 @@ Examples:
 
     # Export Visual subcommand (FAZ-11)
     export_visual_parser = subparsers.add_parser("export_visual", help="Export FAZ-11 Multimodal Visual Dataset (LLaVA/Qwen2-VL format)")
-    export_visual_parser.add_argument("--keep-raw", action="store_true", help="Keep raw PNG crops in downloads/extracted_images/ after WebP optimization")
+    export_visual_parser.add_argument("--clear", action="store_true", help="Delete raw PNG crops from downloads/extracted_images/ after WebP optimization (by default raw crops are kept)")
+    export_visual_parser.add_argument("--keep-raw", action="store_true", help="Deprecated alias: keep raw PNG crops (kept by default now)")
+    export_visual_parser.add_argument("--shards", type=int, default=1, help="Number of parallel GPU worker shards (default: 1 or auto-detect)")
+    export_visual_parser.add_argument("--shard-ports", type=str, default=None, help="Comma-separated list of Ollama port numbers (e.g. 11434,11435)")
 
     # HF Upload subcommand
     hf_parser = subparsers.add_parser("hf_upload", help="Upload exported dataset to Hugging Face Hub")
@@ -278,6 +281,13 @@ Examples:
     
     # Self-test subcommand
     self_test_parser = subparsers.add_parser("self_test", help="Run comprehensive system health self-test & diagnostics")
+    
+    # LangExtract subcommand
+    lx_parser = subparsers.add_parser("langextract", help="Run Google LangExtract grounded entity extraction on project articles")
+    lx_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit number of articles to extract")
+    lx_parser.add_argument("--provider", type=str, choices=["ollama", "openai", "gemini"], default="ollama", help="Model provider (default: ollama)")
+    lx_parser.add_argument("--preset", type=str, default="technical_components", help="Extraction schema preset (default: technical_components)")
+    lx_parser.add_argument("--visualize", action="store_true", help="Generate interactive HTML visualizer reports")
     
     args = parser.parse_args()
     
@@ -339,7 +349,90 @@ Examples:
         print("=== Step 4.5: Exporting Multimodal Visual Dataset (FAZ-11) ===")
         from pipeline.visual_dataset_builder import VisualDatasetBuilder
         builder = VisualDatasetBuilder(config_path=args.config)
-        builder.export_multimodal_dataset(clean_raw_crops=not getattr(args, "keep_raw", False))
+        clean_crops = getattr(args, "clear", False)
+        shards = getattr(args, "shards", 1)
+        shard_ports = getattr(args, "shard_ports", None)
+        builder.export_multimodal_dataset(
+            clean_raw_crops=clean_crops,
+            shards=shards,
+            shard_ports=shard_ports
+        )
+
+    elif args.command == "langextract":
+        print(f"=== Grounded Entity Extraction (LangExtract | Provider: '{args.provider}', Preset: '{args.preset}') ===")
+        import sqlite3
+        from pipeline.langextract_engine import LangExtractEngine
+        
+        with open(args.config, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+            
+        db_path = cfg.get("db_path", "database/elektor_archive.db")
+        if len(Path(db_path).parts) == 1:
+            db_path = str(Path("database") / db_path)
+            
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS langextract_extractions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                article_id INTEGER,
+                preset TEXT,
+                text_span TEXT,
+                start_char INTEGER,
+                end_char INTEGER,
+                attributes TEXT,
+                provider TEXT,
+                extracted_at TEXT,
+                FOREIGN KEY(article_id) REFERENCES articles(id)
+            )
+        """)
+        conn.commit()
+        
+        limit_val = args.limit if isinstance(args.limit, int) else 100
+        cursor.execute("SELECT id, title, extracted_text FROM articles WHERE extracted_text IS NOT NULL AND extracted_text != '' LIMIT ?", (limit_val,))
+        articles = cursor.fetchall()
+        
+        engine = LangExtractEngine(cfg)
+        print(f"Processing {len(articles)} articles with LangExtract Engine...")
+        
+        total_extracted = 0
+        db_name = Path(db_path).stem
+        vis_dir = Path("exports") / db_name / "langextract_visualizations"
+        if args.visualize:
+            vis_dir.mkdir(parents=True, exist_ok=True)
+            
+        for aid, title, text in articles:
+            res = engine.extract_grounded_entities(
+                text=text,
+                schema_preset=args.preset,
+                provider_override=args.provider
+            )
+            entities = res.get("entities", [])
+            total_extracted += len(entities)
+            
+            from datetime import datetime
+            now_iso = datetime.now().isoformat()
+            
+            for ent in entities:
+                stext = ent.get("text_span", "")
+                start = ent.get("start_char", 0)
+                end = ent.get("end_char", len(stext))
+                attr = json.dumps(ent.get("attributes", {}), ensure_ascii=False)
+                
+                cursor.execute("""
+                    INSERT INTO langextract_extractions (article_id, preset, text_span, start_char, end_char, attributes, provider, extracted_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (aid, args.preset, stext, start, end, attr, res.get("provider", args.provider), now_iso))
+            conn.commit()
+            
+            if args.visualize and text:
+                out_html = vis_dir / f"article_{aid}_grounded.html"
+                engine.generate_visualization_html(text, res, str(out_html))
+                print(f"  [Visualizer] Saved HTML report -> {out_html}")
+
+        conn.close()
+        print(f"✅ LangExtract execution finished. Total grounded entities extracted: {total_extracted}")
 
     elif args.command == "hf_upload":
         print("=== Step 5: Uploading Dataset to Hugging Face Hub ===")

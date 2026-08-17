@@ -23,6 +23,7 @@ test_ollama_call.py
 test_ollama_no_json.py
 test_article_call.py
 usb_inventory_report.json
+production_status.json
 
 # Environments & Upload Temp
 .venv/

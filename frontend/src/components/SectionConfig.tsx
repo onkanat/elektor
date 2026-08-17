@@ -6,7 +6,7 @@ interface SectionConfigProps {
   config: PipelineConfig;
   onUpdateConfig: (newConfig: Partial<PipelineConfig>) => Promise<void>;
   pipelineState: PipelineState;
-  onRunPipeline: (command: string, limit?: string, reset?: boolean, confirmReset?: boolean) => void;
+  onRunPipeline: (command: string, limit?: string, reset?: boolean, confirmReset?: boolean, shards?: number, shardPorts?: string) => void;
 }
 
 export const SectionConfig: React.FC<SectionConfigProps> = ({
@@ -24,6 +24,12 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
   const [showResetModal, setShowResetModal] = useState<boolean>(false);
   const [pendingCommand, setPendingCommand] = useState<{ cmd: string; limit?: string }>({ cmd: 'pipeline', limit: '5' });
 
+  // Sharding States
+  const [shardingEnabled, setShardingEnabled] = useState<boolean>(false);
+  const [shardsCount, setShardsCount] = useState<number>(2);
+  const [shardPorts, setShardPorts] = useState<string>('11434,11435');
+  const [isProbing, setIsProbing] = useState<boolean>(false);
+
   const terminalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -31,10 +37,14 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
     setJsonText(JSON.stringify(config, null, 2));
   }, [config]);
 
-  // Auto-scroll terminal log widget to bottom when logs update
+  // Auto-scroll terminal log widget to bottom when logs update (only if user is already near bottom)
   useEffect(() => {
     if (terminalRef.current) {
-      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+      const container = terminalRef.current;
+      const isNearBottom = container.scrollHeight - container.clientHeight - container.scrollTop < 80;
+      if (isNearBottom) {
+        container.scrollTop = container.scrollHeight;
+      }
     }
   }, [pipelineState.logs]);
 
@@ -69,12 +79,43 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
     }
   };
 
+  const handleProbePorts = async () => {
+    setIsProbing(true);
+    try {
+      const res = await fetch('/api/system/probe-ports');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.active_ports && data.active_ports.length > 0) {
+          const portsStr = data.active_ports.join(',');
+          setShardPorts(portsStr);
+          setShardsCount(data.active_ports.length);
+          setShardingEnabled(true);
+          alert(`Aktif Ollama portları keşfedildi: ${portsStr}. Sharding aktif edildi!`);
+        } else {
+          alert('Herhangi bir aktif ardışık Ollama portu (11434-11438) otomatik bulunamadı.');
+        }
+      }
+    } catch (e) {
+      console.error('Probe ports error:', e);
+      alert('Port tarama sırasında bir ağ hatası oluştu.');
+    } finally {
+      setIsProbing(false);
+    }
+  };
+
   const handleTrigger = (cmd: string, limit?: string) => {
     if (resetInput) {
       setPendingCommand({ cmd, limit });
       setShowResetModal(true);
     } else {
-      onRunPipeline(cmd, limit, false, false);
+      onRunPipeline(
+        cmd,
+        limit,
+        false,
+        false,
+        shardingEnabled ? shardsCount : 1,
+        shardingEnabled ? shardPorts : undefined
+      );
     }
   };
 
@@ -88,7 +129,14 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
         projectId={formData.project_id || 'sdr_engineers'}
         onCancel={() => setShowResetModal(false)}
         onConfirm={() => {
-          onRunPipeline(pendingCommand.cmd, pendingCommand.limit, true, true);
+          onRunPipeline(
+            pendingCommand.cmd,
+            pendingCommand.limit,
+            true,
+            true,
+            shardingEnabled ? shardsCount : 1,
+            shardingEnabled ? shardPorts : undefined
+          );
           setShowResetModal(false);
         }}
       />
@@ -298,6 +346,71 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
           />
         </div>
 
+        {/* Google LangExtract Configuration Card */}
+        <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '0.5rem', padding: '1rem', marginTop: '1.2rem', marginBottom: '1.2rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.8rem' }}>
+            <h4 style={{ margin: 0, fontSize: '0.95rem', color: '#60a5fa', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              🔍 Google LangExtract Entegrasyonu (Grounded Extraction)
+            </h4>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                name="enable_langextract"
+                checked={formData.enable_langextract ?? true}
+                onChange={handleChange}
+              />
+              <span style={{ color: '#e2e8f0', fontWeight: 'bold' }}>LangExtract Aktif</span>
+            </label>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.8rem' }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '0.78rem' }}>Sağlayıcı (Provider Priority: Ollama ➔ OpenAI ➔ Gemini)</label>
+              <select
+                name="langextract_provider"
+                className="form-control"
+                style={{ fontSize: '0.82rem' }}
+                value={formData.langextract_provider || 'ollama'}
+                onChange={handleChange}
+              >
+                <option value="ollama">1. Ollama (Yerel Ücretsiz)</option>
+                <option value="openai">2. OpenAI (API)</option>
+                <option value="gemini">3. Gemini API (Google)</option>
+              </select>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '0.78rem' }}>Şema Şablonu (Preset Schema)</label>
+              <select
+                name="langextract_schema_preset"
+                className="form-control"
+                style={{ fontSize: '0.82rem' }}
+                value={formData.langextract_schema_preset || 'technical_components'}
+                onChange={handleChange}
+              >
+                <option value="technical_components">Hardware & Technical Components</option>
+                <option value="circuit_specifications">Circuit & Electrical Specs</option>
+                <option value="software_units">Software Architecture & AST</option>
+                <option value="pinout_mappings">Pinout & Signal Mappings</option>
+                <option value="generic_technical_qa">Generic Technical Q&A</option>
+              </select>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '0.78rem' }}>Gemini API Key (Opsiyonel)</label>
+              <input
+                type="password"
+                name="gemini_api_key"
+                className="form-control"
+                style={{ fontSize: '0.82rem' }}
+                placeholder="AIzaSy..."
+                value={formData.gemini_api_key || ''}
+                onChange={handleChange}
+              />
+            </div>
+          </div>
+        </div>
+
         {/* JSON / Form Görünüm Anahtarı */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem' }}>
           <button
@@ -364,6 +477,80 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
               Veritabanını Sıfırla (--reset) ⚠️
             </label>
           </div>
+        </div>
+
+        {/* PARALEL SHARDING (SPLIT PROCESSING) KART */}
+        <div style={{ marginBottom: '1rem', background: 'rgba(30, 41, 59, 0.5)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--accent-cyan)' }}>
+              ⚡ Paralel Sharding (İş Bölerek İşleme)
+            </span>
+            <button
+              className="btn btn-secondary"
+              style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+              disabled={isProbing || isRunning}
+              onClick={handleProbePorts}
+            >
+              {isProbing ? '🔍 Taranıyor...' : '🔄 Otomatik Port Tara'}
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+            <input
+              type="checkbox"
+              id="shardingEnabled"
+              checked={shardingEnabled}
+              onChange={(e) => setShardingEnabled(e.target.checked)}
+              disabled={isRunning}
+            />
+            <label htmlFor="shardingEnabled" style={{ fontSize: '0.8rem', cursor: 'pointer', color: 'var(--text-primary)' }}>
+              Paralel İşleme Modunu Aktif Et
+            </label>
+          </div>
+
+          {shardingEnabled && (
+            <>
+              {/* VRAM UYARI KARTI */}
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                padding: '0.6rem 0.8rem',
+                borderRadius: 'var(--radius-sm)',
+                marginBottom: '0.75rem',
+                fontSize: '0.75rem',
+                color: '#f87171',
+                lineHeight: '1.25'
+              }}>
+                ⚠️ <strong>VRAM Uyarısı:</strong> Eşzamanlı paralel işleme yaparken VRAM aşımı ve yavaşlama yaşamamak için <strong>9B parametre altındaki</strong> modelleri (örn: <code>ornith:9b</code> veya <code>translategemma:12b</code>) kullanmanız şiddetle tavsiye edilir.
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Parça (Shard) Sayısı</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="8"
+                    className="form-control"
+                    value={shardsCount}
+                    onChange={(e) => setShardsCount(Math.max(1, Number(e.target.value)))}
+                    disabled={isRunning}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Ollama Portları (Virgülle ayırın)</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={shardPorts}
+                    onChange={(e) => setShardPorts(e.target.value)}
+                    placeholder="11434,11435"
+                    disabled={isRunning}
+                  />
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* BÖLÜM 1: TAM PIPELINE BUTONLARI */}

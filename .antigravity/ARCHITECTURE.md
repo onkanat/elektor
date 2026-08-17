@@ -177,6 +177,12 @@ graph TD
 | Model | Özel İstem Standardı | Kullanım Alanı | VRAM/Boyut | Durum |
 |---|---|---|---|---|
 | `deepseek-ocr:3b-bf16` | `<image>\nParse the figure.` / `<|grounding|>` | Şema/Devre Analizi & Tam Sayfa Markdown OCR | ~3.8 GB | ✅ **Varsayılan** |
-| `qwen2.5-vl:7b` | `<image>\nDescribe this image in detail.` | Genel Multimodal Görsel QA & Anlamsal Çıkarım | ~5.2 GB | ✅ Destekleniyor |
-| `llava-phi3:3.8b` | `<image>\nAnalyze image.` | Hafif Görsel İnce-Ayar Etiketleme | ~2.9 GB | ✅ Destekleniyor |
 | `minicpm-v:8b` | `<image>\nParse chart/table.` | Yüksek Çözünürlüklü Grafik & Tablo Okuma | ~6.1 GB | ✅ Destekleniyor |
+
+---
+
+## 🗺️ 8. Yol Haritası ve Gelecek Geliştirmeler (ROADMAP)
+
+Projenin öncelikli mimari hedefleri ve FAZ-12 Hibrit Çift-VLM Yönlendirme Motoru (Dual-Model Vision Router) planı [`ROADMAP.md`](file:///Users/hakankilicaslan/Git/elektor/ROADMAP.md) dosyasında belgelenmiştir.
+
+- **FAZ-12 [CRITICAL/HIGH]:** `deepseek-ocr` (şema/metin/tablo) + `qwen2-vl` / `llava` (doğal fotoğraf/donanım) Hibrit Görsel Yönlendirme Katmanı.

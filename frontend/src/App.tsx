@@ -134,7 +134,9 @@ export const App: React.FC = () => {
     command: string,
     limit?: string,
     reset?: boolean,
-    confirmReset?: boolean
+    confirmReset?: boolean,
+    shards?: number,
+    shardPorts?: string
   ) => {
     try {
       await fetch('/api/pipeline/run', {
@@ -145,6 +147,8 @@ export const App: React.FC = () => {
           limit,
           reset,
           confirm_reset: confirmReset,
+          shards,
+          shard_ports: shardPorts,
         }),
       });
       fetchPipelineStatus();

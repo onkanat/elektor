@@ -130,6 +130,28 @@ class ArchiveAnalyzer:
             cursor.execute("ALTER TABLE enrichments ADD COLUMN human_feedback TEXT")
         self.conn.commit()
 
+    def get_grounded_context_for_article(self, article_id: int) -> str:
+        """Queries SQLite langextract_extractions table for article_id and returns formatted grounded context."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT text_span, start_char, end_char, attributes, preset
+                FROM langextract_extractions
+                WHERE article_id = ?
+                LIMIT 20
+            """, (article_id,))
+            rows = cursor.fetchall()
+            if not rows:
+                return ""
+            
+            grounded_lines = []
+            for span, start, end, attr_json, preset in rows:
+                grounded_lines.append(f"- Entity: '{span}' (Span: [{start}:{end}], Preset: '{preset}', Attr: {attr_json})")
+            
+            return "\n\n### Grounded Source Entities (LangExtract Evidence):\n" + "\n".join(grounded_lines)
+        except Exception:
+            return ""
+
     def call_ollama_json(self, system_prompt, user_prompt, model=None, keep_alive=None, num_predict=8192):
         """Helper to call LLM model and expect a JSON output, optimized with token limit and temp"""
         if model is None:

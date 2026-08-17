@@ -2,7 +2,7 @@ import json
 import sqlite3
 import os
 from pathlib import Path
-import ollama
+from pipeline.llm_client import get_openai_client
 from pipeline.vector_store import ArchiveVectorStore
 
 def get_active_config():
@@ -166,13 +166,14 @@ Respond ONLY in valid JSON with this exact structure:
 """
 
     try:
-        client = ollama.Client(host=ollama_url, timeout=30.0)
-        res = client.chat(
+        client = get_openai_client(config)
+        res = client.chat.completions.create(
             model=model_analyzer,
             messages=[{"role": "user", "content": eval_prompt}],
-            options={"temperature": 0.1}
+            temperature=0.1
         )
-        content = res.get("message", {}).get("content", "").strip()
+        content = res.choices[0].message.content or ""
+        content = content.strip()
         
         # Extract JSON from response
         if "{" in content and "}" in content:

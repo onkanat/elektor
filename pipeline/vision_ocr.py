@@ -1,16 +1,35 @@
 import base64
 import json
 from pathlib import Path
+from typing import Optional, Dict, Any, List
 from pipeline.llm_client import get_openai_client
 
 class VisionOCRManager:
-    def __init__(self, config_path="config.json"):
-        self.config_path = Path(config_path)
-        with open(self.config_path, "r", encoding="utf-8") as f:
-            self.config = json.load(f)
+    def __init__(self, config_path="config.json", config_dict=None):
+        if config_dict is not None:
+            self.config = config_dict
+            self.config_path = Path(config_path)
+        else:
+            self.config_path = Path(config_path)
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                self.config = json.load(f)
             
         self.model_vision = self.config.get("model_vision", "deepseek-ocr:3b-bf16")
         self.client = get_openai_client(self.config)
+
+    def check_health(self) -> bool:
+        """Fast ping check (2s timeout) to verify if vision server / Ollama host:port is reachable."""
+        try:
+            import urllib.parse
+            import socket
+            ollama_url = self.config.get("ollama_url", "http://localhost:11434")
+            parsed = urllib.parse.urlparse(ollama_url)
+            host = parsed.hostname or "localhost"
+            port = parsed.port or 11434
+            with socket.create_connection((host, port), timeout=2.0):
+                return True
+        except Exception:
+            return False
 
     def unload(self):
         """Unloads the vision model from GPU VRAM if Ollama is used."""
@@ -85,7 +104,8 @@ class VisionOCRManager:
                     model=self.model_vision,
                     messages=messages,
                     max_tokens=2048,
-                    temperature=0.2
+                    temperature=0.2,
+                    extra_body={"keep_alive": "30m"}
                 )
                 return response.choices[0].message.content.strip()
             except Exception as sdk_err:
@@ -102,7 +122,8 @@ class VisionOCRManager:
                             "images": [base64_data]
                         }
                     ],
-                    "stream": False
+                    "stream": False,
+                    "keep_alive": "30m"
                 }
                 req = urllib.request.Request(
                     endpoint,
@@ -115,6 +136,14 @@ class VisionOCRManager:
 
         except Exception as e:
             return f"[VLM Extraction Error: {str(e)}]"
+
+    def _clean_vlm_response(self, text: str) -> str:
+        """Strips raw ChatML / prompt control tokens from VLM model outputs."""
+        if not text:
+            return ""
+        for token in ["<|im_start|>user", "<|im_start|>assistant", "<|im_start|>", "<|im_end|>", "<|endoftext|>"]:
+            text = text.replace(token, "")
+        return text.strip()
 
     def describe_cropped_image(self, image_path: str, caption_context: str = "") -> str:
         """FAZ-11: Analyzes cropped figure/diagram with official DeepSeek-OCR prompt (<image>\nParse the figure.)."""
@@ -149,9 +178,10 @@ class VisionOCRManager:
                     model=self.model_vision,
                     messages=messages,
                     max_tokens=2048,
-                    temperature=0.2
+                    temperature=0.2,
+                    extra_body={"keep_alive": "30m"}
                 )
-                return response.choices[0].message.content.strip()
+                return self._clean_vlm_response(response.choices[0].message.content)
             except Exception:
                 # Native Ollama /api/chat fallback
                 import urllib.request
@@ -166,7 +196,8 @@ class VisionOCRManager:
                             "images": [base64_data]
                         }
                     ],
-                    "stream": False
+                    "stream": False,
+                    "keep_alive": "30m"
                 }
                 req = urllib.request.Request(
                     endpoint,
@@ -175,7 +206,8 @@ class VisionOCRManager:
                 )
                 with urllib.request.urlopen(req, timeout=90) as resp:
                     res_data = json.loads(resp.read().decode("utf-8"))
-                    return res_data.get("message", {}).get("content", "").strip()
+                    raw_content = res_data.get("message", {}).get("content", "")
+                    return self._clean_vlm_response(raw_content)
 
         except Exception as e:
             return f"[Vision Extraction Error: {str(e)}]"

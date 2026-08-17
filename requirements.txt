@@ -1,0 +1,16 @@
+openai>=1.0.0
+fastapi>=0.100.0
+uvicorn>=0.20.0
+httpx>=0.24.0
+psutil>=5.9.0
+qdrant-client>=1.3.0
+pandas>=2.0.0
+pyarrow>=12.0.0
+pypdf>=3.9.0
+pypdfium2>=4.0.0
+Pillow>=9.0.0
+pytesseract>=0.3.10
+PyMuPDF>=1.22.0
+langextract>=1.6.0
+google-genai>=1.48.0
+python-dateutil>=2.9.0

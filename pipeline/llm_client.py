@@ -1,0 +1,96 @@
+import os
+import httpx
+from openai import OpenAI, AsyncOpenAI
+
+_clients_pool = {}
+_async_clients_pool = {}
+_client_config_hash = None
+
+def _get_config_hash(config: dict) -> str:
+    """Creates a unique hash key for current client configuration to detect config changes."""
+    ollama_url = config.get("ollama_url", "http://localhost:11434")
+    base_url = config.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL")
+    if not base_url:
+        base_url = ollama_url
+        if not base_url.endswith("/v1") and not base_url.endswith("/v1/"):
+            base_url = f"{base_url.rstrip('/')}/v1"
+            
+    api_key = config.get("openai_api_key") or os.environ.get("OPENAI_API_KEY") or "ollama"
+    timeout = float(config.get("openai_timeout", 600.0))
+    return f"{base_url}|{api_key}|{timeout}"
+
+def get_openai_client(config: dict) -> OpenAI:
+    """Returns a connection-pooled OpenAI client instance cached by config hash."""
+    global _clients_pool
+    current_hash = _get_config_hash(config)
+    
+    if current_hash not in _clients_pool:
+        ollama_url = config.get("ollama_url", "http://localhost:11434")
+        base_url = config.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL")
+        if not base_url:
+            base_url = ollama_url
+            if not base_url.endswith("/v1") and not base_url.endswith("/v1/"):
+                base_url = f"{base_url.rstrip('/')}/v1"
+                
+        api_key = config.get("openai_api_key") or os.environ.get("OPENAI_API_KEY") or "ollama"
+        timeout = float(config.get("openai_timeout", 600.0))
+        
+        # Configure robust connection pooling limits
+        limits = httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=60.0)
+        http_client = httpx.Client(limits=limits, timeout=timeout)
+        
+        _clients_pool[current_hash] = OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            http_client=http_client
+        )
+        
+    return _clients_pool[current_hash]
+
+def get_async_openai_client(config: dict) -> AsyncOpenAI:
+    """Returns a connection-pooled AsyncOpenAI client instance."""
+    global _async_client
+    # For async client, reuse the same configuration hash logic
+    ollama_url = config.get("ollama_url", "http://localhost:11434")
+    base_url = config.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL")
+    if not base_url:
+        base_url = ollama_url
+        if not base_url.endswith("/v1") and not base_url.endswith("/v1/"):
+            base_url = f"{base_url.rstrip('/')}/v1"
+            
+    api_key = config.get("openai_api_key") or os.environ.get("OPENAI_API_KEY") or "ollama"
+    timeout = float(config.get("openai_timeout", 600.0))
+    
+    # We do not cache async client dynamically as of now but keep it simple
+    limits = httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=60.0)
+    http_client = httpx.AsyncClient(limits=limits, timeout=timeout)
+    
+    return AsyncOpenAI(
+        base_url=base_url,
+        api_key=api_key,
+        http_client=http_client
+    )
+
+def unload_ollama_model(config: dict, model_name: str):
+    """Sends a native Ollama API request to unload the specified model from VRAM immediately."""
+    import urllib.request
+    import json
+    if not model_name:
+        return
+    ollama_url = config.get("ollama_url", "http://localhost:11434")
+    # Clean the URL to get the base Ollama endpoint (remove /v1 if present)
+    base_url = ollama_url.replace("/v1", "").rstrip("/")
+    try:
+        url = f"{base_url}/api/chat"
+        data = json.dumps({"model": model_name, "keep_alive": 0}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                print(f"  [Ollama] Successfully unloaded model '{model_name}' from VRAM.")
+    except Exception as e:
+        print(f"  [Ollama] Note: Could not unload model '{model_name}' via API (might be non-Ollama backend): {e}")

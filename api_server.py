@@ -421,7 +421,7 @@ def run_pipeline_process(cmd, limit, reset, shards=1, shard_ports=None, enrich_p
         args.extend(["--limit", str(limit)])
     if reset:
         args.append("--reset")
-    if cmd in ["enrich", "pipeline"] and shards > 1 and shard_ports:
+    if cmd in ["enrich", "pipeline", "export_visual"] and shards > 1 and shard_ports:
         args.extend(["--shards", str(shards), "--shard-ports", str(shard_ports)])
     if enrich_pass and enrich_pass != "all":
         args.extend(["--pass", enrich_pass])
@@ -812,9 +812,15 @@ def export_visual_dataset(payload: Dict[str, Any] = Body(default={})):
     """FAZ-11: Exports multimodal visual instruction tuning dataset (LLaVA/Qwen2-VL format)."""
     try:
         from pipeline.visual_dataset_builder import VisualDatasetBuilder
-        clean_crops = payload.get("clean_raw_crops", True)
+        clean_crops = payload.get("clear", payload.get("clean_raw_crops", False))
+        shards = payload.get("shards", 1)
+        shard_ports = payload.get("shard_ports")
         builder = VisualDatasetBuilder(config_path="config.json")
-        result = builder.export_multimodal_dataset(clean_raw_crops=clean_crops)
+        result = builder.export_multimodal_dataset(
+            clean_raw_crops=clean_crops,
+            shards=shards,
+            shard_ports=shard_ports
+        )
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Visual dataset export error: {str(e)}")
@@ -1344,6 +1350,153 @@ def get_project_error_logs(project_id: str = Query(...), max_lines: int = Query(
 def list_system_personas():
     pm = get_persona_manager()
     return {"personas": pm.get_all_personas()}
+
+# ==============================================================================
+# LANGEXTRACT API ENDPOINTS
+# ==============================================================================
+
+@app.get("/api/langextract/providers")
+def get_langextract_providers():
+    from pipeline.langextract_engine import LangExtractEngine
+    cfg = get_config()
+    engine = LangExtractEngine(cfg)
+    return engine.get_provider_status()
+
+@app.post("/api/langextract/run")
+def run_langextract_task(payload: Dict[str, Any] = Body(...)):
+    from pipeline.langextract_engine import LangExtractEngine
+    cfg = get_config()
+    project_id = payload.get("project_id") or cfg.get("project_id", "sdr_engineers")
+    provider = payload.get("provider") or cfg.get("langextract_provider", "ollama")
+    preset = payload.get("preset") or cfg.get("langextract_schema_preset", "technical_components")
+    limit_val = payload.get("limit", 20)
+    visualize = payload.get("visualize", True)
+
+    db_path = cfg.get("db_path", f"database/{project_id}.db")
+    if len(Path(db_path).parts) == 1:
+        db_path = str(Path("database") / db_path)
+
+    if not Path(db_path).exists():
+        raise HTTPException(status_code=404, detail=f"Veritabanı bulunamadı: {db_path}")
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS langextract_extractions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            article_id INTEGER,
+            preset TEXT,
+            text_span TEXT,
+            start_char INTEGER,
+            end_char INTEGER,
+            attributes TEXT,
+            provider TEXT,
+            extracted_at TEXT,
+            FOREIGN KEY(article_id) REFERENCES articles(id)
+        )
+    """)
+    conn.commit()
+
+    cursor.execute("SELECT id, title, extracted_text FROM articles WHERE extracted_text IS NOT NULL AND extracted_text != '' LIMIT ?", (limit_val,))
+    articles = cursor.fetchall()
+
+    engine = LangExtractEngine(cfg)
+    vis_dir = Path("exports") / project_id / "langextract_visualizations"
+    if visualize:
+        vis_dir.mkdir(parents=True, exist_ok=True)
+
+    extracted_count = 0
+    from datetime import datetime
+
+    for aid, title, text in articles:
+        res = engine.extract_grounded_entities(text=text, schema_preset=preset, provider_override=provider)
+        entities = res.get("entities", [])
+        extracted_count += len(entities)
+        now_iso = datetime.now().isoformat()
+
+        for ent in entities:
+            stext = ent.get("text_span", "")
+            start = ent.get("start_char", 0)
+            end = ent.get("end_char", len(stext))
+            attr = json.dumps(ent.get("attributes", {}), ensure_ascii=False)
+
+            cursor.execute("""
+                INSERT INTO langextract_extractions (article_id, preset, text_span, start_char, end_char, attributes, provider, extracted_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (aid, preset, stext, start, end, attr, res.get("provider", provider), now_iso))
+        conn.commit()
+
+        if visualize and text:
+            out_html = vis_dir / f"article_{aid}_grounded.html"
+            engine.generate_visualization_html(text, res, str(out_html))
+
+    conn.close()
+    return {
+        "status": "success",
+        "project_id": project_id,
+        "processed_articles": len(articles),
+        "total_entities_extracted": extracted_count,
+        "provider": provider,
+        "preset": preset
+    }
+
+@app.get("/api/langextract/results")
+def get_langextract_results(project_id: Optional[str] = Query(None)):
+    cfg = get_config()
+    pid = project_id or cfg.get("project_id", "sdr_engineers")
+    db_path = cfg.get("db_path", f"database/{pid}.db")
+    if len(Path(db_path).parts) == 1:
+        db_path = str(Path("database") / db_path)
+
+    if not Path(db_path).exists():
+        return {"project_id": pid, "count": 0, "results": []}
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='langextract_extractions'")
+    if not cursor.fetchone():
+        conn.close()
+        return {"project_id": pid, "count": 0, "results": []}
+
+    cursor.execute("""
+        SELECT l.id, l.article_id, l.preset, l.text_span, l.start_char, l.end_char, l.attributes, l.provider, l.extracted_at, a.title
+        FROM langextract_extractions l
+        LEFT JOIN articles a ON a.id = l.article_id
+        ORDER BY l.id DESC
+        LIMIT 200
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+
+    results = []
+    for r in rows:
+        lid, aid, preset, span, start, end, attr_str, provider, ext_at, title = r
+        try:
+            attr = json.loads(attr_str) if attr_str else {}
+        except Exception:
+            attr = {}
+        results.append({
+            "id": lid,
+            "article_id": aid,
+            "article_title": title or f"Article #{aid}",
+            "preset": preset,
+            "text_span": span,
+            "start_char": start,
+            "end_char": end,
+            "attributes": attr,
+            "provider": provider,
+            "extracted_at": ext_at
+        })
+
+    return {"project_id": pid, "count": len(results), "results": results}
+
+@app.get("/api/langextract/visualize/{project_id}/{doc_id}")
+def get_langextract_visualization(project_id: str, doc_id: int):
+    target_html = Path("exports") / project_id / "langextract_visualizations" / f"article_{doc_id}_grounded.html"
+    if not target_html.exists():
+        raise HTTPException(status_code=404, detail=f"Visualizer HTML file not found: {target_html}")
+    return FileResponse(path=target_html, media_type="text/html")
+
 
 # Mount React frontend static build
 

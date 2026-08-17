@@ -19,14 +19,19 @@ class DatasetBuilder:
         self.dataset_name = self.config.get("dataset_name", "Document")
         self.dataset_name_tr = self.config.get("dataset_name_tr", "Döküman")
 
-    def _save_jsonl_and_parquet(self, file_path: Path, records: list):
+    def _save_jsonl_and_parquet(self, file_path: Path, records: list, raw: bool = False):
         valid_records = []
         for rec in records:
             if not isinstance(rec, dict):
                 continue
+            if raw:
+                valid_records.append(rec)
+                continue
             inst = rec.get("instruction") or rec.get("prompt") or ""
             out = rec.get("output") or rec.get("chosen") or ""
             if isinstance(rec.get("messages"), list) and len(rec["messages"]) >= 2:
+                valid_records.append(rec)
+            elif rec.get("text_span") is not None or rec.get("start_char") is not None:
                 valid_records.append(rec)
             elif (isinstance(inst, str) and inst.strip()) and (isinstance(out, str) and out.strip()):
                 valid_records.append(rec)
@@ -366,6 +371,9 @@ class DatasetBuilder:
         tr_dpo_file = self.export_dir / "tr_dpo_dataset.jsonl"
         self._save_jsonl_and_parquet(tr_dpo_file, tr_dpo_records)
                 
+        # Export LangExtract Grounded Dataset
+        self.export_langextract_dataset(conn)
+        
         print("\nDatasets exported successfully (JSONL & Parquet):")
         print(f"  English SFT   : {len(sft_records)} samples -> {sft_file}")
         print(f"  English DPO   : {len(dpo_records)} samples -> {dpo_file}")
@@ -375,6 +383,56 @@ class DatasetBuilder:
         print(f"  Turkish DPO   : {len(tr_dpo_records)} samples -> {tr_dpo_file}")
         
         conn.close()
+
+    def export_langextract_dataset(self, conn=None):
+        """Exports SQLite langextract_extractions into langextract_grounded_dataset.jsonl and .parquet"""
+        should_close = False
+        if conn is None:
+            conn = sqlite3.connect(self.db_path)
+            should_close = True
+            
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='langextract_extractions'")
+        if not cursor.fetchone():
+            if should_close:
+                conn.close()
+            return
+
+        cursor.execute("""
+            SELECT l.id, l.article_id, l.preset, l.text_span, l.start_char, l.end_char, 
+                   l.attributes, l.provider, l.extracted_at, a.title, a.filename
+            FROM langextract_extractions l
+            LEFT JOIN articles a ON a.id = l.article_id
+        """)
+        rows = cursor.fetchall()
+        
+        records = []
+        for r in rows:
+            lid, aid, preset, span, start, end, attr_str, provider, ext_at, title, fname = r
+            try:
+                attr = json.loads(attr_str) if attr_str else {}
+            except Exception:
+                attr = {}
+                
+            records.append({
+                "id": f"lx_{lid}",
+                "article_id": aid,
+                "document_title": title or fname or f"Article #{aid}",
+                "preset": preset,
+                "text_span": span,
+                "start_char": start,
+                "end_char": end,
+                "attributes": attr,
+                "provider": provider,
+                "extracted_at": ext_at
+            })
+            
+        lx_file = self.export_dir / "langextract_grounded_dataset.jsonl"
+        self._save_jsonl_and_parquet(lx_file, records)
+        print(f"  LangExtract Grounded: {len(records)} samples -> {lx_file} & .parquet")
+        
+        if should_close:
+            conn.close()
 
 
 

@@ -73,6 +73,20 @@ class ArchiveExtractor:
                 processed_at TEXT
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS langextract_extractions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                article_id INTEGER,
+                preset TEXT,
+                text_span TEXT,
+                start_char INTEGER,
+                end_char INTEGER,
+                attributes TEXT,
+                provider TEXT,
+                extracted_at TEXT,
+                FOREIGN KEY(article_id) REFERENCES articles(id)
+            )
+        """)
         self.conn.commit()
         
         # Backward compatibility migration for is_embedded column
@@ -81,6 +95,38 @@ class ArchiveExtractor:
         except sqlite3.OperationalError:
             cursor.execute("ALTER TABLE articles ADD COLUMN is_embedded INTEGER DEFAULT 0")
             self.conn.commit()
+
+    def run_langextract_on_article(self, article_id: int, text: str, schema_preset: str = None):
+        """Runs LangExtract grounded entity extraction on an article text and stores extractions in SQLite."""
+        if not text or not text.strip():
+            return
+        preset = schema_preset or self.config.get("langextract_schema_preset", "technical_components")
+        try:
+            from pipeline.langextract_engine import LangExtractEngine
+            engine = LangExtractEngine(self.config)
+            result = engine.extract_grounded_entities(text=text, schema_preset=preset)
+            
+            entities = result.get("entities", [])
+            provider = result.get("provider", "ollama")
+            processed_at = datetime.now().isoformat()
+            
+            cursor = self.conn.cursor()
+            for ent in entities:
+                stext = ent.get("text_span", "")
+                start = ent.get("start_char", 0)
+                end = ent.get("end_char", len(stext))
+                attr = json.dumps(ent.get("attributes", {}), ensure_ascii=False)
+                
+                cursor.execute("""
+                    INSERT INTO langextract_extractions (article_id, preset, text_span, start_char, end_char, attributes, provider, extracted_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (article_id, preset, stext, start, end, attr, provider, processed_at))
+            self.conn.commit()
+            if entities:
+                print(f"  [LangExtract] Grounded {len(entities)} entity spans for Article #{article_id} (Preset: '{preset}', Provider: '{provider}').")
+        except Exception as e:
+            print(f"  [LangExtract Note] Ingestion extraction skipped for Article #{article_id}: {e}")
+
 
     def load_zoom_metadata(self):
         """Reads zoom_pageinfo.csv and builds a mapping of filename -> zoom snippet & title"""

@@ -1,6 +1,6 @@
 {
-  "input_mode": "book",
-  "input_path": "/Users/hakankilicaslan/Documents/RP2040/BWT901_Datasheet.pdf",
+  "input_mode": "folder",
+  "input_path": "/Users/hakankilicaslan/Documents/Mekatronik/Booklist-the-mechatronics-handbook.pdf",
   "db_path": "database/test_vision.db",
   "qdrant_db_path": "qdrant_test_vision",
   "ollama_url": "http://192.168.1.14:11434",

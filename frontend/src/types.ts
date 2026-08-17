@@ -30,6 +30,12 @@ export interface PipelineConfig {
   code_cat_completion?: boolean;
   code_cat_bug_fix?: boolean;
   code_cat_unit_test?: boolean;
+  enable_langextract?: boolean;
+  langextract_provider?: 'ollama' | 'openai' | 'gemini';
+  langextract_model_id?: string;
+  langextract_schema_preset?: string;
+  gemini_api_key?: string;
+  openai_api_key?: string;
 }
 
 export interface HealthInfo {

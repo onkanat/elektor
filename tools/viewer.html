@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multimodal Visual Dataset Inspector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --bg-panel: #1e293b;
+      --bg-card: #0f172a;
+      --bg-hover: #334155;
+      --border-color: #334155;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent-cyan: #38bdf8;
+      --accent-indigo: #818cf8;
+      --accent-emerald: #34d399;
+      --accent-amber: #fbbf24;
+      --accent-rose: #f43f5e;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background-color: var(--bg-panel);
+      border-bottom: 1px solid var(--border-color);
+      padding: 0.75rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      z-index: 10;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: var(--accent-cyan);
+    }
+
+    .brand-badge {
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      color: var(--accent-cyan);
+      padding: 0.2rem 0.6rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .btn {
+      background: var(--bg-hover);
+      color: var(--text-main);
+      border: 1px solid var(--border-color);
+      padding: 0.45rem 0.9rem;
+      border-radius: var(--radius-sm);
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: all 0.2s ease;
+    }
+
+    .btn:hover {
+      background: #475569;
+      border-color: #64748b;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #4f46e5, #3b82f6);
+      border: none;
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #4338ca, #2563eb);
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    .main-layout {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      flex: 1;
+      height: calc(100vh - 57px);
+      overflow: hidden;
+    }
+
+    /* Sidebar Left */
+    .sidebar {
+      background-color: var(--bg-panel);
+      border-right: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .sidebar-header {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .search-input {
+      width: 100%;
+      background-color: var(--bg-dark);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      padding: 0.5rem 0.75rem;
+      border-radius: var(--radius-sm);
+      font-size: 0.85rem;
+      outline: none;
+    }
+
+    .search-input:focus {
+      border-color: var(--accent-cyan);
+    }
+
+    .item-list {
+      flex: 1;
+      overflow-y: auto;
+      list-style: none;
+    }
+
+    .item-card {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    .item-card:hover {
+      background-color: var(--bg-hover);
+    }
+
+    .item-card.active {
+      background-color: rgba(56, 189, 248, 0.12);
+      border-left: 3px solid var(--accent-cyan);
+    }
+
+    .item-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-main);
+      margin-bottom: 0.25rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .item-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* Right Split Workspace */
+    .workspace {
+      display: grid;
+      grid-template-rows: 1fr 1fr;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-dark);
+    }
+
+    .top-pane {
+      border-bottom: 1px solid var(--border-color);
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at center, rgba(30, 41, 59, 0.4) 0%, var(--bg-dark) 100%);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .img-container {
+      max-width: 100%;
+      max-height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .preview-img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      border-radius: var(--radius-md);
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+      border: 1px solid var(--border-color);
+      background-color: #000;
+    }
+
+    .bottom-pane {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      overflow: hidden;
+    }
+
+    .description-box {
+      border-right: 1px solid var(--border-color);
+      padding: 1rem 1.25rem;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .box-header {
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--accent-cyan);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .description-content {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.85rem;
+      line-height: 1.6;
+      color: #e2e8f0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: var(--bg-panel);
+      padding: 1rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-color);
+      flex: 1;
+    }
+
+    .metadata-box {
+      padding: 1rem 1.25rem;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      background-color: var(--bg-panel);
+    }
+
+    .meta-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .meta-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    .meta-value {
+      font-size: 0.85rem;
+      color: var(--text-main);
+      word-break: break-all;
+      background: var(--bg-dark);
+      padding: 0.45rem 0.65rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-color);
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-muted);
+      gap: 1rem;
+      text-align: center;
+      padding: 2rem;
+    }
+
+    .empty-icon {
+      font-size: 3rem;
+      opacity: 0.6;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <span>🖼️ Visual Dataset Inspector</span>
+      <span class="brand-badge" id="recordCountBadge">0 Kayıt</span>
+    </div>
+    <div class="controls">
+      <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+        📁 JSONL Dosyası Yükle
+      </button>
+      <input type="file" id="fileInput" accept=".jsonl,.json" onchange="loadJsonlFile(event)">
+      <button class="btn" onclick="loadDefaultDataset()">
+        🔄 Varsayılan Veriyi Yükle (test_vision)
+      </button>
+    </div>
+  </header>
+
+  <div class="main-layout">
+    <!-- SOL PANEL: Dizin / Örnek Listesi -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <input type="text" id="searchInput" class="search-input" placeholder="🔍 ID veya dosya adı ara..." oninput="filterItems()">
+      </div>
+      <ul class="item-list" id="itemList">
+        <li class="empty-state">
+          <div class="empty-icon">📦</div>
+          <div>Henüz veri yüklenmedi.<br>Lütfen JSONL dosyasını yükleyin.</div>
+        </li>
+      </ul>
+    </div>
+
+    <!-- SAĞ PANEL: İki Katmanlı Çalışma Alanı -->
+    <div class="workspace">
+      <!-- ÜST SAĞ: Görsel Ön-izleme -->
+      <div class="top-pane">
+        <div class="img-container" id="imgContainer">
+          <div class="empty-state">
+            <div class="empty-icon">🖼️</div>
+            <div>Sol listeden bir örnek seçin.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ALT SAĞ: Açıklama ve Metadata -->
+      <div class="bottom-pane">
+        <div class="description-box">
+          <div class="box-header">
+            <span>📝 VLM Model Çıktısı (Açıklama / QA)</span>
+            <span id="charCountBadge" style="font-size: 0.75rem; color: var(--text-muted);">0 karakter</span>
+          </div>
+          <div class="description-content" id="descriptionText">Bir örnek seçildiğinde model açıklaması burada görüntülenecektir.</div>
+        </div>
+
+        <div class="metadata-box">
+          <div class="box-header">
+            <span>ℹ️ Örnek Metadata</span>
+          </div>
+          <div class="meta-group">
+            <div class="meta-label">Örnek ID</div>
+            <div class="meta-value" id="metaId">-</div>
+          </div>
+          <div class="meta-group">
+            <div class="meta-label">Görsel Bağıl Yolu</div>
+            <div class="meta-value" id="metaImagePath">-</div>
+          </div>
+          <div class="meta-group">
+            <div class="meta-label">Orijinal Dosya Adı</div>
+            <div class="meta-value" id="metaOriginalName">-</div>
+          </div>
+          <div class="meta-group">
+            <div class="meta-label">Vizyon Modeli</div>
+            <div class="meta-value" id="metaModel">-</div>
+          </div>
+          <div class="meta-group">
+            <div class="meta-label">WebP Tasarruf Oranı</div>
+            <div class="meta-value" id="metaSavedRatio" style="color: var(--accent-emerald); font-weight: 600;">-</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let dataset = [];
+    let filteredDataset = [];
+    let selectedIndex = -1;
+
+    function loadJsonlFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        parseJsonlContent(e.target.result);
+      };
+      reader.readAsText(file);
+    }
+
+    function parseJsonlContent(content) {
+      const lines = content.split('\n');
+      dataset = [];
+      lines.forEach((line, idx) => {
+        const trimmed = line.trim();
+        if (trimmed) {
+          try {
+            const obj = JSON.parse(trimmed);
+            dataset.push(obj);
+          } catch (err) {
+            console.warn(`Line ${idx + 1} parse error:`, err);
+          }
+        }
+      });
+
+      filteredDataset = [...dataset];
+      document.getElementById('recordCountBadge').textContent = `${dataset.length} Kayıt`;
+      renderSidebarList();
+      if (dataset.length > 0) {
+        selectItem(0);
+      }
+    }
+
+    async function loadDefaultDataset() {
+      try {
+        const res = await fetch('/exports/test_vision/multimodal_visual_dataset.jsonl');
+        if (res.ok) {
+          const text = await res.text();
+          parseJsonlContent(text);
+        } else {
+          alert('Varsayılan dataset dosyası bulunamadı. Lütfen "JSONL Dosyası Yükle" butonunu kullanın.');
+        }
+      } catch (e) {
+        alert('Yerel dosyaya erişilemedi. Lütfen "JSONL Dosyası Yükle" butonunu tıklayarak exports/test_vision/multimodal_visual_dataset.jsonl dosyasını seçin.');
+      }
+    }
+
+    function renderSidebarList() {
+      const listEl = document.getElementById('itemList');
+      listEl.innerHTML = '';
+
+      if (filteredDataset.length === 0) {
+        listEl.innerHTML = `
+          <li class="empty-state">
+            <div class="empty-icon">🔍</div>
+            <div>Aramanızla eşleşen kayıt bulunamadı.</div>
+          </li>`;
+        return;
+      }
+
+      filteredDataset.forEach((item, index) => {
+        const li = document.createElement('li');
+        li.className = `item-card ${index === selectedIndex ? 'active' : ''}`;
+        li.onclick = () => selectItem(index);
+
+        const title = item.id || `Örnek #${index + 1}`;
+        const imgName = item.metadata?.webp_filename || item.image || '';
+        const charLen = item.conversations?.[1]?.value?.length || 0;
+
+        li.innerHTML = `
+          <div class="item-title" title="${title}">${title}</div>
+          <div class="item-meta">
+            <span>📷 ${imgName.split('/').pop()}</span>
+            <span>📝 ${charLen} kr.</span>
+          </div>
+        `;
+        listEl.appendChild(li);
+      });
+    }
+
+    function filterItems() {
+      const query = document.getElementById('searchInput').value.toLowerCase();
+      filteredDataset = dataset.filter(item => {
+        const idMatch = (item.id || '').toLowerCase().includes(query);
+        const imgMatch = (item.image || '').toLowerCase().includes(query);
+        const origMatch = (item.metadata?.original_filename || '').toLowerCase().includes(query);
+        return idMatch || imgMatch || origMatch;
+      });
+      selectedIndex = -1;
+      renderSidebarList();
+      if (filteredDataset.length > 0) {
+        selectItem(0);
+      }
+    }
+
+    function selectItem(index) {
+      if (index < 0 || index >= filteredDataset.length) return;
+      selectedIndex = index;
+
+      // Update active list selection
+      const cards = document.querySelectorAll('.item-card');
+      cards.forEach((c, idx) => {
+        if (idx === index) c.classList.add('active');
+        else c.classList.remove('active');
+      });
+
+      const item = filteredDataset[index];
+
+      // Update Image Display
+      const imgContainer = document.getElementById('imgContainer');
+      const relPath = item.image || '';
+      const resolvedSrc = `../exports/test_vision/${relPath}`;
+
+      imgContainer.innerHTML = `
+        <img src="${resolvedSrc}" class="preview-img" alt="${item.id}" 
+             onerror="this.onerror=null; this.src='https://via.placeholder.com/600x400/1e293b/f8fafc?text=Gorsel+Yuklenemedi+(${encodeURIComponent(relPath)})';">
+      `;
+
+      // Update Description
+      const gptText = item.conversations?.[1]?.value || item.conversations?.[0]?.value || 'Açıklama yok.';
+      document.getElementById('descriptionText').textContent = gptText;
+      document.getElementById('charCountBadge').textContent = `${gptText.length} karakter / ${gptText.split(/\s+/).length} kelime`;
+
+      // Update Metadata
+      document.getElementById('metaId').textContent = item.id || '-';
+      document.getElementById('metaImagePath').textContent = item.image || '-';
+      document.getElementById('metaOriginalName').textContent = item.metadata?.original_filename || '-';
+      document.getElementById('metaModel').textContent = item.metadata?.model_vision || 'deepseek-ocr:3b-bf16';
+      document.getElementById('metaSavedRatio').textContent = item.metadata?.saved_ratio_percent ? `%${item.metadata.saved_ratio_percent}` : '-';
+    }
+
+    // Auto-attempt load on page load
+    window.addEventListener('DOMContentLoaded', () => {
+      loadDefaultDataset();
+    });
+  </script>
+</body>
+</html>
