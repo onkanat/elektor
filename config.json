@@ -1,6 +1,6 @@
 {
   "input_mode": "book",
-  "input_path": "/Users/hakankilicaslan/Downloads/Exercisesheet1.pdf",
+  "input_path": "downloads/Exercisesheet1.pdf",
   "db_path": "database/extract.db",
   "qdrant_db_path": "qdrant_extract",
   "ollama_url": "http://127.0.0.1:11434",
@@ -32,5 +32,8 @@
   "project_id": "extract",
   "pragmatic_ratio": 50,
   "enable_vision_ocr": true,
-  "model_vision": "deepseek-ocr:3b-bf16"
+  "model_vision": "deepseek-ocr:3b-bf16",
+  "enable_langextract": true,
+  "langextract_provider": "ollama",
+  "langextract_schema_preset": "engineering_exercise_sheet"
 }

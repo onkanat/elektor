@@ -4,6 +4,10 @@ import os
 import json
 import shutil
 from pathlib import Path
+
+# Ensure unbuffered real-time stdout streaming
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(line_buffering=True)
 from pipeline.extractor import ArchiveExtractor
 from pipeline.analyzer import ArchiveAnalyzer
 from pipeline.vector_store import ArchiveVectorStore

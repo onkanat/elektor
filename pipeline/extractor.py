@@ -127,6 +127,39 @@ class ArchiveExtractor:
         except Exception as e:
             print(f"  [LangExtract Note] Ingestion extraction skipped for Article #{article_id}: {e}")
 
+    def run_langextract_all(self, limit=None):
+        """Runs LangExtract on all articles in the database if enable_langextract is True."""
+        if not self.config.get("enable_langextract", True):
+            return
+        
+        cursor = self.conn.cursor()
+        query = "SELECT id, title, extracted_text FROM articles"
+        if limit:
+            try:
+                lim_val = int(limit)
+                query += f" LIMIT {lim_val}"
+            except Exception:
+                pass
+        cursor.execute(query)
+        articles = cursor.fetchall()
+        
+        if not articles:
+            return
+            
+        preset = self.config.get("langextract_schema_preset", "technical_components")
+        provider = self.config.get("langextract_provider", "ollama")
+        print(f"\n🔍 Google LangExtract Entegrasyonu (Grounded Extraction | Provider: '{provider}', Preset: '{preset}')...")
+        
+        extracted_count = 0
+        for art_id, title, text in articles:
+            cursor.execute("SELECT COUNT(*) FROM langextract_extractions WHERE article_id = ?", (art_id,))
+            if cursor.fetchone()[0] > 0:
+                continue
+            self.run_langextract_on_article(art_id, text, schema_preset=preset)
+            extracted_count += 1
+            
+        if extracted_count > 0:
+            print(f"✅ LangExtract completed for {extracted_count} articles.")
 
     def load_zoom_metadata(self):
         """Reads zoom_pageinfo.csv and builds a mapping of filename -> zoom snippet & title"""
@@ -738,6 +771,7 @@ class ArchiveExtractor:
                 count += 1
 
         print(f"Extraction step completed. Processed {count} new chapters/documents.")
+        self.run_langextract_all(limit=limit)
 
     def close(self):
         if self.enable_vision_ocr and hasattr(self, "vision_ocr") and self.vision_ocr:
