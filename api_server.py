@@ -780,7 +780,7 @@ def get_qdrant_info():
             "points_count": points_count
         }
     except Exception as e:
-        return {"exists": False, "path": qdrant_path, "error": str(e)}
+        return {"exists": False, "path": qdrant_path, "collection": collection_name, "error": str(e)}
     finally:
         if client is not None:
             try:

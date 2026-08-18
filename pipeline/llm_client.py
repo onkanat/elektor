@@ -6,17 +6,24 @@ _clients_pool = {}
 _async_clients_pool = {}
 _client_config_hash = None
 
+def _resolve_endpoint_and_key(config: dict):
+    base_url = config.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL") or config.get("ollama_url", "http://localhost:11434")
+    if not base_url.endswith("/v1") and not base_url.endswith("/v1/"):
+        base_url = f"{base_url.rstrip('/')}/v1"
+    
+    api_key = (
+        config.get("openai_api_key") 
+        or config.get("ollama_api_key") 
+        or os.environ.get("OPENAI_API_KEY") 
+        or os.environ.get("OLLAMA_API_KEY") 
+        or "ollama"
+    )
+    timeout = float(config.get("openai_timeout", 600.0))
+    return base_url, api_key, timeout
+
 def _get_config_hash(config: dict) -> str:
     """Creates a unique hash key for current client configuration to detect config changes."""
-    ollama_url = config.get("ollama_url", "http://localhost:11434")
-    base_url = config.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL")
-    if not base_url:
-        base_url = ollama_url
-        if not base_url.endswith("/v1") and not base_url.endswith("/v1/"):
-            base_url = f"{base_url.rstrip('/')}/v1"
-            
-    api_key = config.get("openai_api_key") or os.environ.get("OPENAI_API_KEY") or "ollama"
-    timeout = float(config.get("openai_timeout", 600.0))
+    base_url, api_key, timeout = _resolve_endpoint_and_key(config)
     return f"{base_url}|{api_key}|{timeout}"
 
 def get_openai_client(config: dict) -> OpenAI:
@@ -25,15 +32,7 @@ def get_openai_client(config: dict) -> OpenAI:
     current_hash = _get_config_hash(config)
     
     if current_hash not in _clients_pool:
-        ollama_url = config.get("ollama_url", "http://localhost:11434")
-        base_url = config.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL")
-        if not base_url:
-            base_url = ollama_url
-            if not base_url.endswith("/v1") and not base_url.endswith("/v1/"):
-                base_url = f"{base_url.rstrip('/')}/v1"
-                
-        api_key = config.get("openai_api_key") or os.environ.get("OPENAI_API_KEY") or "ollama"
-        timeout = float(config.get("openai_timeout", 600.0))
+        base_url, api_key, timeout = _resolve_endpoint_and_key(config)
         
         # Configure robust connection pooling limits
         limits = httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=60.0)
@@ -48,20 +47,9 @@ def get_openai_client(config: dict) -> OpenAI:
     return _clients_pool[current_hash]
 
 def get_async_openai_client(config: dict) -> AsyncOpenAI:
-    """Returns a connection-pooled AsyncOpenAI client instance."""
-    global _async_client
-    # For async client, reuse the same configuration hash logic
-    ollama_url = config.get("ollama_url", "http://localhost:11434")
-    base_url = config.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL")
-    if not base_url:
-        base_url = ollama_url
-        if not base_url.endswith("/v1") and not base_url.endswith("/v1/"):
-            base_url = f"{base_url.rstrip('/')}/v1"
-            
-    api_key = config.get("openai_api_key") or os.environ.get("OPENAI_API_KEY") or "ollama"
-    timeout = float(config.get("openai_timeout", 600.0))
+    """Returns an AsyncOpenAI client instance configured with target endpoint and key."""
+    base_url, api_key, timeout = _resolve_endpoint_and_key(config)
     
-    # We do not cache async client dynamically as of now but keep it simple
     limits = httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=60.0)
     http_client = httpx.AsyncClient(limits=limits, timeout=timeout)
     

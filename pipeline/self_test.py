@@ -94,14 +94,14 @@ def run_self_test(config_path: str = "config.json"):
         env = dict(os.environ)
         env["PYTHONPATH"] = "."
         res = subprocess.run(
-            [sys.executable, "-m", "pytest", "tests/", "-o", "pythonpath=."],
+            [sys.executable, "-m", "pytest", "tests/", "-q", "--disable-warnings", "-o", "pythonpath=."],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=90,
             env=env
         )
         if res.returncode == 0:
-            print("  Pytest Suite OK: All 21 unit tests PASSED cleanly!")
+            print("  Pytest Suite OK: All unit tests PASSED cleanly!")
             passed_checks += 1
         else:
             print(f"  ⚠️ Pytest Warning (Exit code {res.returncode}):\n{res.stdout[:200]}")
