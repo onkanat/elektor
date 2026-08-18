@@ -294,6 +294,13 @@ Examples:
     lx_parser.add_argument("--preset", type=str, default="technical_components", help="Extraction schema preset (default: technical_components)")
     lx_parser.add_argument("--visualize", action="store_true", help="Generate interactive HTML visualizer reports")
     
+    # Kiwix subcommand
+    kiwix_parser = subparsers.add_parser("kiwix", help="Extract text and metadata from Kiwix (.zim) open catalog archives")
+    kiwix_parser.add_argument("--zim", type=str, default=None, help="Path to local .zim archive file")
+    kiwix_parser.add_argument("--url", type=str, default=None, help="Direct Kiwix catalog download URL")
+    kiwix_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit number of articles to extract")
+    kiwix_parser.add_argument("--reset", action="store_true", help="Reset all databases before extracting")
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -490,6 +497,19 @@ Examples:
         print(f"=== Starting Web UI Dashboard on http://{args.host}:{args.port} ===")
         import uvicorn
         uvicorn.run("api_server:app", host=args.host, port=args.port, reload=True)
+
+    elif args.command == "kiwix":
+        print("=== Step 1 (Kiwix): ZIM Archive Extraction ===")
+        from pipeline.kiwix_extractor import KiwixZimExtractor
+        zim_extractor = KiwixZimExtractor(config_path=args.config)
+        try:
+            zim_path = getattr(args, "zim", None)
+            url = getattr(args, "url", None)
+            if url:
+                zim_path = zim_extractor.download_zim_if_needed(target_path=zim_path, url=url)
+            zim_extractor.extract_from_zim(zim_path=zim_path, limit=args.limit)
+        finally:
+            zim_extractor.close()
 
     elif args.command == "self_test":
         from pipeline.self_test import run_self_test

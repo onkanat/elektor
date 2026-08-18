@@ -1,7 +1,7 @@
 export interface PipelineConfig {
   project_id?: string;
   project_name?: string;
-  input_mode: 'folder' | 'book' | 'rendergit' | 'github';
+  input_mode: 'folder' | 'book' | 'rendergit' | 'github' | 'kiwix' | 'zim';
   input_path: string;
 
   db_path: string;
@@ -36,6 +36,10 @@ export interface PipelineConfig {
   langextract_schema_preset?: string;
   gemini_api_key?: string;
   openai_api_key?: string;
+  kiwix_zim_path?: string;
+  kiwix_download_url?: string;
+  kiwix_namespaces?: string[];
+  kiwix_min_chars?: number;
 }
 
 export interface HealthInfo {

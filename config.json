@@ -1,5 +1,5 @@
 {
-  "input_mode": "book",
+  "input_mode": "folder",
   "input_path": "downloads/Exercisesheet1.pdf",
   "db_path": "database/extract.db",
   "qdrant_db_path": "qdrant_extract",
@@ -35,5 +35,9 @@
   "model_vision": "qwen3.5:4b",
   "enable_langextract": true,
   "langextract_provider": "ollama",
-  "langextract_schema_preset": "generic_technical_qa"
+  "langextract_schema_preset": "generic_technical_qa",
+  "kiwix_zim_path": "downloads/wikipedia_tr_all.zim",
+  "kiwix_download_url": "",
+  "kiwix_namespaces": ["A", ""],
+  "kiwix_min_chars": 300
 }

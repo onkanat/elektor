@@ -631,6 +631,14 @@ class ArchiveExtractor:
             
         cursor = self.conn.cursor()
 
+        if self.input_mode in ("kiwix", "zim") or str(self.input_path).lower().endswith(".zim"):
+            print(f"=== Extraction Mode: KIWIX ZIM (Target ZIM: {self.input_path}) ===")
+            from pipeline.kiwix_extractor import KiwixZimExtractor
+            zim_extractor = KiwixZimExtractor(config_path=self.config_path if hasattr(self, "config_path") else "config.json")
+            zim_extractor.extract_from_zim(zim_path=str(self.input_path) if str(self.input_path).endswith(".zim") else None, limit=limit)
+            zim_extractor.close()
+            return
+
         if self.input_mode in ("rendergit", "github", "git_repo"):
             print(f"=== Extraction Mode: RENDERGIT (Target Repo: {self.input_path}) ===")
             repo_input = str(self.input_path).strip()

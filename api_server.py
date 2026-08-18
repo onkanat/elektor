@@ -469,7 +469,7 @@ def trigger_pipeline(payload: Dict[str, Any] = Body(...)):
             raise HTTPException(status_code=400, detail="A pipeline task is already running.")
 
     cmd = payload.get("command", "pipeline")
-    valid_commands = ["pipeline", "extract", "enrich", "embed", "export", "langextract"]
+    valid_commands = ["pipeline", "extract", "enrich", "embed", "export", "langextract", "kiwix"]
     if cmd not in valid_commands:
         raise HTTPException(status_code=400, detail=f"Geçersiz komut: '{cmd}'. Geçerli komutlar: {valid_commands}")
 

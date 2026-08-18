@@ -423,6 +423,55 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
           </div>
         </div>
 
+        {/* GOOGLE LANGEXTRACT & KIWIX ARCHIVE BOARD */}
+        <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', marginBottom: '1.25rem' }}>
+          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#38bdf8', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <span>🌐 Kiwix Kataloğu & OpenZIM Arşiv Çıkarıcı</span>
+            <a href="https://get.kiwix.org/en/solutions/catalog/" target="_blank" rel="noreferrer" style={{ fontSize: '0.72rem', color: 'var(--accent-cyan)', textDecoration: 'underline' }}>
+               Katalog Bağlantısı ↗
+            </a>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '0.78rem' }}>Yerel .zim Dosya Yolu</label>
+              <input
+                type="text"
+                name="kiwix_zim_path"
+                className="form-control"
+                style={{ fontSize: '0.82rem' }}
+                placeholder="downloads/wikipedia_tr_all.zim"
+                value={formData.kiwix_zim_path || ''}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '0.78rem' }}>Kiwix İndirme URL (Opsiyonel)</label>
+              <input
+                type="text"
+                name="kiwix_download_url"
+                className="form-control"
+                style={{ fontSize: '0.82rem' }}
+                placeholder="https://download.kiwix.org/zim/..."
+                value={formData.kiwix_download_url || ''}
+                onChange={handleChange}
+              />
+            </div>
+          </div>
+
+          <div style={{ marginTop: '0.8rem', display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              className={`btn btn-primary ${isRunning ? 'btn-disabled' : ''}`}
+              style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem', background: '#0284c7', borderColor: '#0369a1' }}
+              disabled={isRunning}
+              onClick={() => handleTrigger('kiwix', limitInput)}
+            >
+              📦 Kiwix Zim Arşivi Çıkar (Limit: {limitInput})
+            </button>
+          </div>
+        </div>
+
         {/* JSON / Form Görünüm Anahtarı */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem' }}>
           <button
