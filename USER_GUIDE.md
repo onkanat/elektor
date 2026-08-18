@@ -14,7 +14,10 @@ Bu kılavuz, **Elektor Universal PDF & Rendergit Code Dataset Generator Platform
 6. [🤗 Hugging Face Hub & Bulut GPU Dağıtım Kiti (Faz 4)](#6-hugging-face-hub--bulut-gpu-dağıtım-kiti-faz-4)
 7. [🚀 OpenAI-Uyumlu API & Performans Oturumu (Faz 9)](#7-openai-uyumlu-api--performans-oturumu-faz-9)
 8. [👁️ Multimodal Vizyon (DeepSeek-OCR) & 2x GPU Paralel Sharding (Faz 10)](#8-multimodal-vizyon-deepseek-ocr--2x-gpu-paralel-sharding-faz-10)
-9. [🔍 Google LangExtract Entegrasyonu Kullanım Rehberi (Faz 12)](#9-🔍-google-langextract-entegrasyonu-kullanım-rehberi-faz-12)
+9. [🔍 Google LangExtract Entegrasyonu Kullanım Rehberi (Faz 12)](#9--google-langextract-entegrasyonu-kullanım-rehberi-faz-12)
+10. [📦 Kiwix OpenZIM Ansiklopedi Veri Hattı (Faz 13)](#10--kiwix-openzim-ansiklopedi-veri-hattı-faz-13)
+11. [✨ Dinamik Ön Tarama & Few-Shot Örnek Sentezi (Faz 14)](#11--dinamik-ön-tarama--few-shot-örnek-sentezi-faz-14)
+12. [🩺 Otonom Sistem Teşhis & Sağlık Modülü (`self_test`) (Faz 15)](#12--otonom-sistem-teşhis--sağlık-modülü-self_test-faz-15)
 
 ---
 
@@ -238,4 +241,44 @@ LangExtract tarafından işlenen dökümanlar için `exports/<project_id>/langex
 
 ---
 
-*Rehber Son Güncelleme: 2026-08-17 | Elektor Universal Pipeline v12.0*
+## 10. 📦 Kiwix OpenZIM Ansiklopedi Veri Hattı (Faz 13)
+
+Kiwix veri alım hattı, İnternet erişimi kısıtlı veya devasa çevrimdışı arşivleri (Wikipedia Türkçe/İngilizce, StackOverflow, Vikisözlük) doğrudan sentetik veri setlerine dönüştürür.
+
+- **Kullanım (CLI)**:
+  ```bash
+  python run.py kiwix --zim downloads/wikipedia_tr_all.zim --limit 100
+  ```
+- **Filtreleme & Temizlik**:
+  - `libzim.Archive` API okuyucusu.
+  - `BeautifulSoup4` + `html2text` ile şablon ve HTML gürültülerinden arındırılmış temiz Markdown üretimi.
+  - Minimum karakter filtresi (`kiwix_min_chars: 300`).
+
+---
+
+## 11. ✨ Dinamik Ön Tarama & Few-Shot Örnek Sentezi (Faz 14)
+
+LangExtract modülü, sabit promptlar yerine işlenen dökümanın ilk 2.500 karakterlik bölümünü ön tarayarak dokümana özel `prompt_description` ve `lx.data.ExampleData` nesneleri üretir.
+
+- **Ayarlama (Web UI & `config.json`)**:
+  - Web UI LangExtract panelinde **✨ Dinamik Doküman Ön Taraması & Few-Shot Örnek Üretimi** seçeneğini aktif/pasif yapabilirsiniz.
+  - `"enable_langextract_dynamic_examples": true`
+
+---
+
+## 12. 🩺 Otonom Sistem Teşhis & Sağlık Modülü (`self_test`) (Faz 15)
+
+Sistemin tüm bileşenlerinin (SQLite, Qdrant, Ollama VRAM, Vision OCR ve Pytest test kiti) çalışırlığını 5 aşamalı otonom test ile denetler.
+
+- **Çalıştırma**:
+  ```bash
+  python run.py self_test
+  ```
+- **Raporlama**:
+  ```text
+  🎯 SELF-TEST COMPLETED: 5/5 System Checks Passed!
+  ```
+
+---
+
+*Rehber Son Güncelleme: 2026-08-18 | Elektor Universal Pipeline v15.0*

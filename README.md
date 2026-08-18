@@ -22,6 +22,9 @@ Originally built for the Elektor Magazine Archive (1974–2025), the pipeline ha
 | **FAZ 10** | **Multimodal Tarama & Çizim / Grafik Anlamlandırma Motoru (DeepSeek-OCR)**: Taralı PDF'lerdeki teknik çizimleri, devre şemalarını, grafik şemaları ve görsel tabloları anlamlandırmak için `deepseek-ocr:3b-bf16` vizyon modeli entegrasyonu, akıllı yerleşim/kutu filtreleme (smart bounding box filtering) ve otomatik VRAM offload mekanizması. 2x 16GB GPU üzerinde Paralel Sharding (Port 11434 & 11435) ile SQLite WAL modunda eşzamanlı çalışma desteği. | ✅ **Tamamlandı** |
 | **FAZ 11** | **Otomatik Multimodal Görsel İnce-Ayar Veri Seti Motoru (Visual Instruction Tuning / LLaVA Format)**: PDF'lerden kırpılan teknik çizim, şema ve grafiklerin (`downloads/extracted_images/`) `deepseek-ocr:3b-bf16` ile otomatik etiketlenerek LLaVA/Qwen-VL uyumlu bağımsız **Görsel Veri Seti** (`multimodal_visual_dataset.jsonl`) olarak paketlenmesi. | 💡 **Gelecek Vizyonu (Planlanan)** |
 | **FAZ 12** | **Google LangExtract Entegrasyonu & Karakter Bazlı Kaynak Bağlama (Source Grounding)**: Google'ın `langextract` kütüphanesinin **Gemini API** (Google GenAI), **OpenAI** ve **Ollama** (yerel modeller) sağlayıcıları ile entegrasyonu; hassas karakter offset aralıkları (`start_char`, `end_char`), hazır mühendislik ve ders kitabı şemaları (`engineering_exercise_sheet`), etkileşimli HTML görselleştirme raporları ve `langextract_grounded_dataset.jsonl` ihracı. | ✅ **Tamamlandı** |
+| **FAZ 13** | **Kiwix OpenZIM Kataloğu & Ansiklopedi Veri Hattı (`kiwix`)**: OpenZIM (`.zim`) formatındaki Wikipedia (Türkçe/İngilizce), StackOverflow ve akademik ansiklopedi arşivlerini `libzim` ile doğrudan okuyup SQLite `articles` tablosuna ve eğitime hazır JSONL veri setlerine dönüştüren yüksek hızlı veri alım hattı. | ✅ **Tamamlandı** |
+| **FAZ 14** | **Google LangExtract Dinamik Ön Tarama & Few-Shot Örnek Sentezi**: Sabit prompt ve şablonlar yerine dökümanın ilk 2.500 karakterini ön tarayarak dokümana özgü `prompt_description` ve `lx.data.ExampleData` / `lx.data.Extraction` nesnelerini canlı üreten dinamik LangExtract motoru. | ✅ **Tamamlandı** |
+| **FAZ 15** | **Otonom Sistem Teşhis & Sağlık Teşhis Modülü (`self_test`)**: SQLite WAL veritabanı, Qdrant vektör indeksi, Ollama VRAM/model durumu, DeepSeek-OCR vizyon motoru ve Pytest birim test paketini tek komutla 5 aşamalı otonom denetleyen teşhis sistemi. | ✅ **Tamamlandı** |
 
 ---
 
@@ -29,6 +32,7 @@ Originally built for the Elektor Magazine Archive (1974–2025), the pipeline ha
 
 ### 1. Multi-Mode Ingestion (Çoklu Veri Alım Modları)
 - **Rendergit Mode (`input_mode: "rendergit"`)**: Clones Git repositories (or parses local source folders), flattens codebase structure into a unified Markdown file (`exports/<project_id>_rendergit.md`), and extracts Abstract Syntax Tree (AST) code units (classes, functions) into SQLite `code_units`.
+- **Kiwix ZIM Mode (`input_mode: "kiwix"`)**: Parses OpenZIM (`.zim`) encyclopedia/Wikipedia archives using `libzim`, converts HTML to clean Markdown with `BeautifulSoup4` + `html2text`, and indexes articles directly into SQLite.
 - **Folder Mode (`input_mode: "folder"`)**: Recursively parses PDF document directories.
 - **Book Mode (`input_mode: "book"`)**: Splits large PDF textbooks or datasheets into contiguous chapters using PDF outline bookmarks, with a 10-page fallback slice generator.
 
@@ -52,8 +56,9 @@ Generates 4 distinct, production-grade synthetic coding dataset split categories
 - **Live Debug & Audit Console**: Color-coded UI terminal displaying safety checks and projected merged row counts.
 - **Atomic Consolidated Merge**: Merges SQLite databases using dynamic column mapping (`_merge_table_dynamic`) and exports unified JSONL/Parquet datasets in `exports/<target_project_id>/`.
 
-### 5. Google LangExtract Structured Extraction & Grounding (Faz 12 Entegrasyonu)
-- **Multi-Provider Priority**: Supports **Ollama** (default zero-cost local models), **OpenAI**, and **Gemini API** (`google-genai` / `gemini-2.5-flash`).
+### 5. Google LangExtract Structured Extraction & Grounding (Faz 12 & 14 Entegrasyonu)
+- **Multi-Provider Priority**: Supports **Ollama** (default zero-cost local models), **OpenAI**, **https://ollama.com/v1** cloud API, and **Gemini API** (`google-genai` / `gemini-2.5-flash`).
+- **Dynamic Pre-scan & Few-Shot Generator**: Pre-scans document content to synthesize customized `prompt_description` and `lx.data.ExampleData` objects on-the-fly.
 - **Precise Source Grounding**: Maps extracted entity spans back to exact character offsets (`start_char`, `end_char`) in the source text.
 - **Built-in Schema Presets**:
   - `technical_components`: Hardware ICs, microcontrollers, passive elements, and functions.
@@ -82,15 +87,17 @@ elektor/
   │    ├── __init__.py
   │    ├── extractor.py         # PDF text extraction & SQLite metadata indexing
   │    ├── code_extractor.py    # Rendergit repo flattener & AST code parser
-  │    ├── langextract_engine.py# Google LangExtract engine with multi-provider & schema presets
+  │    ├── kiwix_extractor.py   # Kiwix OpenZIM (.zim) catalog archive extractor
+  │    ├── langextract_engine.py# Google LangExtract engine with dynamic few-shot generator & presets
   │    ├── analyzer.py          # LLM enrichment & grounded DPO pair synthesizer
   │    ├── vector_store.py      # Word-boundary chunking & Qdrant DB indexer
   │    ├── dataset_builder.py   # JSONL & Parquet training dataset exporter
+  │    ├── self_test.py         # 5-Stage autonomous system health diagnostic module
   │    └── project_merger.py    # Phase 3 Safe Project & Dataset Merger Engine
   ├── database/                 # Dedicated SQLite database directory (*.db)
   ├── exports/                  # Project-isolated dataset export directory
   ├── frontend/                 # React + Vite Web UI with Hata Ayıklama Konsolu & LangExtract panel
-  ├── .antigravity/             # System architecture reference docs (ARCHITECTURE.md)
+  ├── tests/                    # Pytest test suite for API, pipeline & extraction
   └── README.md
 ```
 
@@ -101,17 +108,17 @@ elektor/
 ### System Dependencies
 - **Python 3.11+**
 - **Tesseract OCR CLI**: Installed and available in PATH (e.g. `/opt/homebrew/bin/tesseract` on macOS).
-- **Ollama Local LLM Server**: Installed and running locally. Pull required models:
+- **Ollama Local LLM Server**: Installed and running locally (`http://127.0.0.1:11434`). Pull required models:
   ```bash
   ollama pull nomic-embed-text:latest
-  ollama pull translategemma:12b-it-q4_K_M
-  ollama pull ornith:35b-q4_K_M
+  ollama pull qwen3.5:4b
+  ollama pull gpt-oss:120b-cloud
   ```
 
 ### Python & Frontend Setup
 1. **Python Environment**:
    ```bash
-    pip install pypdf pypdfium2 ollama openai qdrant-client pandas pytest fastapi uvicorn
+   pip install pypdf pypdfium2 ollama openai qdrant-client pandas pytest fastapi uvicorn libzim bs4 html2text
    ```
 2. **Frontend Web UI Build**:
    ```bash
@@ -127,47 +134,38 @@ elektor/
 
 ```json
 {
-  "input_mode": "rendergit",
-  "input_path": "https://github.com/karpathy/rendergit",
-  "db_path": "database/rendergit_01.db",
-  "qdrant_db_path": "qdrant_rendergit_01",
-  "ollama_url": "http://192.168.1.14:11434",
+  "input_mode": "folder",
+  "input_path": "downloads/Exercisesheet1.pdf",
+  "db_path": "database/extract.db",
+  "qdrant_db_path": "qdrant_extract",
+  "ollama_url": "http://127.0.0.1:11434",
+  "openai_timeout": 600,
   "model_embedding": "nomic-embed-text:latest",
-  "model_analyzer": "ornith:35b-q4_K_M",
-  "model_translator": "translategemma:12b-it-q4_K_M",
-  "llm_persona": "Senior Principal Software Architect & Code Auditor",
-  "llm_subject": "Python Software Architecture, AST Analysis, Performance & Security",
+  "model_analyzer": "qwen3.5:4b",
+  "model_translator": "qwen3.5:4b",
+  "llm_persona": "Professional Systems Engineer",
+  "llm_subject": "Technical Documentation & Architecture",
   "generation_language": "bilingual",
   "translation_target": "tr",
-  "sft_qa_count": 15,
+  "sft_qa_count": 10,
   "direct_tr_generation": true,
   "enable_dpo_verification": true,
   "generate_multi_turn_chat": true,
-  "code_cat_explanation": true,
-  "code_cat_completion": true,
-  "code_cat_bug_fix": true,
-  "code_cat_unit_test": true,
-  "chunk_size": 800,
-  "chunk_overlap": 150,
-  "ocr_threshold_chars": 100,
-  "tesseract_cmd": "/opt/homebrew/bin/tesseract",
-  "project_id": "rendergit_01"
+  "enable_langextract": true,
+  "enable_langextract_dynamic_examples": true,
+  "langextract_provider": "ollama",
+  "langextract_schema_preset": "generic_technical_qa",
+  "kiwix_zim_path": "downloads/wikipedia_tr_all.zim",
+  "kiwix_min_chars": 300
 }
 ```
-
-* **OpenAI Uyumlu Yapılandırma Seçenekleri (Opsiyonel)**:
-  * `"openai_base_url"`: LLM / Embedding istekleri için temel OpenAI API URL'i (Örn: `http://192.168.1.14:11434/v1`, vLLM, SGLang, Groq). Tanımlanmazsa varsayılan olarak `"ollama_url"` parametresi sonuna otomatik `/v1` eklenerek çözümlenir.
-  * `"openai_api_key"`: Groq, DeepSeek vb. harici sağlayıcılar için API anahtarı. Varsayılan: `"ollama"`.
-  * `"openai_timeout"`: Soket bağlantı zaman aşımı süresi (saniye). Varsayılan: `600.0`.
-  * `"analyzer_max_chars"`: LLM zenginleştirme aşamasına gönderilen döküman segmentlerinin maksimum karakter uzunluğu. Daha güçlü donanım ve geniş bağlam penceresine (context window) sahip modeller için artırılabilir. Varsayılan: `4000`.
-  * `"analyzer_max_tokens"`: Üretilecek yanıtın maksimum token sınırı (`num_predict` / `max_tokens`). Varsayılan: `8192`.
 
 ---
 
 ## 📖 Usage & Execution Guide (Kullanım Rehberi)
 
 ### 1. Web UI Dashboard (FastAPI + React)
-Launch the unified web dashboard with interactive project merger and debug console:
+Launch the unified web dashboard:
 ```bash
 python run.py api
 # Or directly via uvicorn:
@@ -175,46 +173,32 @@ python -m uvicorn api_server:app --reload --port 3456
 ```
 Open `http://localhost:3456` in your browser.
 
-### 2. Project Merger Workflow (Faz 3 Proje Birleştirme)
-1. Open **"🗂️ Proje Gezgini & Çoklu Veri Setleri"** in Web UI.
-2. Click **"🔀 Projeleri Birleştir (Merge)"**.
-3. Select at least 2 source projects (e.g. `rendergit_01`, `rendergit_02`, `rendergit_03`) and enter target project ID.
-4. Click **"🔍 1. İki Kez Doğrulama ve Test Çalıştırması Yap (Dry-Run Audit)"**.
-5. Inspect the **🛠️ Hata Ayıklama & Ön Denetim Konsolu** report.
-6. Click **"⚡ 2. Güvenli Birleştirmeyi Başlat"** to perform atomic consolidation.
+### 2. Autonomous System Self-Test (`self_test`)
+Diagnose system health across SQLite DB, Qdrant vector store, Ollama server, DeepSeek-OCR VLM, and Pytest suite:
+```bash
+python run.py self_test
+```
 
-### 3. Command Line Interface (CLI)
+### 3. Kiwix OpenZIM Catalog Extractor (`kiwix`)
+Extract ZIM archives directly into SQLite database:
+```bash
+python run.py kiwix --zim downloads/wikipedia_tr_all.zim --limit 100
+```
+
+### 4. Command Line Interface (CLI)
 - **Full Pipeline Run**:
   ```bash
   python run.py pipeline --limit 10
   ```
-- **Text & AST Code Extraction**:
-  ```bash
-  python run.py extract --limit 10
-  ```
-- **LLM Enrichment & Code Analysis**:
-  ```bash
-  python run.py enrich --limit 10
-  ```
-- **Vector Embedding (Qdrant Indexing)**:
-  ```bash
-  python run.py embed
-  ```
-- **Export Training Datasets (JSONL & Parquet)**:
-  ```bash
-  python run.py export
-  ```
-- **Google LangExtract Grounded Extraction**:
+- **Google LangExtract Extraction**:
   ```bash
   python run.py langextract --provider ollama --preset engineering_exercise_sheet --limit 10 --visualize
-  # Or using Gemini API (if GEMINI_API_KEY is set):
-  python run.py langextract --provider gemini --preset engineering_exercise_sheet --limit 10 --visualize
   ```
 
 ---
 
 ## 🔬 Unit Tests & Verification
-Run unit tests to verify AST code parsing, repository flattening, DPO verification, and project merger logic:
+Run unit tests to verify AST code parsing, repository flattening, Kiwix ZIM extraction, DPO verification, and project merger logic:
 ```bash
 PYTHONPATH=. python -m pytest tests/
 ```
