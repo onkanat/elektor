@@ -31,6 +31,7 @@ export interface PipelineConfig {
   code_cat_bug_fix?: boolean;
   code_cat_unit_test?: boolean;
   enable_langextract?: boolean;
+  enable_langextract_dynamic_examples?: boolean;
   langextract_provider?: 'ollama' | 'openai' | 'gemini';
   langextract_model_id?: string;
   langextract_schema_preset?: string;

@@ -97,3 +97,18 @@ def unload_ollama_model(config: dict, model_name: str):
         except Exception:
             pass
     print(f"  [Ollama Note] Unload model signal sent for '{model_name}'.")
+
+def call_llm(config: dict, system_instruction: str, user_prompt: str, temperature: float = 0.1, model_override: str = None) -> str:
+    """Helper function to execute synchronous LLM completion using configured model."""
+    client = get_openai_client(config)
+    model_name = model_override or config.get("model_analyzer", "qwen3.5:4b")
+    
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=temperature
+    )
+    return response.choices[0].message.content or ""

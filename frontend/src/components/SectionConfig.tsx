@@ -352,7 +352,9 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
             <h4 style={{ margin: 0, fontSize: '0.95rem', color: '#60a5fa', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               🔍 Google LangExtract Entegrasyonu (Grounded Extraction)
             </h4>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', cursor: 'pointer' }}>
+          </div>
+          <div style={{ marginBottom: '0.8rem', display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem' }}>
               <input
                 type="checkbox"
                 name="enable_langextract"
@@ -360,6 +362,16 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
                 onChange={handleChange}
               />
               <span style={{ color: '#e2e8f0', fontWeight: 'bold' }}>LangExtract Aktif</span>
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+              <input
+                type="checkbox"
+                name="enable_langextract_dynamic_examples"
+                checked={formData.enable_langextract_dynamic_examples ?? true}
+                onChange={handleChange}
+              />
+              <span style={{ color: '#38bdf8', fontWeight: 'bold' }}>✨ Dinamik Doküman Ön Taraması & Few-Shot Örnek Üretimi</span>
             </label>
           </div>
 

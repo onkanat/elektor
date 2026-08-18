@@ -230,23 +230,136 @@ class LangExtractEngine:
             self.logger.warning(f"Could not build LangExtract model config for '{provider}': {e}", module="langextract")
             return None, provider, model_id
 
+    def generate_dynamic_examples_and_prompt(
+        self,
+        text: str,
+        schema_preset: str = "generic_technical_qa"
+    ) -> Dict[str, Any]:
+        """
+        Pre-scans document snippet and uses LLM to dynamically generate domain-tailored prompt_description
+        and high-quality lx.data.ExampleData objects directly extracted from the actual text.
+        """
+        snippet = text[:2500].strip()
+        if not snippet:
+            preset_data = self.PRESETS.get(schema_preset, self.PRESETS["technical_components"])
+            return {"prompt": preset_data["prompt"], "examples": preset_data["examples"], "is_dynamic": False}
+
+        from pipeline.llm_client import call_llm
+
+        system_instruction = """You are an expert Google LangExtract schema architect.
+Analyze the provided document text snippet and generate:
+1. 'prompt_description': Clear, precise instructions on what entities, technical concepts, parameters, functions, formulas, or relationships to extract in order of appearance.
+2. 'examples': Exactly ONE high-quality example constructed directly using a sentence or paragraph from the text snippet.
+The example MUST contain:
+- 'text': An exact quote/sentence from the provided snippet.
+- 'extractions': An array of objects, each having:
+    * 'extraction_class': The type/category (e.g., 'concept', 'component', 'parameter', 'formula', 'task', 'relationship').
+    * 'extraction_text': The exact verbatim substring inside 'text'.
+    * 'attributes': Key-value object with contextual details (e.g. {'unit': 'MHz', 'type': 'microcontroller'}).
+
+Output ONLY valid JSON with keys "prompt_description" and "examples"."""
+
+        user_prompt = f"Document Snippet:\n{snippet}\n\nGenerate dynamic LangExtract prompt and few-shot example JSON."
+
+        try:
+            raw_response = call_llm(self.config, system_instruction, user_prompt, temperature=0.1)
+            import re
+            json_match = re.search(r"\{.*\}", raw_response, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group(0))
+                prompt_desc = parsed.get("prompt_description") or self.PRESETS.get(schema_preset, {}).get("prompt", "")
+                raw_examples = parsed.get("examples", [])
+                if prompt_desc and raw_examples:
+                    self.logger.info("Generated dynamic LangExtract prompt & few-shot example for document.", module="langextract")
+                    return {
+                        "prompt": prompt_desc,
+                        "examples": raw_examples,
+                        "is_dynamic": True
+                    }
+        except Exception as e:
+            self.logger.warning(f"Could not generate dynamic examples: {e}. Falling back to preset.", module="langextract")
+
+        preset_data = self.PRESETS.get(schema_preset, self.PRESETS["technical_components"])
+        return {"prompt": preset_data["prompt"], "examples": preset_data["examples"], "is_dynamic": False}
+
+    def build_lx_example_objects(self, raw_examples: List[Dict[str, Any]]) -> List[Any]:
+        """Converts raw dictionary examples into Google LangExtract lx.data.ExampleData objects if available."""
+        if not LANGEXTRACT_AVAILABLE:
+            return raw_examples
+
+        lx_examples = []
+        try:
+            for ex in raw_examples:
+                if hasattr(ex, "text") and hasattr(ex, "extractions"):
+                    lx_examples.append(ex)
+                    continue
+
+                t = ex.get("text", "")
+                exts = ex.get("extractions") or ex.get("output") or []
+                lx_ext_list = []
+
+                for item in exts:
+                    if hasattr(item, "extraction_class") and hasattr(item, "extraction_text"):
+                        lx_ext_list.append(item)
+                    elif isinstance(item, dict):
+                        e_class = item.get("extraction_class") or item.get("type") or item.get("category") or "entity"
+                        e_text = item.get("extraction_text") or item.get("text") or item.get("component_name") or item.get("concept") or ""
+                        attrs = item.get("attributes") or {k: v for k, v in item.items() if k not in ("extraction_class", "extraction_text", "text", "type")}
+                        if e_text:
+                            lx_ext_list.append(
+                                lx.data.Extraction(
+                                    extraction_class=e_class,
+                                    extraction_text=e_text,
+                                    attributes=attrs
+                                )
+                            )
+                if t and lx_ext_list:
+                    lx_examples.append(
+                        lx.data.ExampleData(
+                            text=t,
+                            extractions=lx_ext_list
+                        )
+                    )
+            return lx_examples if lx_examples else raw_examples
+        except Exception as e:
+            self.logger.warning(f"Could not build lx.data.ExampleData objects: {e}. Using dict format.", module="langextract")
+            return raw_examples
+
     def extract_grounded_entities(
         self,
         text: str,
         schema_preset: str = "technical_components",
         provider_override: Optional[str] = None,
-        model_override: Optional[str] = None
+        model_override: Optional[str] = None,
+        dynamic_prompt: Optional[str] = None,
+        dynamic_examples: Optional[List[Any]] = None
     ) -> Dict[str, Any]:
         """
-        Executes grounded entity extraction on unstructured text.
+        Executes grounded entity extraction on unstructured text using dynamic or preset examples.
         Returns a dict containing extracted entities with character spans and metadata.
         """
         if not text or not text.strip():
             return {"entities": [], "grounded_spans": [], "count": 0, "preset": schema_preset}
 
-        preset_data = self.PRESETS.get(schema_preset, self.PRESETS["technical_components"])
-        prompt_desc = preset_data["prompt"]
-        examples = preset_data["examples"]
+        # Check if dynamic examples are enabled or provided
+        enable_dynamic = self.config.get("enable_langextract_dynamic_examples", True)
+
+        if dynamic_prompt and dynamic_examples:
+            prompt_desc = dynamic_prompt
+            raw_examples = dynamic_examples
+            is_dynamic = True
+        elif enable_dynamic:
+            dyn_data = self.generate_dynamic_examples_and_prompt(text, schema_preset=schema_preset)
+            prompt_desc = dyn_data["prompt"]
+            raw_examples = dyn_data["examples"]
+            is_dynamic = dyn_data.get("is_dynamic", False)
+        else:
+            preset_data = self.PRESETS.get(schema_preset, self.PRESETS["technical_components"])
+            prompt_desc = preset_data["prompt"]
+            raw_examples = preset_data["examples"]
+            is_dynamic = False
+
+        examples = self.build_lx_example_objects(raw_examples)
 
         model_obj, active_provider, active_model = self._resolve_model_config(provider_override, model_override)
 
