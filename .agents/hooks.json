@@ -1,0 +1,30 @@
+{
+  "security-gate": {
+    "pre_tool_execution": [
+      {
+        "matcher": "code_execution|write_file|database_mutation|gemini_api_call",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .agents/hooks-scripts/security_gate.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "dataset-auto-lint": {
+    "post_tool_execution": [
+      {
+        "matcher": "enrich|judge|langextract|export",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .agents/hooks-scripts/dataset_linter.py",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

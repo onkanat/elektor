@@ -595,6 +595,23 @@ python unsloth_finetune.py
         with open(runpod_file, "w", encoding="utf-8") as f:
             f.write(runpod_bash)
 
+        # Google Vertex AI / Gemini Supervised Fine-Tuning Recipe
+        vertex_config = {
+            "tuning_job_name": f"{project_id}-gemini-sft",
+            "base_model": "gemini-2.5-flash",
+            "training_dataset_uri": f"gs://elektor-datasets/{project_id}/sft_dataset.jsonl",
+            "validation_dataset_uri": f"gs://elektor-datasets/{project_id}/validation_dataset.jsonl",
+            "hyperparameters": {
+                "epoch_count": 3,
+                "learning_rate_multiplier": 1.0,
+                "adapter_size": 16
+            },
+            "export_target": "vertex_model_registry"
+        }
+        vertex_file = target_dir / "vertex_ai_tuning.json"
+        with open(vertex_file, "w", encoding="utf-8") as f:
+            json.dump(vertex_config, f, indent=2, ensure_ascii=False)
+
         return {
             "status": "success",
             "project_id": project_id,
@@ -604,6 +621,10 @@ python unsloth_finetune.py
                 "unsloth_finetune.py",
                 notebook_filename,
                 "axolotl_config.yaml",
-                "run_cloud_gpu.sh"
+                "run_cloud_gpu.sh",
+                "vertex_ai_tuning.json"
             ]
         }
+
+    # Alias for API consistency
+    generate_payload = prepare_cloud_payload

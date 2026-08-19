@@ -469,7 +469,7 @@ def trigger_pipeline(payload: Dict[str, Any] = Body(...)):
             raise HTTPException(status_code=400, detail="A pipeline task is already running.")
 
     cmd = payload.get("command", "pipeline")
-    valid_commands = ["pipeline", "extract", "enrich", "embed", "export", "langextract", "kiwix"]
+    valid_commands = ["pipeline", "extract", "enrich", "embed", "export", "langextract", "kiwix", "judge"]
     if cmd not in valid_commands:
         raise HTTPException(status_code=400, detail=f"Geçersiz komut: '{cmd}'. Geçerli komutlar: {valid_commands}")
 
@@ -1496,8 +1496,108 @@ def get_langextract_results(project_id: Optional[str] = Query(None)):
 def get_langextract_visualization(project_id: str, doc_id: int):
     target_html = Path("exports") / project_id / "langextract_visualizations" / f"article_{doc_id}_grounded.html"
     if not target_html.exists():
-        raise HTTPException(status_code=404, detail=f"Visualizer HTML file not found: {target_html}")
+        raise HTTPException(status_code=404, detail="Visualizer HTML report not found.")
     return FileResponse(path=target_html, media_type="text/html")
+
+
+# JUDGE & GEMINI API ENDPOINTS
+
+@app.get("/api/gemini/budget")
+def get_gemini_budget_info():
+    """Returns monthly Gemini token consumption and cost estimation."""
+    from pipeline.gemini_client import get_gemini_client
+    cfg = get_config()
+    client = get_gemini_client(cfg)
+    return {
+        "is_configured": client.is_available(),
+        "model": client.default_model,
+        "consumption": client.budget_manager.get_monthly_consumption()
+    }
+
+@app.post("/api/judge/run")
+def run_judge_task(payload: Dict[str, Any] = Body(...)):
+    """Runs LLM-as-a-Judge quality evaluation on the active project."""
+    from pipeline.judge_engine import JudgeEngine
+    cfg = get_config()
+    mode = payload.get("mode", "strict")
+    threshold = float(payload.get("threshold", 7.0))
+    limit = payload.get("limit")
+    
+    engine = JudgeEngine(cfg)
+    stats = engine.judge_all(limit=limit, mode=mode, threshold=threshold)
+    return {"status": "success", "stats": stats}
+
+@app.get("/api/judge/stats")
+def get_judge_stats(project_id: Optional[str] = Query(None)):
+    """Returns judge scores breakdown from SQLite database."""
+    cfg = get_config()
+    target_pid = project_id or cfg.get("project_id", "sdr_engineers")
+    db_file = Path(f"database/{target_pid}.db")
+    if not db_file.exists():
+        db_file = Path(cfg.get("db_path", f"database/{target_pid}.db"))
+    if not db_file.exists():
+        return {"total": 0, "approved": 0, "borderline": 0, "rejected": 0, "average_score": 0.0}
+
+    conn = sqlite3.connect(str(db_file), timeout=30.0)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='enrichments'")
+    if not cursor.fetchone():
+        conn.close()
+        return {"total": 0, "approved": 0, "borderline": 0, "rejected": 0, "average_score": 0.0}
+
+    cursor.execute("""
+        SELECT judge_status, COUNT(*), AVG(judge_score)
+        FROM enrichments
+        WHERE judge_status IS NOT NULL
+        GROUP BY judge_status
+    """)
+    rows = cursor.fetchall()
+    
+    cursor.execute("SELECT AVG(judge_score), COUNT(*) FROM enrichments WHERE judge_score IS NOT NULL")
+    overall_avg, total_judged = cursor.fetchone()
+    conn.close()
+
+    breakdown = {status: count for status, count, _ in rows}
+    return {
+        "total_judged": total_judged or 0,
+        "average_score": round(overall_avg or 0.0, 2),
+        "approved": breakdown.get("approved", 0),
+        "borderline": breakdown.get("borderline", 0),
+        "rejected": breakdown.get("rejected", 0)
+    }
+
+
+# TRIGGERS & HOOKS API ENDPOINTS
+
+@app.post("/api/triggers/run")
+def trigger_scheduled_audit(payload: Dict[str, Any] = Body(...)):
+    """Triggers an automated off-peak quality audit & judge pass."""
+    from pipeline.scheduled_triggers import ScheduledTriggersManager
+    cfg = get_config()
+    limit = int(payload.get("limit", 50))
+    mode = payload.get("mode", "strict")
+    threshold = float(payload.get("threshold", 7.0))
+    
+    mgr = ScheduledTriggersManager(cfg)
+    result = mgr.run_trigger_audit_pass(limit=limit, mode=mode, threshold=threshold)
+    return result
+
+@app.get("/api/hooks/audit")
+def audit_environment_hooks():
+    """Runs a live diagnostic audit on Managed Agents Environment Hooks."""
+    from pipeline.agent_hooks import get_agent_hooks_manager
+    hooks_mgr = get_agent_hooks_manager()
+    
+    pre_safe = hooks_mgr.execute_pre_hooks("code_execution", {"command": "python3 -c 'print(42)'"})
+    pre_deny = hooks_mgr.execute_pre_hooks("code_execution", {"command": "rm -rf /"})
+    post_check = hooks_mgr.execute_post_hooks("enrich", "```python\ndef ok(): pass\n```")
+    
+    return {
+        "hooks_configured": bool(hooks_mgr.hooks_data),
+        "pre_hook_safe_test": pre_safe,
+        "pre_hook_deny_test": pre_deny,
+        "post_hook_linter_test": post_check
+    }
 
 
 # Mount React frontend static build

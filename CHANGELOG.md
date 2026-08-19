@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [19.0.0] - 2026-08-19
+
+### Added
+- **Gemini API Hardening & Token Budgeting (Faz 14)**: Connection-pooled `GeminiClient` with jitter exponential backoff, structured Pydantic JSON schema enforcement, and SQLite `TokenBudgetManager` for Google Developer Program credit monitoring.
+- **LLM-as-a-Judge & Editor-in-Chief Arbitration (Faz 15-16)**: `JudgeEngine` with two-tier evaluation: `strict` mode for fast scoring/filtering and `hybrid_editor` for surgical rewriting of borderline SFT/DPO pairs into gold-standard candidates.
+- **Optimized LangExtract Grounding & Offset Alignment (Faz 16)**: Direct Gemini 3.6 Flash integration, `locate_character_offsets` substring alignment, and dynamic few-shot meta-prompt synthesis.
+- **Multimodal Markdown Catalog (Faz 17)**: `multimodal_catalog.md` generated alongside `multimodal_visual_dataset.jsonl` with embedded figures and DeepSeek-OCR technical breakdowns.
+- **Managed Agents Environment Hooks & Scheduled Triggers (Faz 18)**: `.agents/hooks.json` implementation featuring pre-tool `security_gate.py`, post-tool `dataset_linter.py` (Python AST, LaTeX, JSON checks), and `scheduled_triggers.py` background audit scheduler.
+- **Cloud Training Kit & Vertex AI Tuning Recipes (Faz 19)**: Unsloth/Axolotl export automation combined with Google Vertex AI Gemini fine-tuning configuration (`vertex_ai_tuning.json`).
+
+---
+
 ## [15.0.0] - 2026-08-18
 
 ### Added

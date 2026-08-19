@@ -286,6 +286,12 @@ Examples:
     # Self-test subcommand
     self_test_parser = subparsers.add_parser("self_test", help="Run comprehensive system health self-test & diagnostics")
     
+    # Judge subcommand (LLM-as-a-Judge & Editor-in-Chief)
+    judge_parser = subparsers.add_parser("judge", help="Run LLM-as-a-Judge and Editor-in-Chief quality arbitration on SFT/DPO datasets")
+    judge_parser.add_argument("--mode", type=str, choices=["strict", "hybrid_editor"], default="strict", help="Judge mode: 'strict' (fast scoring) or 'hybrid_editor' (targeted rewrite)")
+    judge_parser.add_argument("--threshold", type=float, default=7.0, help="Approval threshold score (1.0 - 10.0, default: 7.0)")
+    judge_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit number of articles to judge")
+    
     # LangExtract subcommand
     lx_parser = subparsers.add_parser("langextract", help="Run Google LangExtract grounded entity extraction on project articles")
     lx_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit number of articles to extract")
@@ -300,6 +306,18 @@ Examples:
     kiwix_parser.add_argument("--url", type=str, default=None, help="Direct Kiwix catalog download URL")
     kiwix_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit number of articles to extract")
     kiwix_parser.add_argument("--reset", action="store_true", help="Reset all databases before extracting")
+
+    # Trigger subcommand (Scheduled Autonomous Judge & Dataset Curation)
+    trigger_parser = subparsers.add_parser("trigger", help="Run automated trigger/cron batch dataset audit and judge pass")
+    trigger_parser.add_argument("--limit", type=parse_limit, default=50, help="Batch limit for records to audit")
+    trigger_parser.add_argument("--mode", type=str, choices=["strict", "hybrid_editor"], default="strict", help="Judge mode for trigger")
+    trigger_parser.add_argument("--threshold", type=float, default=7.0, help="Approval threshold score")
+    trigger_parser.add_argument("--daemon", action="store_true", help="Run continuously as background cron scheduler")
+    trigger_parser.add_argument("--interval", type=int, default=3600, help="Interval in seconds for daemon mode (default: 3600s)")
+
+    # Hooks subcommand (Audit and test Managed Agents Environment Hooks)
+    hooks_parser = subparsers.add_parser("hooks", help="Test and inspect Managed Agents Environment Hooks (.agents/hooks.json)")
+    hooks_parser.add_argument("--check", action="store_true", help="Run self-check on security gate and dataset linter hooks")
     
     args = parser.parse_args()
     
@@ -431,6 +449,13 @@ Examples:
         conn.close()
         print(f"✅ LangExtract execution finished. Total grounded entities extracted: {total_extracted}")
 
+    elif args.command == "judge":
+        print(f"=== Quality Arbitration & LLM-as-a-Judge (Mode: '{args.mode}', Threshold: {args.threshold}) ===")
+        from pipeline.judge_engine import JudgeEngine
+        engine = JudgeEngine(config_or_path=args.config)
+        limit_val = args.limit if isinstance(args.limit, int) else None
+        engine.judge_all(limit=limit_val, mode=args.mode, threshold=args.threshold)
+
     elif args.command == "hf_upload":
         print("=== Step 5: Uploading Dataset to Hugging Face Hub ===")
         from pipeline.hf_deployer import HFDeployer
@@ -515,6 +540,44 @@ Examples:
         from pipeline.self_test import run_self_test
         success = run_self_test(config_path=args.config)
         sys.exit(0 if success else 1)
+
+    elif args.command == "trigger":
+        print(f"=== Scheduled Triggers & Autonomous Dataset Curation (Mode: '{args.mode}', Limit: {args.limit}) ===")
+        from pipeline.scheduled_triggers import ScheduledTriggersManager
+        mgr = ScheduledTriggersManager(config_or_path=args.config)
+        limit_val = args.limit if isinstance(args.limit, int) else 50
+        
+        if getattr(args, "daemon", False):
+            print(f"Starting trigger background scheduler (Interval: {args.interval}s)... Press Ctrl+C to stop.")
+            import time
+            t = mgr.start_recurring_scheduler(interval_seconds=args.interval, limit_per_run=limit_val, mode=args.mode)
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                print("\nScheduler stopped.")
+        else:
+            res = mgr.run_trigger_audit_pass(limit=limit_val, mode=args.mode, threshold=args.threshold)
+            print(f"Trigger Output: {json.dumps(res, indent=2, ensure_ascii=False)}")
+
+    elif args.command == "hooks":
+        print("=== Managed Agents Environment Hooks Audit ===")
+        from pipeline.agent_hooks import get_agent_hooks_manager
+        hooks_mgr = get_agent_hooks_manager()
+        
+        print("\n1. Testing Pre-Tool Security Gate (Safe Command)...")
+        pre_safe = hooks_mgr.execute_pre_hooks("code_execution", {"command": "python3 -c 'print(42)'"})
+        print(f"   Result: {pre_safe}")
+        
+        print("\n2. Testing Pre-Tool Security Gate (Dangerous Command)...")
+        pre_deny = hooks_mgr.execute_pre_hooks("code_execution", {"command": "rm -rf /"})
+        print(f"   Result: {pre_deny}")
+        
+        print("\n3. Testing Post-Tool Dataset Linter (Valid Code)...")
+        post_ok = hooks_mgr.execute_post_hooks("enrich", "```python\ndef test():\n    return True\n```")
+        print(f"   Result: {post_ok}")
+        
+        print("\n✅ Hooks diagnostic check completed successfully.")
 
 if __name__ == "__main__":
     main()

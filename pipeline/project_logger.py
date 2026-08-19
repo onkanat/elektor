@@ -48,6 +48,10 @@ class ProjectLogger:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
 
+    def info(self, message: str, module: str = "pipeline"):
+        # Log info messages or print them gracefully
+        print(f"[{module}] {message}")
+
     def warning(self, message: str, module: str = "pipeline"):
         self.logger.warning(f"[{module}] {message}")
 

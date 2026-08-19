@@ -35,10 +35,13 @@
   "model_vision": "qwen3.5:4b",
   "enable_langextract": true,
   "enable_langextract_dynamic_examples": true,
-  "langextract_provider": "ollama",
+  "langextract_provider": "openai",
   "langextract_schema_preset": "generic_technical_qa",
   "kiwix_zim_path": "downloads/wikipedia_tr_all.zim",
   "kiwix_download_url": "",
-  "kiwix_namespaces": ["A", ""],
+  "kiwix_namespaces": [
+    "A",
+    ""
+  ],
   "kiwix_min_chars": 300
 }

@@ -21,10 +21,14 @@ Originally built for the Elektor Magazine Archive (1974–2025), the pipeline ha
 | **FAZ 9** | **OpenAI-Uyumlu API Standardına Geçiş & Sunucu Performans / Hata Ayıklama Oturumu**: Ham Ollama istemcisinden evrensel `OpenAI` (`v1/chat/completions`) SDK standardına geçiş; vLLM, Ollama v1, SGLang ve Cloud API tak-çalıştır desteği; sunucu soket/zaman aşımı iyileştirmeleri, bellek sızıntısı ve kod refactoring oturumu. Ön uç terminal panelinde akıllı kaydırma kilidi (auto-scroll-lock) ile canlı log akışında sayfa yenilense dahi geçmiş okuma kolaylığı sağlandı. | ✅ **Tamamlandı** |
 | **FAZ 10** | **Multimodal Tarama & Çizim / Grafik Anlamlandırma Motoru (DeepSeek-OCR)**: Taralı PDF'lerdeki teknik çizimleri, devre şemalarını, grafik şemaları ve görsel tabloları anlamlandırmak için `deepseek-ocr:3b-bf16` vizyon modeli entegrasyonu, akıllı yerleşim/kutu filtreleme (smart bounding box filtering) ve otomatik VRAM offload mekanizması. 2x 16GB GPU üzerinde Paralel Sharding (Port 11434 & 11435) ile SQLite WAL modunda eşzamanlı çalışma desteği. | ✅ **Tamamlandı** |
 | **FAZ 11** | **Otomatik Multimodal Görsel İnce-Ayar Veri Seti Motoru (Visual Instruction Tuning / LLaVA Format)**: PDF'lerden kırpılan teknik çizim, şema ve grafiklerin (`downloads/extracted_images/`) `deepseek-ocr:3b-bf16` ile otomatik etiketlenerek LLaVA/Qwen-VL uyumlu bağımsız **Görsel Veri Seti** (`multimodal_visual_dataset.jsonl`) olarak paketlenmesi. | 💡 **Gelecek Vizyonu (Planlanan)** |
-| **FAZ 12** | **Google LangExtract Entegrasyonu & Karakter Bazlı Kaynak Bağlama (Source Grounding)**: Google'ın `langextract` kütüphanesinin **Gemini API** (Google GenAI), **OpenAI** ve **Ollama** (yerel modeller) sağlayıcıları ile entegrasyonu; hassas karakter offset aralıkları (`start_char`, `end_char`), hazır mühendislik ve ders kitabı şemaları (`engineering_exercise_sheet`), etkileşimli HTML görselleştirme raporları ve `langextract_grounded_dataset.jsonl` ihracı. | ✅ **Tamamlandı** |
+| **FAZ 12** | **Google LangExtract Entegrasyonu & Karakter Bazlı Kaynak Bağlama (Source Grounding)**: Google'ın `langextract` kütüphanesinin **Gemini API** (Google GenAI), **OpenAI** ve **Ollama** sağlayıcıları ile entegrasyonu; hassas karakter offset aralıkları (`start_char`, `end_char`), hazır mühendislik ve ders kitabı şemaları (`engineering_exercise_sheet`), etkileşimli HTML görselleştirme raporları ve `langextract_grounded_dataset.jsonl` ihracı. | ✅ **Tamamlandı** |
 | **FAZ 13** | **Kiwix OpenZIM Kataloğu & Ansiklopedi Veri Hattı (`kiwix`)**: OpenZIM (`.zim`) formatındaki Wikipedia (Türkçe/İngilizce), StackOverflow ve akademik ansiklopedi arşivlerini `libzim` ile doğrudan okuyup SQLite `articles` tablosuna ve eğitime hazır JSONL veri setlerine dönüştüren yüksek hızlı veri alım hattı. | ✅ **Tamamlandı** |
-| **FAZ 14** | **Google LangExtract Dinamik Ön Tarama & Few-Shot Örnek Sentezi**: Sabit prompt ve şablonlar yerine dökümanın ilk 2.500 karakterini ön tarayarak dokümana özgü `prompt_description` ve `lx.data.ExampleData` / `lx.data.Extraction` nesnelerini canlı üreten dinamik LangExtract motoru. | ✅ **Tamamlandı** |
-| **FAZ 15** | **Otonom Sistem Teşhis & Sağlık Teşhis Modülü (`self_test`)**: SQLite WAL veritabanı, Qdrant vektör indeksi, Ollama VRAM/model durumu, DeepSeek-OCR vizyon motoru ve Pytest birim test paketini tek komutla 5 aşamalı otonom denetleyen teşhis sistemi. | ✅ **Tamamlandı** |
+| **FAZ 14** | **Gemini API Sağlamlaştırma & Token Bütçe Yöneticisi**: `gemini-3.6-flash`, `gemini-3.5-flash` desteği, `httpx.Limits` bağlantı havuzlama, jitter içeren üstel geri çekilme ve SQLite tabanlı `TokenBudgetManager` ile Google Developer Program kredi denetimi. | ✅ **Tamamlandı** |
+| **FAZ 15** | **Bağımsız LLM-as-a-Judge & Editor-in-Chief Hakemliği**: SFT ve DPO çiftlerinin teknik doğruluk, mantık ve Türkçe sentaks açısından 1-10 skalasında hızlı puanlanması (`strict`) ve sınırda kalanların cerrahi düzeltilmesi (`hybrid_editor`). `python run.py judge` CLI ve REST API desteği. | ✅ **Tamamlandı** |
+| **FAZ 16** | **LangExtract Kaynak Doğrulama & Dinamik Few-Shot Optimizasyonu**: `locate_character_offsets` ile kaynak metin hizalama, Pydantic şema zorlaması ve dökümana özel 1-shot dinamik sentezleme. | ✅ **Tamamlandı** |
+| **FAZ 17** | **DeepSeek-OCR Multimodal Markdown Kataloğu**: Şema ve devre kırpmalarını görsel etiketleri (`Figure: images/crop.webp`) ve teknik dökümleriyle ihraç eden `multimodal_catalog.md` raporu. | ✅ **Tamamlandı** |
+| **FAZ 18** | **Managed Agents Environment Hooks & Scheduled Triggers**: `.agents/hooks.json` altında Pre-tool Security Gate (`rm -rf /` ve bütçe engeli), Post-tool Dataset Linter (Python AST, LaTeX kontrolü) ve otonom `run.py trigger` zamanlayıcısı. | ✅ **Tamamlandı** |
+| **FAZ 19** | **Hugging Face Hub & Google Vertex AI Gemini Tuning**: Gelişmiş dataset kartları, Unsloth/Axolotl kitleri ve Google Vertex AI Supervised Fine-Tuning reçetesi (`vertex_ai_tuning.json`). | ✅ **Tamamlandı** |
 
 ---
 
@@ -83,21 +87,30 @@ elektor/
   ├── api_server.py             # FastAPI backend server with project merger & LangExtract endpoints
   ├── LANGEXTRACT_GUIDE.md      # Comprehensive guide for creating custom LangExtract schema presets
   ├── USER_GUIDE.md             # End-to-end platform user guide with Web UI walkthroughs
+  ├── ROADMAP.md                # Multi-phase development roadmap
+  ├── .agents/                  # Gemini Managed Agents Environment Hooks & Scripts
   ├── pipeline/
   │    ├── __init__.py
+  │    ├── gemini_client.py     # Resilient Gemini API client with TokenBudgetManager
+  │    ├── judge_engine.py      # LLM-as-a-Judge & Editor-in-Chief arbitration engine
+  │    ├── agent_hooks.py       # Pre/Post Environment Hooks manager & runner
+  │    ├── scheduled_triggers.py# Autonomous scheduled trigger & background audit cron
   │    ├── extractor.py         # PDF text extraction & SQLite metadata indexing
   │    ├── code_extractor.py    # Rendergit repo flattener & AST code parser
   │    ├── kiwix_extractor.py   # Kiwix OpenZIM (.zim) catalog archive extractor
   │    ├── langextract_engine.py# Google LangExtract engine with dynamic few-shot generator & presets
   │    ├── analyzer.py          # LLM enrichment & grounded DPO pair synthesizer
+  │    ├── visual_dataset_builder.py # Multimodal Visual dataset & Markdown catalog builder
   │    ├── vector_store.py      # Word-boundary chunking & Qdrant DB indexer
   │    ├── dataset_builder.py   # JSONL & Parquet training dataset exporter
+  │    ├── hf_deployer.py       # Hugging Face Hub automated deployment
+  │    ├── cloud_gpu_offloader.py# Cloud GPU (Unsloth/Axolotl/Vertex AI) offloader
   │    ├── self_test.py         # 5-Stage autonomous system health diagnostic module
   │    └── project_merger.py    # Phase 3 Safe Project & Dataset Merger Engine
   ├── database/                 # Dedicated SQLite database directory (*.db)
   ├── exports/                  # Project-isolated dataset export directory
   ├── frontend/                 # React + Vite Web UI with Hata Ayıklama Konsolu & LangExtract panel
-  ├── tests/                    # Pytest test suite for API, pipeline & extraction
+  ├── tests/                    # Pytest test suite (43 test cases)
   └── README.md
 ```
 

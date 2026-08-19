@@ -1,5 +1,5 @@
 {
-  "active_project_id": "extract",
+  "active_project_id": "sdr_engineers",
   "projects": {
     "sdr_engineers": {
       "project_id": "sdr_engineers",
@@ -56,20 +56,6 @@
       "config_file": "projects_rapberry_pi_pico_all.json",
       "created_at": 1786049236.37803,
       "last_accessed": 1786049835.872344
-    },
-    "test_vision": {
-      "project_id": "test_vision",
-      "project_name": "test_vision",
-      "config_file": "projects_test_vision.json",
-      "created_at": 1786475340.5133922,
-      "last_accessed": 1786475340.5133922
-    },
-    "extract": {
-      "project_id": "extract",
-      "project_name": "test_extract",
-      "config_file": "projects_extract.json",
-      "created_at": 1786956430.5314078,
-      "last_accessed": 1786956430.5314088
     }
   }
 }

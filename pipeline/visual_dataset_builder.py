@@ -251,6 +251,30 @@ class VisualDatasetBuilder:
             for rec in multimodal_records:
                 f.write(json.dumps(rec, ensure_ascii=False) + '\n')
 
+        # Step 4.5: Generate Rich Unified Multimodal Markdown Catalog (with embedded images)
+        md_catalog_path = self.export_dir / "multimodal_catalog.md"
+        with open(md_catalog_path, 'w', encoding='utf-8') as mf:
+            mf.write(f"# 📊 Multimodal Technical Catalog & Diagram Breakdown\n\n")
+            mf.write(f"**Project:** `{self.project_id}` | **VLM Model:** `{self.vision_model}` | **Total Figures:** {len(multimodal_records)}\n\n---\n\n")
+            for idx, rec in enumerate(multimodal_records, 1):
+                img_rel = rec.get("image", "")
+                meta = rec.get("metadata", {})
+                orig_name = meta.get("original_filename", f"figure_{idx}")
+                
+                # Extract conversation answer
+                convs = rec.get("conversations", [])
+                ans_text = ""
+                for c in convs:
+                    if c.get("from") in ("gpt", "assistant"):
+                        ans_text = c.get("value", "")
+                        break
+                
+                mf.write(f"## Figure {idx}: `{orig_name}`\n\n")
+                mf.write(f"![{orig_name}]({img_rel})\n\n")
+                mf.write(f"### 🔍 Technical Parsing & Extraction\n\n")
+                mf.write(f"{ans_text}\n\n")
+                mf.write(f"---\n\n")
+
         # Step 5: Clean up raw PNG files from downloads/extracted_images/ ONLY if clean_raw_crops (--clear) is True
         cleaned_files_count = 0
         if clean_raw_crops and self.raw_images_dir.exists():
@@ -263,6 +287,7 @@ class VisualDatasetBuilder:
 
         print(f"Multimodal Visual Dataset exported successfully:")
         print(f"  Visual JSONL      : {len(multimodal_records)} samples -> {jsonl_output_path}")
+        print(f"  Markdown Catalog  : Embedded visual report -> {md_catalog_path}")
         print(f"  Optimized Images  : {len(image_mappings)} WebP files in {self.export_images_dir}")
         print(f"  Quality Filtered  : {low_quality_count} crops (< {min_chars} chars)")
         print(f"  Failed/Skipped    : {failed_count} crops")
@@ -271,6 +296,7 @@ class VisualDatasetBuilder:
         return {
             "status": "success",
             "jsonl_path": str(jsonl_output_path),
+            "markdown_catalog_path": str(md_catalog_path),
             "exported_records": len(multimodal_records),
             "low_quality_crops": low_quality_count,
             "failed_crops": failed_count,

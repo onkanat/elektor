@@ -52,6 +52,12 @@ flowchart TD
 | :--- | :--- | :--- | :--- |
 | **FAZ-1..9** | Çift-Geçişli Metin Zenginleştirme (OpenAI SDK / Ollama 2x GPU Sharding + TranslateGemma) | **Tamamlandı ✅** | Yüksek |
 | **FAZ-10** | Akıllı Düzen Filtreleme (Layout Analyzer, Bounding Box Crop Engine & WebP Optimizer) | **Tamamlandı ✅** | Yüksek |
-| **FAZ-11** | Multimodal Visual Dataset Generator (LLaVA / Qwen2-VL formatında ihraç & `viewer.html`) | **Tamamlandı ✅** | Yüksek |
+| **FAZ-11** | Multimodal Visual Dataset Generator (LLaVA / Qwen2-VL formatında ihraç, WebP & Markdown Catalog) | **Tamamlandı ✅** | Yüksek |
 | **FAZ-12** | **Hibrit Çift-VLM Yönlendirme Motoru (DeepSeek-OCR + Qwen2-VL / LLaVA)** | **Planlandı 🚨** | **CRITICAL / HIGH** |
-| **FAZ-13** | Hugging Face Hub Otomatik Yayınlama ve Cloud GPU Training Kit (Unsloth / Axolotl) | **Planlandı 🔜** | Orta |
+| **FAZ-13** | Hugging Face Hub Otomatik Yayınlama ve Cloud GPU Training Kit (Unsloth / Axolotl) | **Tamamlandı ✅** | Orta |
+| **FAZ-14** | **Gemini API Sağlamlaştırma (Bağlantı Havuzu, Üstel Geri Çekilme, Token Bütçe Takipçisi & Gemini 3.6/3.5 Flash)** | **Tamamlandı ✅** | **Yüksek** |
+| **FAZ-15** | **Bağımsız LLM-as-a-Judge & Editor-in-Chief (Strict Scoring & Cerrahi DPO/SFT Yeniden Yazım)** | **Tamamlandı ✅** | **Yüksek** |
+| **FAZ-16** | **LangExtract Kaynak Doğrulama (Grounding), Ofset Hizalama & Dinamik Few-Shot Küratörlüğü** | **Tamamlandı ✅** | **Yüksek** |
+| **FAZ-17** | **DeepSeek-OCR Multimodal Markdown Kataloğu & Zengin Görsel Raporlama** | **Tamamlandı ✅** | **Yüksek** |
+| **FAZ-18** | **Managed Agents Sandbox Hooks (`pre_tool_execution`, `post_tool_execution`) & Zamanlanmış Tetikleyiciler (Triggers)** | **Tamamlandı ✅** | **Yüksek** |
+| **FAZ-19** | **Hugging Face Hub Otomasyonu, Unsloth / Axolotl Cloud Kit & Google Vertex AI Gemini Fine-Tuning Reçetesi** | **Tamamlandı ✅** | **Orta** |

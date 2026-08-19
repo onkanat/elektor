@@ -34,14 +34,16 @@ class HFDeployer:
         # Build dynamic file architecture list based on files actually existing
         file_descriptions = {
             "sft_dataset.jsonl": "English technical SFT Q&A.",
-            "dpo_dataset.jsonl": "English DPO chosen/rejected preference pairs.",
+            "dpo_dataset.jsonl": "English DPO chosen/rejected preference pairs (LLM-as-a-Judge approved).",
             "chat_dataset.jsonl": "English multi-turn conversational dialogs.",
             "tr_sft_dataset.jsonl": "Turkish SFT dataset (direct generation).",
             "tr_chat_dataset.jsonl": "Turkish multi-turn technical dialogs.",
-            "tr_dpo_dataset.jsonl": "Turkish DPO preference pairs.",
+            "tr_dpo_dataset.jsonl": "Turkish DPO preference pairs (Editor-in-Chief refined).",
             "code_sft_dataset.jsonl": "Synthetic code diversity dataset (`explanation`, `completion`, `bug_fix`, `unit_test`).",
             "tr_code_sft_dataset.jsonl": "Turkish synthetic code dataset.",
             "langextract_grounded_dataset.jsonl": "Google LangExtract source grounded entity dataset with character offsets and attributes.",
+            "multimodal_visual_dataset.jsonl": "Multimodal Visual VLM dataset (LLaVA/Qwen2-VL format with optimized WebP images).",
+            "multimodal_catalog.md": "Rich technical diagram breakdown and visual catalog.",
         }
         
         dynamic_file_arch = []
@@ -51,8 +53,9 @@ class HFDeployer:
                 base_name = filename.split(".")[0]
                 jsonl_file = proj_export_dir / f"{base_name}.jsonl"
                 parquet_file = proj_export_dir / f"{base_name}.parquet"
-                if jsonl_file.exists() or parquet_file.exists():
-                    dynamic_file_arch.append(f"- `{base_name}.jsonl` / `.parquet`: {file_descriptions[filename]}")
+                md_file = proj_export_dir / filename
+                if jsonl_file.exists() or parquet_file.exists() or md_file.exists():
+                    dynamic_file_arch.append(f"- `{filename}`: {file_descriptions[filename]}")
                     
         if not dynamic_file_arch:
             dynamic_file_arch.append("- No datasets exported yet.")

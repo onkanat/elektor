@@ -281,4 +281,52 @@ Sistemin tüm bileşenlerinin (SQLite, Qdrant, Ollama VRAM, Vision OCR ve Pytest
 
 ---
 
-*Rehber Son Güncelleme: 2026-08-18 | Elektor Universal Pipeline v15.0*
+## 13. 🏛️ LLM-as-a-Judge & Editor-in-Chief Hakem Modülü (`run.py judge`)
+
+Elektor veri hattı, üretilen sentetik SFT ve DPO çiftlerini Gemini API (`gemini-3.6-flash`) tabanlı üst akıl ile denetler:
+
+- **Strict Judge (Hızlı Puanlama & Eleme)**:
+  ```bash
+  python run.py judge --mode strict --threshold 7.0 --limit 50
+  ```
+- **Editor-in-Chief (Cerrahi Yeniden Yazım)**:
+  Eşik altında kalan kurtarılabilir "sınırdaki" verileri Gemini API ile kusursuz bir Chosen varyantına dönüştürür:
+  ```bash
+  python run.py judge --mode hybrid_editor --threshold 7.0 --limit 50
+  ```
+- **Kredi & Bütçe Koruması**: `TokenBudgetManager` ile aylık harcanan token ve kalan Google Developer Program kredisi anlık denetlenir.
+
+---
+
+## 14. 🛡️ Managed Agents Environment Hooks & Scheduled Triggers (`hooks` / `trigger`)
+
+- **Environment Hooks Denetimi**:
+  ```bash
+  python run.py hooks --check
+  ```
+  - **`pre_tool_execution` (Security Gate)**: Tehlikeli komutları ve bütçe aşımını engeller.
+  - **`post_tool_execution` (Dataset Linter)**: Python AST sözdizimini, dengesiz LaTeX matematik sembollerini (`$`) ve JSON şemalarını otomatik doğrular.
+
+- **Zamanlanmış Otonom Tetikleyiciler (Scheduled Triggers)**:
+  Düşük kullanım saatlerinde veritabanındaki denetlenmemiş kayıtları otonom tarar ve iyileştirir:
+  ```bash
+  python run.py trigger --mode strict --limit 50 --daemon --interval 3600
+  ```
+
+---
+
+## 15. 📊 Multimodal Markdown Kataloğu & Vertex AI Tuning
+
+- **Multimodal Markdown Kataloğu**:
+  ```bash
+  python run.py export_visual
+  ```
+  Çıktı olarak `multimodal_visual_dataset.jsonl` ile birlikte görsel referansları ve DeepSeek-OCR teknik analizlerini içeren **`exports/<project_id>/multimodal_catalog.md`** dosyası üretilir.
+
+- **Google Vertex AI Gemini Fine-Tuning Reçetesi**:
+  `exports/<project_id>/cloud_payload/vertex_ai_tuning.json` dosyası üzerinden Vertex AI Gemini Supervised Fine-Tuning işi tek komutla başlatılabilir.
+
+---
+
+*Rehber Son Güncelleme: 2026-08-19 | Elektor Universal Pipeline v19.0*
+
