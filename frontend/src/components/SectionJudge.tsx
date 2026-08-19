@@ -2,13 +2,12 @@ import React, { useState, useEffect } from 'react';
 import type { JudgeStats, TokenBudgetInfo, HookAuditInfo, PipelineConfig } from '../types';
 
 interface SectionJudgeProps {
-  config: PipelineConfig | null;
+  config?: PipelineConfig | null;
   activeProjectId: string;
   onRefreshHealth?: () => void;
 }
 
 export const SectionJudge: React.FC<SectionJudgeProps> = ({
-  config: _config,
   activeProjectId,
   onRefreshHealth,
 }) => {
@@ -41,7 +40,8 @@ export const SectionJudge: React.FC<SectionJudgeProps> = ({
       const res = await fetch('/api/gemini/budget');
       if (res.ok) {
         const data = await res.json();
-        setBudgetInfo(data.consumption || data);
+        const info = data.consumption ? data.consumption : data;
+        setBudgetInfo(info);
       }
     } catch (e) {
       console.error('Gemini budget fetch error:', e);
@@ -88,7 +88,7 @@ export const SectionJudge: React.FC<SectionJudgeProps> = ({
       });
       const data = await res.json();
       if (res.ok) {
-        setActionMessage(`✅ Hakem değerlendirmesi tamamlandı: ${data.approved || 0} onaylandı, ${data.borderline || 0} yeniden yazıldı, ${data.rejected || 0} reddedildi.`);
+        setActionMessage(`✅ Hakem denetimi tamamlandı: ${data.approved || 0} onaylandı, ${data.borderline || 0} yeniden yazıldı, ${data.rejected || 0} reddedildi.`);
         refreshAll();
       } else {
         setActionMessage(`❌ Hata: ${data.detail || 'Hakem çalıştırma başarısız.'}`);
@@ -127,127 +127,145 @@ export const SectionJudge: React.FC<SectionJudgeProps> = ({
     }
   };
 
+  // Safe formatting helpers
+  const totalTokensFormatted = budgetInfo?.total_tokens != null ? Number(budgetInfo.total_tokens).toLocaleString() : '0';
+  const monthlyLimitFormatted = budgetInfo?.monthly_limit_tokens != null ? (Number(budgetInfo.monthly_limit_tokens) / 1_000_000).toFixed(0) : '100';
+  const estimatedCostFormatted = budgetInfo?.estimated_cost_tl != null ? Number(budgetInfo.estimated_cost_tl).toFixed(2) : '0.00';
+  const remainingGrantFormatted = budgetInfo?.remaining_grant_tl != null ? Number(budgetInfo.remaining_grant_tl).toFixed(2) : '473.98';
+  const budgetPercent = budgetInfo?.budget_percent != null ? Number(budgetInfo.budget_percent) : 0.0;
+
+  const totalJudgedCount = judgeStats?.total_judged != null ? Number(judgeStats.total_judged).toLocaleString() : '0';
+  const approvedCount = judgeStats?.approved != null ? Number(judgeStats.approved).toLocaleString() : '0';
+  const borderlineCount = judgeStats?.borderline != null ? Number(judgeStats.borderline).toLocaleString() : '0';
+  const rejectedCount = judgeStats?.rejected != null ? Number(judgeStats.rejected).toLocaleString() : '0';
+  const avgScoreFormatted = judgeStats?.average_score != null ? Number(judgeStats.average_score).toFixed(1) : '0.0';
+
+  const preHookDecision = hookAudit?.pre_hook_safe_test?.decision || 'allow';
+  const postHookStatus = hookAudit?.post_hook_linter_test?.status || 'passed';
+
   return (
-    <div className="space-y-6 animate-fadeIn pb-12">
-      {/* Top Banner: Google Developer Program & Token Budget Bar */}
-      <div className="bg-gradient-to-r from-gray-900 via-indigo-950 to-gray-900 border border-indigo-500/30 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      {/* 1. TOP BANNER: Google Developer Program & Token Bütçesi */}
+      <div className="card" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%)', border: '1px solid rgba(99, 102, 241, 0.3)', boxShadow: '0 4px 20px rgba(0,0,0,0.4)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
-            <div className="flex items-center space-x-3">
-              <span className="text-2xl">💎</span>
-              <h2 className="text-xl font-bold text-white tracking-wide">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <span style={{ fontSize: '1.5rem' }}>💎</span>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc' }}>
                 Google Developer Program Kredi & Token Bütçe Yöneticisi
-              </h2>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+              </h3>
+              <span className="badge online" style={{ background: 'rgba(99, 102, 241, 0.2)', color: '#a5b4fc', border: '1px solid rgba(99, 102, 241, 0.4)' }}>
                 Gemini 3.6 Flash / 2.5 Pro
               </span>
             </div>
-            <p className="text-sm text-gray-300 mt-1">
-              Aylık düzenli hibe: <strong className="text-emerald-400">₺473,98</strong> | Güvenli otomatik bütçe kapısı ve aşım koruması.
+            <p style={{ margin: '0.35rem 0 0 0', fontSize: '0.82rem', color: '#cbd5e1' }}>
+              Aylık düzenli hibe: <strong style={{ color: '#34d399' }}>₺473,98</strong> | Güvenli otomatik bütçe kapısı ve aşım koruması.
             </p>
           </div>
 
           <button
             onClick={refreshAll}
-            className="self-start md:self-auto px-4 py-2 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 rounded-xl text-sm font-medium transition flex items-center space-x-2"
+            className="btn btn-secondary"
+            style={{ fontSize: '0.8rem', padding: '0.4rem 0.85rem' }}
           >
-            <span>🔄</span>
-            <span>Verileri Yenile</span>
+            🔄 Verileri Yenile
           </button>
         </div>
 
-        {/* Budget Progress Bar */}
-        <div className="mt-6 pt-4 border-t border-indigo-500/20 grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-black/40 rounded-xl p-3 border border-indigo-500/20">
-            <span className="text-xs text-gray-400 block">Bu Ay Harcanan Token</span>
-            <span className="text-lg font-bold text-indigo-300">
-              {budgetInfo ? budgetInfo.total_tokens.toLocaleString() : '0'}
-            </span>
-            <span className="text-xs text-gray-500 block">
-              / {budgetInfo ? (budgetInfo.monthly_limit_tokens / 1_000_000).toFixed(0) : '100'}M Limit
-            </span>
+        {/* Budget Progress Bar & Breakdown */}
+        <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(99, 102, 241, 0.2)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+          <div style={{ background: 'rgba(0,0,0,0.35)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <span style={{ fontSize: '0.72rem', color: '#94a3b8', display: 'block' }}>Bu Ay Harcanan Token</span>
+            <strong style={{ fontSize: '1.15rem', color: '#a5b4fc' }}>{totalTokensFormatted}</strong>
+            <span style={{ fontSize: '0.72rem', color: '#64748b', display: 'block' }}>/ {monthlyLimitFormatted}M Tavan Limit</span>
           </div>
 
-          <div className="bg-black/40 rounded-xl p-3 border border-indigo-500/20">
-            <span className="text-xs text-gray-400 block">Tahmini Harcama</span>
-            <span className="text-lg font-bold text-emerald-400">
-              ₺{budgetInfo ? budgetInfo.estimated_cost_tl.toFixed(2) : '0.00'}
-            </span>
-            <span className="text-xs text-gray-500 block">
-              Kalan Hibe: ₺{budgetInfo ? budgetInfo.remaining_grant_tl.toFixed(2) : '473.98'}
-            </span>
+          <div style={{ background: 'rgba(0,0,0,0.35)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <span style={{ fontSize: '0.72rem', color: '#94a3b8', display: 'block' }}>Tahmini Harcama</span>
+            <strong style={{ fontSize: '1.15rem', color: '#34d399' }}>₺{estimatedCostFormatted}</strong>
+            <span style={{ fontSize: '0.72rem', color: '#64748b', display: 'block' }}>Kalan Hibe: ₺{remainingGrantFormatted}</span>
           </div>
 
-          <div className="bg-black/40 rounded-xl p-3 border border-indigo-500/20 md:col-span-2 flex flex-col justify-center">
-            <div className="flex justify-between text-xs text-gray-300 mb-1">
+          <div style={{ background: 'rgba(0,0,0,0.35)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(255,255,255,0.05)', gridColumn: 'span 2' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#cbd5e1', marginBottom: '0.4rem' }}>
               <span>Bütçe Kullanım Oranı</span>
-              <span className="font-semibold text-indigo-300">
-                %{budgetInfo ? budgetInfo.budget_percent.toFixed(2) : '0.00'}
-              </span>
+              <strong style={{ color: '#a5b4fc' }}>%{budgetPercent.toFixed(2)}</strong>
             </div>
-            <div className="w-full bg-gray-800 rounded-full h-3 overflow-hidden border border-gray-700">
+            <div style={{ width: '100%', height: '8px', background: '#1e293b', borderRadius: '999px', overflow: 'hidden' }}>
               <div
-                className="bg-gradient-to-r from-emerald-500 via-indigo-500 to-amber-500 h-full rounded-full transition-all duration-500"
-                style={{ width: `${Math.min(100, budgetInfo?.budget_percent || 0.5)}%` }}
+                style={{
+                  width: `${Math.min(100, Math.max(0.5, budgetPercent))}%`,
+                  height: '100%',
+                  background: 'linear-gradient(90deg, #10b981, #6366f1, #f59e0b)',
+                  transition: 'width 0.4s ease',
+                }}
               />
             </div>
           </div>
         </div>
       </div>
 
-      {/* Main Content Grid: Judge Configuration (Left) & Stats Dashboard (Right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Judge & Editor Execution Form */}
-        <div className="lg:col-span-5 bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-xl space-y-6">
-          <div className="flex items-center justify-between border-b border-gray-800 pb-3">
-            <div className="flex items-center space-x-2">
-              <span className="text-xl">⚖️</span>
-              <h3 className="font-bold text-white text-base">LLM Hakem & Editor-in-Chief</h3>
-            </div>
-            <span className="text-xs text-gray-400">Proje: {activeProjectId}</span>
+      {/* 2. MAIN GRID: Judge Controls & Scoreboard */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
+        {/* Left Column: Form Controls */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="card-title" style={{ justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span>⚖️</span>
+              <span>LLM Hakem & Editor-in-Chief</span>
+            </span>
+            <span className="badge online" style={{ fontSize: '0.72rem' }}>{activeProjectId}</span>
           </div>
 
           {/* Mode Selector */}
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider block">
+          <div>
+            <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>
               Hakem Çalışma Modu
             </label>
-            <div className="grid grid-cols-2 gap-3">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
               <button
                 type="button"
                 onClick={() => setMode('strict')}
-                className={`p-3 rounded-xl border text-left transition ${
-                  mode === 'strict'
-                    ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-lg'
-                    : 'bg-gray-800/60 border-gray-700 text-gray-400 hover:bg-gray-800'
-                }`}
+                className="btn"
+                style={{
+                  textAlign: 'left',
+                  padding: '0.6rem 0.75rem',
+                  borderRadius: 'var(--radius-md)',
+                  background: mode === 'strict' ? 'rgba(99, 102, 241, 0.2)' : 'var(--bg-primary)',
+                  border: mode === 'strict' ? '1px solid #6366f1' : '1px solid var(--border-color)',
+                  color: mode === 'strict' ? '#ffffff' : 'var(--text-secondary)',
+                }}
               >
-                <div className="font-bold text-sm text-indigo-300">1. Strict Judge</div>
-                <div className="text-xs text-gray-400 mt-1">Hızlı 1-10 puanlama & eleme (Ekonomik token).</div>
+                <div style={{ fontWeight: 700, fontSize: '0.82rem', color: mode === 'strict' ? '#a5b4fc' : undefined }}>1. Strict Judge</div>
+                <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '0.2rem' }}>Hızlı 1-10 puanlama & eleme.</div>
               </button>
 
               <button
                 type="button"
                 onClick={() => setMode('hybrid_editor')}
-                className={`p-3 rounded-xl border text-left transition ${
-                  mode === 'hybrid_editor'
-                    ? 'bg-amber-600/20 border-amber-500 text-white shadow-lg'
-                    : 'bg-gray-800/60 border-gray-700 text-gray-400 hover:bg-gray-800'
-                }`}
+                className="btn"
+                style={{
+                  textAlign: 'left',
+                  padding: '0.6rem 0.75rem',
+                  borderRadius: 'var(--radius-md)',
+                  background: mode === 'hybrid_editor' ? 'rgba(245, 158, 11, 0.2)' : 'var(--bg-primary)',
+                  border: mode === 'hybrid_editor' ? '1px solid #f59e0b' : '1px solid var(--border-color)',
+                  color: mode === 'hybrid_editor' ? '#ffffff' : 'var(--text-secondary)',
+                }}
               >
-                <div className="font-bold text-sm text-amber-300">2. Editor-in-Chief</div>
-                <div className="text-xs text-gray-400 mt-1">Sınırda kalanları cerrahi yeniden yazıp onarır.</div>
+                <div style={{ fontWeight: 700, fontSize: '0.82rem', color: mode === 'hybrid_editor' ? '#fde68a' : undefined }}>2. Editor-in-Chief</div>
+                <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '0.2rem' }}>Sınırda kalanları cerrahi onarır.</div>
               </button>
             </div>
           </div>
 
-          {/* Approval Threshold Slider */}
-          <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
-                Onay Eşiği Puanı (Threshold)
+          {/* Threshold Slider */}
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase' }}>
+                Onay Eşiği Puanı
               </label>
-              <span className="text-sm font-bold text-emerald-400 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+              <span className="badge online" style={{ fontSize: '0.8rem', fontWeight: 700 }}>
                 {threshold.toFixed(1)} / 10.0
               </span>
             </div>
@@ -258,31 +276,36 @@ export const SectionJudge: React.FC<SectionJudgeProps> = ({
               step="0.5"
               value={threshold}
               onChange={(e) => setThreshold(parseFloat(e.target.value))}
-              className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+              style={{ width: '100%', cursor: 'pointer' }}
             />
-            <div className="flex justify-between text-2xs text-gray-500">
-              <span>1.0 (Tümünü Onayla)</span>
-              <span>7.0 (Önerilen)</span>
-              <span>9.5 (Çok Katı)</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: '#64748b', marginTop: '0.2rem' }}>
+              <span>1.0 (Esnek)</span>
+              <span>7.0 (Önerilen Standart)</span>
+              <span>9.5 (Katı)</span>
             </div>
           </div>
 
-          {/* Record Limit Selector */}
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider block">
-              Değerlendirilecek Kayıt Sayısı
+          {/* Limit Selector */}
+          <div>
+            <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>
+              Örnek Sayısı (Limit)
             </label>
-            <div className="grid grid-cols-4 gap-2">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.4rem' }}>
               {['10', '25', '50', 'all'].map((val) => (
                 <button
                   key={val}
                   type="button"
                   onClick={() => setLimit(val)}
-                  className={`py-2 rounded-xl text-xs font-semibold border transition ${
-                    limit === val
-                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-md'
-                      : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-750'
-                  }`}
+                  className="btn"
+                  style={{
+                    padding: '0.4rem 0',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    borderRadius: 'var(--radius-md)',
+                    background: limit === val ? '#6366f1' : 'var(--bg-primary)',
+                    color: limit === val ? '#ffffff' : 'var(--text-secondary)',
+                    border: limit === val ? '1px solid #6366f1' : '1px solid var(--border-color)',
+                  }}
                 >
                   {val === 'all' ? 'Tümü' : `${val} Adet`}
                 </button>
@@ -290,9 +313,9 @@ export const SectionJudge: React.FC<SectionJudgeProps> = ({
             </div>
           </div>
 
-          {/* Action Message Alert */}
+          {/* Action Message */}
           {actionMessage && (
-            <div className="p-3 rounded-xl bg-gray-800/90 border border-gray-700 text-xs text-gray-200 animate-fadeIn">
+            <div style={{ padding: '0.6rem 0.8rem', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.78rem', color: '#f1f5f9' }}>
               {actionMessage}
             </div>
           )}
@@ -301,138 +324,93 @@ export const SectionJudge: React.FC<SectionJudgeProps> = ({
           <button
             onClick={handleRunJudge}
             disabled={loading}
-            className={`w-full py-3.5 px-4 rounded-xl font-bold text-sm shadow-xl flex items-center justify-center space-x-2 transition ${
-              loading
-                ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white'
-            }`}
+            className={`btn ${loading ? 'btn-disabled' : 'btn-primary'}`}
+            style={{ width: '100%', padding: '0.75rem', fontSize: '0.85rem', fontWeight: 700, marginTop: 'auto' }}
           >
-            {loading ? (
-              <>
-                <span className="animate-spin text-lg">⚙️</span>
-                <span>Hakem Değerlendirmesi Yürütülüyor...</span>
-              </>
-            ) : (
-              <>
-                <span>🎯</span>
-                <span>Hakem Kalite Denetimini Başlat ({mode === 'strict' ? 'Strict' : 'Editor'})</span>
-              </>
-            )}
+            {loading ? '⚙️ Hakem Değerlendirmesi Yürütülüyor...' : `🎯 Hakem Kalite Denetimini Başlat (${mode === 'strict' ? 'Strict' : 'Editor'})`}
           </button>
         </div>
 
-        {/* Right Column: Judge Scoreboard & Environment Hooks */}
-        <div className="lg:col-span-7 space-y-6">
-          {/* Judge Stats Cards */}
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-gray-800 pb-3">
-              <div className="flex items-center space-x-2">
-                <span className="text-xl">📊</span>
-                <h3 className="font-bold text-white text-base">Hakem Skor Dağılımı</h3>
-              </div>
-              <span className="text-xs text-emerald-400 font-semibold">
-                Ortalama Puan: {judgeStats ? judgeStats.average_score.toFixed(1) : '0.0'} / 10
+        {/* Right Column: Scoreboard & Hooks */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* Scoreboard Card */}
+          <div className="card">
+            <div className="card-title" style={{ justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span>📊</span>
+                <span>Hakem Skor Dağılımı</span>
+              </span>
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#34d399' }}>
+                Ortalama: {avgScoreFormatted} / 10
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="bg-black/30 border border-gray-800 rounded-xl p-4 text-center">
-                <span className="text-2xs text-gray-400 uppercase tracking-wider block">Toplam Denetlenen</span>
-                <span className="text-2xl font-extrabold text-white mt-1 block">
-                  {judgeStats ? judgeStats.total_judged.toLocaleString() : '0'}
-                </span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem', marginTop: '0.75rem' }}>
+              <div style={{ background: 'var(--bg-primary)', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                <span style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', display: 'block' }}>Toplam Denetlenen</span>
+                <strong style={{ fontSize: '1.35rem', color: '#f8fafc', display: 'block', marginTop: '0.2rem' }}>{totalJudgedCount}</strong>
               </div>
 
-              <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-xl p-4 text-center">
-                <span className="text-2xs text-emerald-400 uppercase tracking-wider block">Onaylanan (Approved)</span>
-                <span className="text-2xl font-extrabold text-emerald-400 mt-1 block">
-                  {judgeStats ? judgeStats.approved.toLocaleString() : '0'}
-                </span>
+              <div style={{ background: 'rgba(16, 185, 129, 0.1)', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(16, 185, 129, 0.3)', textAlign: 'center' }}>
+                <span style={{ fontSize: '0.7rem', color: '#34d399', textTransform: 'uppercase', display: 'block' }}>Onaylanan (Approved)</span>
+                <strong style={{ fontSize: '1.35rem', color: '#34d399', display: 'block', marginTop: '0.2rem' }}>{approvedCount}</strong>
               </div>
 
-              <div className="bg-amber-950/20 border border-amber-500/30 rounded-xl p-4 text-center">
-                <span className="text-2xs text-amber-400 uppercase tracking-wider block">Yeniden Yazılan</span>
-                <span className="text-2xl font-extrabold text-amber-400 mt-1 block">
-                  {judgeStats ? judgeStats.borderline.toLocaleString() : '0'}
-                </span>
+              <div style={{ background: 'rgba(245, 158, 11, 0.1)', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(245, 158, 11, 0.3)', textAlign: 'center' }}>
+                <span style={{ fontSize: '0.7rem', color: '#f59e0b', textTransform: 'uppercase', display: 'block' }}>Yeniden Yazılan</span>
+                <strong style={{ fontSize: '1.35rem', color: '#f59e0b', display: 'block', marginTop: '0.2rem' }}>{borderlineCount}</strong>
               </div>
 
-              <div className="bg-rose-950/20 border border-rose-500/30 rounded-xl p-4 text-center">
-                <span className="text-2xs text-rose-400 uppercase tracking-wider block">Reddedilen</span>
-                <span className="text-2xl font-extrabold text-rose-400 mt-1 block">
-                  {judgeStats ? judgeStats.rejected.toLocaleString() : '0'}
-                </span>
+              <div style={{ background: 'rgba(244, 63, 94, 0.1)', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid rgba(244, 63, 94, 0.3)', textAlign: 'center' }}>
+                <span style={{ fontSize: '0.7rem', color: '#f43f5e', textTransform: 'uppercase', display: 'block' }}>Reddedilen</span>
+                <strong style={{ fontSize: '1.35rem', color: '#f43f5e', display: 'block', marginTop: '0.2rem' }}>{rejectedCount}</strong>
               </div>
             </div>
           </div>
 
-          {/* Managed Agents Hooks & Scheduled Triggers Panel */}
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-gray-800 pb-3">
-              <div className="flex items-center space-x-2">
-                <span className="text-xl">🛡️</span>
-                <h3 className="font-bold text-white text-base">Managed Agents Hooks & Otonom Tetikleyiciler</h3>
-              </div>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                .agents/hooks.json Aktif
+          {/* Hooks & Triggers Card */}
+          <div className="card">
+            <div className="card-title" style={{ justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span>🛡️</span>
+                <span>Managed Agents Hooks & Otonom Tetikleyiciler</span>
               </span>
+              <span className="badge online" style={{ fontSize: '0.7rem' }}>.agents/hooks.json</span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Pre-Tool Security Gate */}
-              <div className="bg-black/30 border border-gray-800 rounded-xl p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-gray-200">Pre-Tool Security Gate</span>
-                  <span className="text-2xs font-semibold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                    Korumalı
-                  </span>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem' }}>
+              <div style={{ background: 'var(--bg-primary)', padding: '0.6rem 0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#f1f5f9' }}>Pre-Tool Gate</span>
+                  <span className="badge online" style={{ fontSize: '0.65rem' }}>{preHookDecision}</span>
                 </div>
-                <p className="text-2xs text-gray-400">
-                  Tehlikeli komut kalıplarını (`rm -rf`, `forkbomb`) ve token bütçe tavan aşımını otomatik engeller.
+                <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.68rem', color: '#94a3b8' }}>
+                  Tehlikeli komut ve token bütçe aşım koruması.
                 </p>
-                <div className="text-2xs text-gray-500 font-mono">
-                  Son Test: {hookAudit ? hookAudit.pre_hook_safe_test.decision : 'allow'}
-                </div>
               </div>
 
-              {/* Post-Tool Dataset Linter */}
-              <div className="bg-black/30 border border-gray-800 rounded-xl p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-gray-200">Post-Tool Dataset Linter</span>
-                  <span className="text-2xs font-semibold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/40">
-                    AST + LaTeX
-                  </span>
+              <div style={{ background: 'var(--bg-primary)', padding: '0.6rem 0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#f1f5f9' }}>Dataset Linter</span>
+                  <span className="badge online" style={{ fontSize: '0.65rem' }}>{postHookStatus}</span>
                 </div>
-                <p className="text-2xs text-gray-400">
-                  Python `ast.parse` kod doğruluğu, LaTeX formül dengesi ve JSON şema bütünlüğünü denetler.
+                <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.68rem', color: '#94a3b8' }}>
+                  AST sözdizimi, LaTeX denge ve JSON şema denetimi.
                 </p>
-                <div className="text-2xs text-gray-500 font-mono">
-                  Linter Durumu: {hookAudit ? hookAudit.post_hook_linter_test.status : 'passed'}
-                </div>
               </div>
             </div>
 
-            {/* Autonomous Scheduled Trigger Button */}
-            <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-gray-800/80">
-              <div className="text-xs text-gray-400">
-                Düşük kullanım saatlerinde (gece/off-peak) denetlenmemiş verileri bütçe dahilinde otonom iyileştirir.
-              </div>
+            <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                Düşük kullanım saatlerinde denetlenmemiş verileri otonom tarar.
+              </span>
               <button
                 onClick={handleRunScheduledTrigger}
                 disabled={isTriggerRunning}
-                className="px-4 py-2 bg-indigo-900/40 hover:bg-indigo-900/70 border border-indigo-500/40 text-indigo-200 rounded-xl text-xs font-semibold transition whitespace-nowrap flex items-center space-x-2"
+                className="btn btn-secondary"
+                style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
               >
-                {isTriggerRunning ? (
-                  <>
-                    <span className="animate-spin">⚙️</span>
-                    <span>Tetikleyici Çalışıyor...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>⚡</span>
-                    <span>Otonom Denetimi Tetikle (Trigger)</span>
-                  </>
-                )}
+                {isTriggerRunning ? '⚙️ Çalışıyor...' : '⚡ Otonom Denetimi Tetikle'}
               </button>
             </div>
           </div>
