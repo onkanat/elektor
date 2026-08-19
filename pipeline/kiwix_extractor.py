@@ -42,7 +42,7 @@ class KiwixZimExtractor:
 
         self.zim_path = self.config.get("kiwix_zim_path", "downloads/wikipedia_tr.zim")
         self.download_url = self.config.get("kiwix_download_url", "").strip()
-        self.namespaces = self.config.get("kiwix_namespaces", ["A", ""])
+        self.namespaces = self.config.get("kiwix_namespaces", None)
         self.min_chars = self.config.get("kiwix_min_chars", 300)
 
         # Connect/Initialize SQLite database
@@ -192,15 +192,22 @@ class KiwixZimExtractor:
             if self.namespaces and namespace and namespace not in self.namespaces:
                 continue
 
-            # Skip media/style assets (.css, .js, .png, .jpg, .svg)
-            if any(path.endswith(ext) for ext in [".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".gif", ".ico", ".woff", ".ttf"]):
+            # Skip media/style assets (.css, .js, .png, .jpg, .svg, and asset folders)
+            if any(path.startswith(prefix) for prefix in ["images/", "Img/", "css/", "js/", "fonts/", "style/", "static/"]):
+                continue
+            if any(path.endswith(ext) for ext in [".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".eot"]):
                 continue
 
             try:
                 item = entry.get_item()
-                content_bytes = bytes(item.get_content())
+                if hasattr(item, "content"):
+                    content_bytes = bytes(item.content)
+                elif hasattr(item, "get_content"):
+                    content_bytes = bytes(item.get_content())
+                else:
+                    content_bytes = bytes(item)
                 html_str = content_bytes.decode("utf-8", errors="ignore")
-            except Exception:
+            except Exception as e:
                 continue
 
             cleaned_text = self.clean_html_to_markdown(html_str, title=title)

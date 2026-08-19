@@ -303,3 +303,6 @@ class VisualDatasetBuilder:
             "cleaned_raw_crops": cleaned_files_count,
             "saved_ratio_percent": overall_saved
         }
+
+    # Alias for method name consistency
+    export_visual_dataset = export_multimodal_dataset

@@ -6,9 +6,12 @@ from pipeline.llm_client import get_openai_client
 
 class VisionOCRManager:
     def __init__(self, config_path="config.json", config_dict=None):
-        if config_dict is not None:
+        if isinstance(config_path, dict):
+            self.config = config_path
+            self.config_path = Path("config.json")
+        elif config_dict is not None:
             self.config = config_dict
-            self.config_path = Path(config_path)
+            self.config_path = Path(config_path) if isinstance(config_path, (str, Path)) else Path("config.json")
         else:
             self.config_path = Path(config_path)
             with open(self.config_path, "r", encoding="utf-8") as f:

@@ -11,8 +11,13 @@ from datetime import datetime
 
 class ArchiveExtractor:
     def __init__(self, config_path="config.json"):
-        with open(config_path, "r", encoding="utf-8") as f:
-            self.config = json.load(f)
+        if isinstance(config_path, dict):
+            self.config = config_path
+            self.config_path = "config.json"
+        else:
+            self.config_path = str(config_path)
+            with open(config_path, "r", encoding="utf-8") as f:
+                self.config = json.load(f)
             
         self.input_mode = self.config.get("input_mode", "folder")
         self.raw_input_path = str(self.config.get("input_path", "")).strip()
