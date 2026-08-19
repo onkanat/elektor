@@ -1592,12 +1592,29 @@ def audit_environment_hooks():
     pre_deny = hooks_mgr.execute_pre_hooks("code_execution", {"command": "rm -rf /"})
     post_check = hooks_mgr.execute_post_hooks("enrich", "```python\ndef ok(): pass\n```")
     
-    return {
-        "hooks_configured": bool(hooks_mgr.hooks_data),
-        "pre_hook_safe_test": pre_safe,
-        "pre_hook_deny_test": pre_deny,
-        "post_hook_linter_test": post_check
-    }
+@app.get("/api/dataset/catalog")
+def get_multimodal_catalog(project_id: Optional[str] = Query(None)):
+    """Returns content of exports/<project_id>/multimodal_catalog.md."""
+    cfg = get_config()
+    target_pid = project_id or cfg.get("project_id", "sdr_engineers")
+    catalog_file = Path("exports") / target_pid / "multimodal_catalog.md"
+    if not catalog_file.exists():
+        return {
+            "exists": False,
+            "project_id": target_pid,
+            "content": "Henüz multimodal katalog oluşturulmadı. `python run.py export_visual` komutu ile oluşturabilirsiniz."
+        }
+    try:
+        content = catalog_file.read_text(encoding="utf-8")
+        return {
+            "exists": True,
+            "project_id": target_pid,
+            "filename": catalog_file.name,
+            "size_bytes": catalog_file.stat().st_size,
+            "content": content
+        }
+    except Exception as e:
+        return {"exists": False, "error": str(e), "content": ""}
 
 
 # Mount React frontend static build

@@ -3,6 +3,7 @@ import { Header } from './components/Header';
 import { SectionConfig } from './components/SectionConfig';
 import { SectionDatasetViewer } from './components/SectionDatasetViewer';
 import { SectionModelChat } from './components/SectionModelChat';
+import { SectionJudge } from './components/SectionJudge';
 import { ProjectExplorer } from './components/ProjectExplorer';
 import { QuickHelpModal } from './components/QuickHelpModal';
 import { HFUploadModal } from './components/HFUploadModal';
@@ -10,7 +11,7 @@ import type { ProjectItem } from './components/ProjectExplorer';
 import type { HealthInfo, PipelineConfig, PipelineState } from './types';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'config' | 'dataset' | 'chat'>('config');
+  const [activeTab, setActiveTab] = useState<'config' | 'dataset' | 'chat' | 'judge'>('config');
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [config, setConfig] = useState<PipelineConfig | null>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
@@ -221,6 +222,14 @@ export const App: React.FC = () => {
               <SectionModelChat
                 config={config}
                 availableModels={health?.available_models || []}
+              />
+            )}
+
+            {activeTab === 'judge' && (
+              <SectionJudge
+                config={config}
+                activeProjectId={activeProjectId}
+                onRefreshHealth={fetchHealth}
               />
             )}
           </>

@@ -13,7 +13,9 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
   activeProjectName,
   activeDatasetName = 'rp2040_datasheet',
 }) => {
-  const [subTab, setSubTab] = useState<'jsonl' | 'sqlite' | 'qdrant'>('jsonl');
+  const [subTab, setSubTab] = useState<'jsonl' | 'sqlite' | 'qdrant' | 'catalog'>('jsonl');
+  const [catalogData, setCatalogData] = useState<{ exists: boolean; content: string; filename?: string; size_bytes?: number } | null>(null);
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState<boolean>(false);
 
   // Render mode: KaTeX Math vs Raw Text
   const [renderMathMode, setRenderMathMode] = useState<boolean>(true);
@@ -241,6 +243,27 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
     }
   };
 
+  // Fetch Multimodal Markdown Catalog
+  const fetchCatalog = () => {
+    setIsLoadingCatalog(true);
+    fetch(`/api/dataset/catalog?project_id=${encodeURIComponent(activeProjectId)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setCatalogData(data);
+        setIsLoadingCatalog(false);
+      })
+      .catch((err) => {
+        console.error('Error fetching catalog:', err);
+        setIsLoadingCatalog(false);
+      });
+  };
+
+  useEffect(() => {
+    if (subTab === 'catalog') {
+      fetchCatalog();
+    }
+  }, [subTab, activeProjectId]);
+
   const selectedFolder = selectedFile ? selectedFile.split('/')[0] : '';
 
   return (
@@ -266,6 +289,13 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
             onClick={() => setSubTab('qdrant')}
           >
             🔍 Lite Qdrant Vektör Arama
+          </button>
+          <button
+            className={`tab-btn ${subTab === 'catalog' ? 'active' : ''}`}
+            onClick={() => setSubTab('catalog')}
+            style={{ borderColor: subTab === 'catalog' ? '#a855f7' : undefined }}
+          >
+            🖼️ Multimodal Katalog (.md)
           </button>
         </div>
       </div>
@@ -679,6 +709,52 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 4: MULTIMODAL MARKDOWN CATALOG */}
+      {subTab === 'catalog' && (
+        <div style={{ padding: '1rem', background: 'var(--bg-primary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{ fontSize: '1.2rem' }}>🖼️</span>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Multimodal Teknik Katalog & Şema Dökümü (`multimodal_catalog.md`)
+                </h4>
+                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Proje: <code>{activeProjectId}</code> | WebP Şema Kırpmaları & DeepSeek-OCR Analizleri
+                </p>
+              </div>
+            </div>
+
+            <button
+              className="btn btn-secondary"
+              onClick={fetchCatalog}
+              disabled={isLoadingCatalog}
+              style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem' }}
+            >
+              {isLoadingCatalog ? 'Yenileniyor...' : '🔄 Kataloğu Yenile'}
+            </button>
+          </div>
+
+          {isLoadingCatalog ? (
+            <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+              Katalog yükleniyor...
+            </div>
+          ) : !catalogData?.exists ? (
+            <div style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>
+              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📑</div>
+              <p style={{ fontSize: '0.85rem' }}>{catalogData?.content || 'Bu projede henüz multimodal katalog ihraç edilmedi.'}</p>
+              <code style={{ fontSize: '0.75rem', background: '#1e293b', padding: '0.25rem 0.5rem', borderRadius: '4px', display: 'inline-block', marginTop: '0.5rem' }}>
+                python run.py export_visual
+              </code>
+            </div>
+          ) : (
+            <div style={{ padding: '1rem', background: '#0b0f19', borderRadius: 'var(--radius-md)', border: '1px solid #1e293b' }}>
+              <MathMarkdownRenderer content={catalogData.content} rawMode={!renderMathMode} />
             </div>
           )}
         </div>

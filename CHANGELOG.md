@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Multimodal Markdown Catalog (Faz 17)**: `multimodal_catalog.md` generated alongside `multimodal_visual_dataset.jsonl` with embedded figures and DeepSeek-OCR technical breakdowns.
 - **Managed Agents Environment Hooks & Scheduled Triggers (Faz 18)**: `.agents/hooks.json` implementation featuring pre-tool `security_gate.py`, post-tool `dataset_linter.py` (Python AST, LaTeX, JSON checks), and `scheduled_triggers.py` background audit scheduler.
 - **Cloud Training Kit & Vertex AI Tuning Recipes (Faz 19)**: Unsloth/Axolotl export automation combined with Google Vertex AI Gemini fine-tuning configuration (`vertex_ai_tuning.json`).
+- **React Web UI Entegrasyonu & SectionJudge (Faz 14-19 UI)**: Added new dedicated `🏛️ LLM Hakem & Editor` tab (`SectionJudge.tsx`) with Google Developer Program token/cost budget tracker, score breakdown cards, Managed Agents Hooks/Triggers panel, and in-browser Multimodal Markdown Catalog viewer (`SectionDatasetViewer.tsx`).
 
 ---
 

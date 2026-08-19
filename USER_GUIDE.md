@@ -328,5 +328,18 @@ Elektor veri hattı, üretilen sentetik SFT ve DPO çiftlerini Gemini API (`gemi
 
 ---
 
+## 16. 🎨 Web UI LLM Hakem Paneli (`SectionJudge.tsx`) & Multimodal Önizleyici
+
+Web arayüzüne eklenen 4. ana sekme üzerinden (`http://localhost:3456`):
+
+- **💎 Google Developer Program Token Bütçesi**: Aylık ₺473,98 Gen AI hibesinin tüketim yüzdesini ve harcanan TL tutarını anlık gösterir.
+- **⚖️ Hakem Çalışma Modu**: `Strict Judge` veya `Editor-in-Chief` modu, 1.0 - 10.0 onay eşiği slider'ı ve tek tıkla toplu hakem değerlendirmesi.
+- **📊 Canlı Skor Kartları**: Toplam denetlenen, onaylanan, cerrahi düzeltilen ve reddedilen kayıt sayıları ile ortalama kalite puanı.
+- **🛡️ Kanca & Tetikleyici Yönetimi**: Security Gate ve Dataset Linter tanı durumları ile zamanlanmış otonom denetim tetikleyicisi.
+- **🖼️ Multimodal Katalog Önizleyici**: Veri Seti İnceleyici sekmesi altında `multimodal_catalog.md` dosyasını şemalar ve teknik açıklamalarla canlı render eder.
+
+---
+
 *Rehber Son Güncelleme: 2026-08-19 | Elektor Universal Pipeline v19.0*
+
 

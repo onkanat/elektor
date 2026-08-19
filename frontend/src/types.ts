@@ -111,3 +111,31 @@ export interface SystemMetrics {
   ollama_online: boolean;
   vram_models: VramModel[];
 }
+
+export interface JudgeStats {
+  total_judged: number;
+  average_score: number;
+  approved: number;
+  borderline: number;
+  rejected: number;
+}
+
+export interface TokenBudgetInfo {
+  month: string;
+  total_tokens: number;
+  prompt_tokens: number;
+  candidate_tokens: number;
+  call_count: number;
+  monthly_limit_tokens: number;
+  budget_percent: number;
+  estimated_cost_tl: number;
+  monthly_grant_tl: number;
+  remaining_grant_tl: number;
+}
+
+export interface HookAuditInfo {
+  hooks_configured: boolean;
+  pre_hook_safe_test: { decision: string; reason: string };
+  pre_hook_deny_test: { decision: string; reason: string };
+  post_hook_linter_test: { status: string; lint_results?: any[] };
+}

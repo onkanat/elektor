@@ -4,8 +4,8 @@ import { SystemMetricsCard } from './SystemMetricsCard';
 
 interface HeaderProps {
   health: HealthInfo | null;
-  activeTab: 'config' | 'dataset' | 'chat';
-  setActiveTab: (tab: 'config' | 'dataset' | 'chat') => void;
+  activeTab: 'config' | 'dataset' | 'chat' | 'judge';
+  setActiveTab: (tab: 'config' | 'dataset' | 'chat' | 'judge') => void;
   activeProjectName?: string;
   onOpenProjectExplorer: () => void;
   onOpenQuickHelp: () => void;
@@ -61,19 +61,29 @@ export const Header: React.FC<HeaderProps> = ({
           className={`tab-btn ${activeTab === 'config' ? 'active' : ''}`}
           onClick={() => setActiveTab('config')}
         >
-          ⚙️ Bölüm A: Girdi & Config
+          ⚙️ Girdi & Config
         </button>
         <button
           className={`tab-btn ${activeTab === 'dataset' ? 'active' : ''}`}
           onClick={() => setActiveTab('dataset')}
         >
-          📊 Bölüm B: Dataset & DB
+          📊 Dataset & DB
         </button>
         <button
           className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`}
           onClick={() => setActiveTab('chat')}
         >
-          💬 Bölüm C: Analyzer Chat
+          💬 Analyzer Chat
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'judge' ? 'active' : ''}`}
+          onClick={() => setActiveTab('judge')}
+          style={{
+            borderColor: activeTab === 'judge' ? '#818cf8' : undefined,
+            boxShadow: activeTab === 'judge' ? '0 0 12px rgba(99, 102, 241, 0.3)' : undefined,
+          }}
+        >
+          🏛️ LLM Hakem & Editor
         </button>
       </nav>
 

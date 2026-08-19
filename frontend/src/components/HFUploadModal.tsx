@@ -456,6 +456,10 @@ export const HFUploadModal: React.FC<HFUploadModalProps> = ({
                 <div style={{ color: '#f1f5f9', fontSize: '0.8rem' }}>
                   Paket Dizini: <code>{cloudResult.payload_dir}</code><br/>
                   Üretilen Dosyalar ({cloudResult.generated_files.length}): <code>{cloudResult.generated_files.join(', ')}</code>
+                  <div style={{ marginTop: '0.6rem', padding: '0.5rem', background: 'rgba(99, 102, 241, 0.15)', borderRadius: '0.35rem', border: '1px solid rgba(99, 102, 241, 0.3)', color: '#c7d2fe' }}>
+                    💎 <strong>Google Vertex AI Gemini Tuning Reçetesi (`vertex_ai_tuning.json`):</strong><br/>
+                    Google Developer Program krediniz ile Google Cloud Vertex AI Model Registry üzerinde Gemini Supervised Fine-Tuning başlatmak için hazırlandı.
+                  </div>
                 </div>
               </div>
             )}
