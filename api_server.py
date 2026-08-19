@@ -1543,28 +1543,50 @@ def get_judge_stats(project_id: Optional[str] = Query(None)):
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='enrichments'")
     if not cursor.fetchone():
         conn.close()
-        return {"total": 0, "approved": 0, "borderline": 0, "rejected": 0, "average_score": 0.0}
+        return {"total": 0, "total_judged": 0, "approved": 0, "borderline": 0, "rejected": 0, "average_score": 0.0}
 
-    cursor.execute("""
-        SELECT judge_status, COUNT(*), AVG(judge_score)
-        FROM enrichments
-        WHERE judge_status IS NOT NULL
-        GROUP BY judge_status
-    """)
-    rows = cursor.fetchall()
-    
-    cursor.execute("SELECT AVG(judge_score), COUNT(*) FROM enrichments WHERE judge_score IS NOT NULL")
-    overall_avg, total_judged = cursor.fetchone()
-    conn.close()
+    # Ensure judge columns exist without throwing OperationalError
+    cursor.execute("PRAGMA table_info(enrichments)")
+    cols = [col[1] for col in cursor.fetchall()]
+    if "judge_status" not in cols or "judge_score" not in cols:
+        try:
+            if "judge_score" not in cols:
+                cursor.execute("ALTER TABLE enrichments ADD COLUMN judge_score REAL")
+            if "judge_status" not in cols:
+                cursor.execute("ALTER TABLE enrichments ADD COLUMN judge_status TEXT")
+            if "judge_feedback" not in cols:
+                cursor.execute("ALTER TABLE enrichments ADD COLUMN judge_feedback TEXT")
+            if "judged_at" not in cols:
+                cursor.execute("ALTER TABLE enrichments ADD COLUMN judged_at TEXT")
+            conn.commit()
+        except Exception:
+            conn.close()
+            return {"total": 0, "total_judged": 0, "approved": 0, "borderline": 0, "rejected": 0, "average_score": 0.0}
 
-    breakdown = {status: count for status, count, _ in rows}
-    return {
-        "total_judged": total_judged or 0,
-        "average_score": round(overall_avg or 0.0, 2),
-        "approved": breakdown.get("approved", 0),
-        "borderline": breakdown.get("borderline", 0),
-        "rejected": breakdown.get("rejected", 0)
-    }
+    try:
+        cursor.execute("""
+            SELECT judge_status, COUNT(*), AVG(judge_score)
+            FROM enrichments
+            WHERE judge_status IS NOT NULL AND judge_status != ''
+            GROUP BY judge_status
+        """)
+        rows = cursor.fetchall()
+        
+        cursor.execute("SELECT AVG(judge_score), COUNT(*) FROM enrichments WHERE judge_score IS NOT NULL")
+        overall_avg, total_judged = cursor.fetchone()
+        conn.close()
+
+        breakdown = {status: count for status, count, _ in rows}
+        return {
+            "total_judged": total_judged or 0,
+            "average_score": round(overall_avg or 0.0, 2),
+            "approved": breakdown.get("approved", 0),
+            "borderline": breakdown.get("borderline", 0),
+            "rejected": breakdown.get("rejected", 0)
+        }
+    except Exception as e:
+        conn.close()
+        return {"total": 0, "total_judged": 0, "approved": 0, "borderline": 0, "rejected": 0, "average_score": 0.0, "error": str(e)}
 
 
 # TRIGGERS & HOOKS API ENDPOINTS
@@ -1592,6 +1614,13 @@ def audit_environment_hooks():
     pre_deny = hooks_mgr.execute_pre_hooks("code_execution", {"command": "rm -rf /"})
     post_check = hooks_mgr.execute_post_hooks("enrich", "```python\ndef ok(): pass\n```")
     
+    return {
+        "hooks_configured": bool(hooks_mgr.hooks_data),
+        "pre_hook_safe_test": pre_safe,
+        "pre_hook_deny_test": pre_deny,
+        "post_hook_linter_test": post_check
+    }
+
 @app.get("/api/dataset/catalog")
 def get_multimodal_catalog(project_id: Optional[str] = Query(None)):
     """Returns content of exports/<project_id>/multimodal_catalog.md."""

@@ -72,3 +72,38 @@ async def test_qdrant_info():
         assert response.status_code == 200
         data = response.json()
         assert "collection" in data
+
+@pytest.mark.asyncio
+async def test_judge_stats_endpoint():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.get("/api/judge/stats?project_id=sdr_engineers")
+        assert response.status_code == 200
+        data = response.json()
+        assert "total_judged" in data
+        assert "average_score" in data
+        assert "approved" in data
+
+@pytest.mark.asyncio
+async def test_gemini_budget_endpoint():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.get("/api/gemini/budget")
+        assert response.status_code == 200
+        data = response.json()
+        assert "consumption" in data or "total_tokens" in data
+
+@pytest.mark.asyncio
+async def test_hooks_audit_endpoint():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.get("/api/hooks/audit")
+        assert response.status_code == 200
+        data = response.json()
+        assert "pre_hook_safe_test" in data
+
+@pytest.mark.asyncio
+async def test_dataset_catalog_endpoint():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.get("/api/dataset/catalog?project_id=sdr_engineers")
+        assert response.status_code == 200
+        data = response.json()
+        assert "exists" in data
+        assert "content" in data

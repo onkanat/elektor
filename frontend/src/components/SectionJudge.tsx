@@ -41,7 +41,7 @@ export const SectionJudge: React.FC<SectionJudgeProps> = ({
       const res = await fetch('/api/gemini/budget');
       if (res.ok) {
         const data = await res.json();
-        setBudgetInfo(data);
+        setBudgetInfo(data.consumption || data);
       }
     } catch (e) {
       console.error('Gemini budget fetch error:', e);
