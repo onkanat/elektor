@@ -1623,7 +1623,7 @@ def audit_environment_hooks():
 
 @app.get("/api/dataset/catalog")
 def get_multimodal_catalog(project_id: Optional[str] = Query(None)):
-    """Returns content of exports/<project_id>/multimodal_catalog.md."""
+    """Returns content of exports/<project_id>/multimodal_catalog.md with resolved image URLs."""
     cfg = get_config()
     target_pid = project_id or cfg.get("project_id", "sdr_engineers")
     catalog_file = Path("exports") / target_pid / "multimodal_catalog.md"
@@ -1635,16 +1635,24 @@ def get_multimodal_catalog(project_id: Optional[str] = Query(None)):
         }
     try:
         content = catalog_file.read_text(encoding="utf-8")
+        import re
+        # Rewrite relative image paths so markdown viewer can render images via /exports/{project_id}/images/...
+        content_fixed = re.sub(r'\!\[(.*?)\]\(images/(.*?)\)', rf'![\1](/exports/{target_pid}/images/\2)', content)
         return {
             "exists": True,
             "project_id": target_pid,
             "filename": catalog_file.name,
             "size_bytes": catalog_file.stat().st_size,
-            "content": content
+            "content": content_fixed
         }
     except Exception as e:
         return {"exists": False, "error": str(e), "content": ""}
 
+
+# Mount exports directory for dataset assets and image previews
+EXPORTS_DIR = Path("exports")
+EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/exports", StaticFiles(directory=str(EXPORTS_DIR)), name="exports_static")
 
 # Mount React frontend static build
 
@@ -1658,8 +1666,8 @@ if FRONTEND_DIST.exists():
 
     @app.get("/{full_path:path}")
     def serve_spa_paths(full_path: str):
-        if full_path.startswith("api/"):
-            raise HTTPException(status_code=404, detail="API endpoint not found")
+        if full_path.startswith("api/") or full_path.startswith("exports/"):
+            raise HTTPException(status_code=404, detail="API or static asset not found")
         file_path = FRONTEND_DIST / full_path
         if file_path.exists() and file_path.is_file():
             return FileResponse(file_path)

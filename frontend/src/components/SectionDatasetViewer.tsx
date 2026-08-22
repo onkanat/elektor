@@ -113,8 +113,8 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
 
   const [selectedRowModal, setSelectedRowModal] = useState<any | null>(null);
 
-  // Fetch JSONL dataset list on mount / project change
-  useEffect(() => {
+  // Fetch JSONL dataset list on mount / project change / manual refresh
+  const fetchDatasets = () => {
     fetch('/api/datasets')
       .then((res) => res.json())
       .then((data) => {
@@ -129,6 +129,10 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
         }
       })
       .catch((err) => console.error('Error fetching datasets:', err));
+  };
+
+  useEffect(() => {
+    fetchDatasets();
   }, [activeProjectId, activeDatasetName]);
 
   // Filter datasets based on projectFilterMode
@@ -323,8 +327,18 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
               </button>
             </div>
 
-            <div className="badge online" style={{ fontSize: '0.75rem' }}>
-              Klasör: exports/<code>{selectedFolder || 'seçilmedi'}</code>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <button
+                className="btn btn-secondary"
+                style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
+                onClick={() => fetchDatasets()}
+                title="Veri seti listesini yeniden tara"
+              >
+                🔄 Listeyi Yenile
+              </button>
+              <div className="badge online" style={{ fontSize: '0.75rem' }}>
+                Klasör: exports/<code>{selectedFolder || 'seçilmedi'}</code>
+              </div>
             </div>
           </div>
 

@@ -193,13 +193,23 @@ class KiwixZimExtractor:
                 continue
 
             # Skip media/style assets (.css, .js, .png, .jpg, .svg, and asset folders)
-            if any(path.startswith(prefix) for prefix in ["images/", "Img/", "css/", "js/", "fonts/", "style/", "static/"]):
+            path_lower = path.lower()
+            if any(path_lower.startswith(prefix) for prefix in ["images/", "img/", "css/", "js/", "fonts/", "style/", "static/"]):
                 continue
-            if any(path.endswith(ext) for ext in [".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".eot"]):
+            if any(substr in path_lower for substr in ["/img/", "/images/", "/content/img/", "sprite", "favicon"]):
+                continue
+            if any(path_lower.split("?")[0].endswith(ext) for ext in [
+                ".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".gif", ".ico", 
+                ".webp", ".woff", ".woff2", ".ttf", ".eot", ".json", ".xml", ".mp3", ".mp4"
+            ]):
                 continue
 
             try:
                 item = entry.get_item()
+                mimetype = getattr(item, "mimetype", getattr(entry, "mimetype", ""))
+                if mimetype and not (mimetype.startswith("text/") or mimetype in ("application/xhtml+xml", "application/html")):
+                    continue
+
                 if hasattr(item, "content"):
                     content_bytes = bytes(item.content)
                 elif hasattr(item, "get_content"):

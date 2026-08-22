@@ -5,6 +5,39 @@ All notable changes to the **Elektor Universal PDF & Rendergit Code Dataset Gene
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [19.3.0] - 2026-08-22
+
+### Added
+- **Production Cloud Templates & Environment Interpolation**: Added `templates/ollama_cloud.json` (`minimax-m3`, `gpt-oss:120b`, `gpt-oss:20b`) and `templates/gemini.json` (`gemini-3.6-flash`) with dynamic `${VAR_NAME}` environment variable resolution.
+- **Dedicated Diagnostic Test Suite in `tools/`**:
+  - `tools/test_ollama_cloud.py`: Supports server model probing (`--probe-models`), single model override (`--model`), and reasoning `<think>` block extraction.
+  - `tools/test_gemini_config.py`: 4-stage end-to-end test verifying API connectivity, structured JSON schema extraction, technical translation, and multimodal vision OCR on circuit schematics.
+  - `tools/test_langextract.py`: Diagnostic tool testing grounded entity extraction, verbatim substring character offsets, and heuristic fallback across Gemini, Ollama, OpenAI, and Fallback engines.
+- **Multi-Provider LangExtract Execution**: Added native OpenAI-compatible structured JSON extraction in `pipeline/langextract_engine.py` for Ollama and OpenAI backends.
+- **Templates User Guide**: Created comprehensive `templates/USER_GUIDE.md` detailing cloud template configurations, API key setups, and troubleshooting guides.
+
+### Fixed
+- **Bilingual & Direct Turkish Dataset Isolation**: Fixed `pipeline/analyzer.py` and `pipeline/dataset_builder.py` so that English datasets (`chat_dataset.jsonl`, `sft_dataset.jsonl`, `dpo_dataset.jsonl`) remain strictly in English while Turkish datasets (`tr_chat_dataset.jsonl`, `tr_sft_dataset.jsonl`, `tr_dpo_dataset.jsonl`) contain Turkish generations without cross-contamination.
+- **LangExtract Heuristic Fallback Precision**: Optimized `_fallback_heuristic_extractor` regex patterns with stop-words filtering to eliminate common word noise and extract sharp technical acronyms (`HF`, `VHF`, `SDR`), ICs (`ESP32`, `STM32`), and spec values (`28 MHz`, `500 mA`).
+- **Ollama Cloud 401 Unauthorized Troubleshooting**: Added automated key length verification and diagnostic guidance for truncated/missing API keys.
+
+---
+
+## [19.2.0] - 2026-08-21
+
+### Added
+- **VLM Vision OCR & Non-Thinking Reasoning Optimization (Faz 11)**: Configurable `vision_max_tokens` (default 4096), Qwen 3.5 non-thinking options (`enable_thinking: False`, `think: False`, `temperature: 0.7`, `top_p: 0.8`), and automatic reasoning recovery fallback to prevent empty VLM responses when reasoning tokens exhaust the budget.
+- **FastAPI Static Route Mount for `/exports`**: Mounted `app.mount("/exports", StaticFiles(directory="exports"))` and added dynamic markdown image URL rewriter in `/api/dataset/catalog` to render WebP figures seamlessly in React frontend.
+- **UI Dataset List Live Refresh & Multi-Project Bar**: Added `🔄 Listeyi Yenile` manual refresh button and improved multi-project filtering in `SectionDatasetViewer.tsx`.
+- **Gemini API Pydantic `$defs` / `$ref` Schema Inliner**: Added recursive schema flattening in `pipeline/gemini_client.py` resolving 400 Bad Request errors on nested structured output requests.
+- **Kiwix ZIM Binary MIME Filtering**: Enhanced `KiwixExtractor` to automatically skip sprite graphics and non-article binary assets in OpenZIM archives.
+- **Pytest Suite Expansion**: Expanded automated unit test suite to 51 passing tests (100% pass rate).
+
+### Fixed
+- **Empty VLM Output on Heavy Schemas**: Fixed issue where reasoning models (`qwen3.5:4b`, etc.) spent all completion tokens in thinking mode, leaving empty content strings.
+- **Broken Markdown Catalog Images**: Fixed 404 image errors on `multimodal_catalog.md` in browser by routing images via `/exports/<project_id>/images/`.
+- **Project Explorer Export Discovery**: Fixed active project mismatch hiding newly exported JSONL and multimodal catalog files in dataset viewer.
+
 ---
 
 ## [19.0.0] - 2026-08-19

@@ -18,6 +18,7 @@ class DatasetBuilder:
         self.export_dir.mkdir(parents=True, exist_ok=True)
         self.dataset_name = self.config.get("dataset_name", "Document")
         self.dataset_name_tr = self.config.get("dataset_name_tr", "Döküman")
+        self.generation_language = self.config.get("generation_language", "bilingual").lower()
 
     def _save_jsonl_and_parquet(self, file_path: Path, records: list, raw: bool = False):
         valid_records = []
@@ -85,33 +86,28 @@ class DatasetBuilder:
         cursor.execute("PRAGMA table_info(enrichments)")
         cols = [c[1] for c in cursor.fetchall()]
         has_tr_qa = "tr_sft_qa" in cols and "tr_dpo_pairs" in cols
+        has_multi_turn = "multi_turn_chat" in cols
+        has_tr_multi_turn = "tr_multi_turn_chat" in cols
         has_is_excluded = "is_excluded" in cols
 
         where_clause = "WHERE (e.is_excluded IS NULL OR e.is_excluded = 0)" if has_is_excluded else ""
+        multi_turn_col = "e.multi_turn_chat" if has_multi_turn else "NULL"
+        tr_multi_turn_col = "e.tr_multi_turn_chat" if has_tr_multi_turn else "NULL"
+        tr_qa_cols = "e.tr_sft_qa, e.tr_dpo_pairs" if has_tr_qa else "NULL, NULL"
 
-        if has_tr_qa:
-            cursor.execute(f"""
-                SELECT a.title, a.year, e.summary, e.turkish_title, e.turkish_summary, 
-                       e.sft_qa, e.dpo_pairs, e.tr_sft_qa, e.tr_dpo_pairs
-                FROM enrichments e
-                JOIN articles a ON a.id = e.article_id
-                {where_clause}
-            """)
-        else:
-            cursor.execute(f"""
-                SELECT a.title, a.year, e.summary, e.turkish_title, e.turkish_summary, 
-                       e.sft_qa, e.dpo_pairs, NULL, NULL
-                FROM enrichments e
-                JOIN articles a ON a.id = e.article_id
-                {where_clause}
-            """)
+        cursor.execute(f"""
+            SELECT a.title, a.year, e.summary, e.turkish_title, e.turkish_summary, 
+                   e.sft_qa, e.dpo_pairs, {tr_qa_cols}, {multi_turn_col}, {tr_multi_turn_col}
+            FROM enrichments e
+            JOIN articles a ON a.id = e.article_id
+            {where_clause}
+        """)
         rows = cursor.fetchall()
         
         def safe_str(val):
             if val is None:
                 return ""
             if isinstance(val, dict):
-                # If it's a dict, try to extract logical string fields or fallback to string representation
                 val = val.get("text", val.get("question", val.get("answer", val.get("chosen", val.get("rejected", str(val))))))
             elif isinstance(val, list):
                 val = " ".join(str(i) for i in val)
@@ -128,11 +124,26 @@ class DatasetBuilder:
         
         print(f"Compiling datasets from {len(rows)} enriched articles...")
         
+        invalid_summaries = ["özet bulunamadı.", "özet bulunamadı", "summary unavailable.", "summary unavailable", ""]
+
         for row in rows:
-            title, year, summary, tr_title, tr_summary, sft_qa_json, dpo_pairs_json, tr_sft_qa_json, tr_dpo_pairs_json = row
+            title, year, summary, tr_title, tr_summary, sft_qa_json, dpo_pairs_json, tr_sft_qa_json, tr_dpo_pairs_json, multi_turn_chat_json, tr_multi_turn_chat_json = row
             display_tr_title = tr_title if tr_title else title
             
-            # --- English SFT and Chat data ---
+            # --- English Multi-turn Chat dataset ---
+            has_valid_en_chat = False
+            if multi_turn_chat_json:
+                try:
+                    multi_turn = json.loads(multi_turn_chat_json)
+                    if isinstance(multi_turn, list) and len(multi_turn) >= 2:
+                        valid_turns = all(isinstance(turn, dict) and "role" in turn and "content" in turn for turn in multi_turn)
+                        if valid_turns:
+                            chat_records.append({"messages": multi_turn})
+                            has_valid_en_chat = True
+                except Exception as e:
+                    print(f"Error parsing English multi_turn_chat for article '{title}': {e}")
+
+            # --- English SFT and Chat fallback ---
             if sft_qa_json:
                 try:
                     sft_qa = json.loads(sft_qa_json)
@@ -150,14 +161,15 @@ class DatasetBuilder:
                                     "input": f"Context: {self.dataset_name} ({year}) article '{title}'",
                                     "output": a
                                 })
-                                chat_records.append({
-                                    "messages": [
-                                        {"role": "user", "content": q},
-                                        {"role": "assistant", "content": a}
-                                    ]
-                                })
+                                if not has_valid_en_chat:
+                                    chat_records.append({
+                                        "messages": [
+                                            {"role": "user", "content": q},
+                                            {"role": "assistant", "content": a}
+                                        ]
+                                    })
                 except Exception as e:
-                    print(f"Error parsing SFT QA for article '{title}': {e}")
+                    print(f"Error parsing English SFT QA for article '{title}': {e}")
                     
             # --- English DPO data ---
             if dpo_pairs_json:
@@ -180,9 +192,41 @@ class DatasetBuilder:
                                     "rejected": rej
                                 })
                 except Exception as e:
-                    print(f"Error parsing DPO pairs for article '{title}': {e}")
-                    
-            # --- Turkish SFT, Chat, and DPO data ---
+                    print(f"Error parsing English DPO pairs for article '{title}': {e}")
+
+            # --- English Summary SFT ---
+            clean_en_summary = summary.strip() if summary else ""
+            if title and clean_en_summary and clean_en_summary.lower() not in invalid_summaries and len(clean_en_summary) > 20:
+                import random
+                en_templates = [
+                    "What is the article '{title}' published in {year} in {dataset} about? Please summarize briefly.",
+                    "Please provide a technical summary of the {year} {dataset} article titled '{title}'.",
+                    "Can you summarize the main technical concepts and mechanisms of '{title}' ({year}) from {dataset}?",
+                    "What key engineering topics are discussed in the {dataset} ({year}) publication '{title}'?",
+                    "Please summarize the purpose, methods, and results described in the article '{title}' ({year})."
+                ]
+                en_prompt = random.choice(en_templates).format(dataset=self.dataset_name, year=year, title=title)
+                sft_records.append({
+                    "instruction": en_prompt,
+                    "input": "",
+                    "output": clean_en_summary
+                })
+
+            # --- Turkish Multi-turn Chat dataset ---
+            has_valid_tr_chat = False
+            target_tr_chat_json = tr_multi_turn_chat_json or (multi_turn_chat_json if self.generation_language == "tr" else None)
+            if target_tr_chat_json:
+                try:
+                    tr_multi_turn = json.loads(target_tr_chat_json)
+                    if isinstance(tr_multi_turn, list) and len(tr_multi_turn) >= 2:
+                        valid_turns = all(isinstance(turn, dict) and "role" in turn and "content" in turn for turn in tr_multi_turn)
+                        if valid_turns:
+                            tr_chat_records.append({"messages": tr_multi_turn})
+                            has_valid_tr_chat = True
+                except Exception as e:
+                    print(f"Error parsing Turkish multi_turn_chat for article '{display_tr_title}': {e}")
+
+            # --- Turkish SFT and Chat fallback ---
             if tr_sft_qa_json:
                 try:
                     tr_sft_qa = json.loads(tr_sft_qa_json)
@@ -200,15 +244,17 @@ class DatasetBuilder:
                                     "input": f"Bağlam: {self.dataset_name_tr} ({year}) '{display_tr_title}' makalesi",
                                     "output": a
                                 })
-                                tr_chat_records.append({
-                                    "messages": [
-                                        {"role": "user", "content": q},
-                                        {"role": "assistant", "content": a}
-                                    ]
-                                })
+                                if not has_valid_tr_chat:
+                                    tr_chat_records.append({
+                                        "messages": [
+                                            {"role": "user", "content": q},
+                                            {"role": "assistant", "content": a}
+                                        ]
+                                    })
                 except Exception as e:
                     print(f"Error parsing Turkish SFT QA for article '{display_tr_title}': {e}")
 
+            # --- Turkish DPO data ---
             if tr_dpo_pairs_json:
                 try:
                     tr_dpo_pairs = json.loads(tr_dpo_pairs_json)
@@ -238,8 +284,9 @@ class DatasetBuilder:
                 except Exception as e:
                     print(f"Error parsing Turkish DPO pairs for article '{display_tr_title}': {e}")
                     
-            # Turkish SFT dataset (Summary and Title QA)
-            if display_tr_title and tr_summary:
+            # --- Turkish Summary SFT ---
+            clean_summary = tr_summary.strip() if tr_summary else ""
+            if display_tr_title and clean_summary and clean_summary.lower() not in invalid_summaries and len(clean_summary) > 20:
                 import random
                 tr_templates = [
                     "{dataset} bünyesinde {year} yılında yayınlanan '{title}' makalesi ne hakkındadır? Kısaca özetler misiniz?",
@@ -254,7 +301,7 @@ class DatasetBuilder:
                 tr_sft_records.append({
                     "instruction": tr_prompt,
                     "input": "",
-                    "output": tr_summary.strip()
+                    "output": clean_summary
                 })
                 
         # Check and export synthetic_code_pairs table
@@ -347,40 +394,40 @@ class DatasetBuilder:
                 print(f"  Code SFT      : {len(code_sft_records)} samples -> {code_sft_file} & .parquet")
                 print(f"  Turkish Code SFT: {len(tr_code_sft_records)} samples -> {tr_code_sft_file} & .parquet")
 
-        # Write English SFT
-        sft_file = self.export_dir / "sft_dataset.jsonl"
-        self._save_jsonl_and_parquet(sft_file, sft_records)
-                
-        # Write English DPO
-        dpo_file = self.export_dir / "dpo_dataset.jsonl"
-        self._save_jsonl_and_parquet(dpo_file, dpo_records)
-                
-        # Write English Chat
-        chat_file = self.export_dir / "chat_dataset.jsonl"
-        self._save_jsonl_and_parquet(chat_file, chat_records)
-                
-        # Write Turkish SFT
-        tr_sft_file = self.export_dir / "tr_sft_dataset.jsonl"
-        self._save_jsonl_and_parquet(tr_sft_file, tr_sft_records)
+        # Write English datasets
+        if self.generation_language in ["bilingual", "en"]:
+            sft_file = self.export_dir / "sft_dataset.jsonl"
+            self._save_jsonl_and_parquet(sft_file, sft_records)
+                    
+            dpo_file = self.export_dir / "dpo_dataset.jsonl"
+            self._save_jsonl_and_parquet(dpo_file, dpo_records)
+                    
+            chat_file = self.export_dir / "chat_dataset.jsonl"
+            self._save_jsonl_and_parquet(chat_file, chat_records)
 
-        # Write Turkish Chat
-        tr_chat_file = self.export_dir / "tr_chat_dataset.jsonl"
-        self._save_jsonl_and_parquet(tr_chat_file, tr_chat_records)
+        # Write Turkish datasets
+        if self.generation_language in ["bilingual", "tr"]:
+            tr_sft_file = self.export_dir / "tr_sft_dataset.jsonl"
+            self._save_jsonl_and_parquet(tr_sft_file, tr_sft_records)
 
-        # Write Turkish DPO
-        tr_dpo_file = self.export_dir / "tr_dpo_dataset.jsonl"
-        self._save_jsonl_and_parquet(tr_dpo_file, tr_dpo_records)
+            tr_chat_file = self.export_dir / "tr_chat_dataset.jsonl"
+            self._save_jsonl_and_parquet(tr_chat_file, tr_chat_records)
+
+            tr_dpo_file = self.export_dir / "tr_dpo_dataset.jsonl"
+            self._save_jsonl_and_parquet(tr_dpo_file, tr_dpo_records)
                 
         # Export LangExtract Grounded Dataset
         self.export_langextract_dataset(conn)
         
         print("\nDatasets exported successfully (JSONL & Parquet):")
-        print(f"  English SFT   : {len(sft_records)} samples -> {sft_file}")
-        print(f"  English DPO   : {len(dpo_records)} samples -> {dpo_file}")
-        print(f"  English Chat  : {len(chat_records)} samples -> {chat_file}")
-        print(f"  Turkish SFT   : {len(tr_sft_records)} samples -> {tr_sft_file}")
-        print(f"  Turkish Chat  : {len(tr_chat_records)} samples -> {tr_chat_file}")
-        print(f"  Turkish DPO   : {len(tr_dpo_records)} samples -> {tr_dpo_file}")
+        if self.generation_language in ["bilingual", "en"]:
+            print(f"  English SFT   : {len(sft_records)} samples -> {sft_file}")
+            print(f"  English DPO   : {len(dpo_records)} samples -> {dpo_file}")
+            print(f"  English Chat  : {len(chat_records)} samples -> {chat_file}")
+        if self.generation_language in ["bilingual", "tr"]:
+            print(f"  Turkish SFT   : {len(tr_sft_records)} samples -> {tr_sft_file}")
+            print(f"  Turkish Chat  : {len(tr_chat_records)} samples -> {tr_chat_file}")
+            print(f"  Turkish DPO   : {len(tr_dpo_records)} samples -> {tr_dpo_file}")
         
         conn.close()
 

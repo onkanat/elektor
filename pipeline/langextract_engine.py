@@ -296,53 +296,149 @@ Analyze the provided engineering/technical document text snippet and generate:
         grounded_spans = []
 
         # High-performance native Gemini execution path
-        if active_provider == "gemini" and self.gemini_client.is_available():
-            system_instruction = f"""You are a high-precision Grounded Information Extraction Engine.
+        if active_provider == "gemini":
+            if not self.gemini_client.is_available():
+                self.logger.warning(
+                    "GEMINI_API_KEY bulunamadı! Konsoldan veya config.json/env üzerinden GEMINI_API_KEY tanımlanmadığı için 'gemini_fallback' sezgisel moduna geçildi.",
+                    module="langextract"
+                )
+            else:
+                system_instruction = f"""You are a high-precision Grounded Information Extraction Engine.
 Goal: {prompt_desc}
 
 Rule:
 - Every 'extraction_text' MUST be an exact verbatim substring from the source document.
 - Assign appropriate 'extraction_class' and rich 'attributes' metadata (values, units, pins, types, etc.).
 """
-            res = self.gemini_client.generate_content(
-                prompt=f"### Source Document Text:\n{text}\n\nPerform grounded extraction.",
-                system_instruction=system_instruction,
-                model=active_model if "gemini" in active_model else "gemini-3.6-flash",
-                response_schema=ExtractionPayload,
-                purpose="langextract_extraction"
-            )
+                res = self.gemini_client.generate_content(
+                    prompt=f"### Source Document Text:\n{text}\n\nPerform grounded extraction.",
+                    system_instruction=system_instruction,
+                    model=active_model if "gemini" in active_model else "gemini-3.6-flash",
+                    response_schema=ExtractionPayload,
+                    purpose="langextract_extraction"
+                )
 
-            if res["success"] and res["json_data"]:
+                if res["success"] and res["json_data"]:
+                    try:
+                        payload = ExtractionPayload(**res["json_data"])
+                        last_search_offset = 0
+                        for item in payload.extractions:
+                            stext = item.extraction_text
+                            start, end = locate_character_offsets(text, stext, search_start=last_search_offset)
+                            if start > 0:
+                                last_search_offset = start
+
+                            ent_dict = {
+                                "text_span": stext,
+                                "start_char": start,
+                                "end_char": end,
+                                "extraction_class": item.extraction_class,
+                                "attributes": item.attributes,
+                                "preset": schema_preset
+                            }
+                            extracted_entities.append(ent_dict)
+                            grounded_spans.append({"start": start, "end": end, "text": stext, "attr": item.attributes, "class": item.extraction_class})
+
+                        if extracted_entities:
+                            return {
+                                "entities": extracted_entities,
+                                "grounded_spans": grounded_spans,
+                                "count": len(extracted_entities),
+                                "preset": schema_preset,
+                                "provider": "gemini",
+                                "model": res["model"]
+                            }
+                    except Exception as e:
+                        self.logger.warning(f"Error parsing Gemini LangExtract response: {e}", module="langextract")
+
+        # OpenAI / Ollama / Ollama Cloud execution path
+        elif active_provider in ("ollama", "openai"):
+            try:
+                from pipeline.llm_client import get_openai_client
+                client = get_openai_client(self.config)
+                model_to_use = active_model or self.config.get("model_analyzer", "minimax-m3")
+                
+                system_instruction = f"""You are a high-precision Grounded Information Extraction Engine.
+Goal: {prompt_desc}
+
+Rule:
+- Every 'extraction_text' MUST be an exact verbatim substring from the source document.
+- Assign appropriate 'extraction_class' (e.g. spec_value, component, frequency, parameter, etc.) and rich 'attributes' metadata.
+- Output a single JSON object with key 'extractions', where each item has 'extraction_class', 'extraction_text', and 'attributes'.
+"""
+                response = client.chat.completions.create(
+                    model=model_to_use,
+                    messages=[
+                        {"role": "system", "content": system_instruction},
+                        {"role": "user", "content": f"### Source Document Text:\n{text[:6000]}\n\nPerform grounded extraction and return JSON."}
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.1,
+                    max_tokens=4096
+                )
+                content = (response.choices[0].message.content or "").strip()
+                if "<think>" in content and "</think>" in content:
+                    content = content.split("</think>", 1)[1].strip()
+                if content.startswith("```json"):
+                    content = content[7:]
+                elif content.startswith("```"):
+                    content = content[3:]
+                if content.endswith("```"):
+                    content = content[:-3]
+                content = content.strip()
+
                 try:
-                    payload = ExtractionPayload(**res["json_data"])
-                    last_search_offset = 0
-                    for item in payload.extractions:
-                        stext = item.extraction_text
-                        start, end = locate_character_offsets(text, stext, search_start=last_search_offset)
-                        if start > 0:
-                            last_search_offset = start
+                    data = json.loads(content)
+                except Exception:
+                    import re
+                    match = re.search(r'(\{.*\})', content, re.DOTALL)
+                    if match:
+                        data = json.loads(match.group(1))
+                    else:
+                        raise
 
-                        ent_dict = {
-                            "text_span": stext,
-                            "start_char": start,
-                            "end_char": end,
-                            "extraction_class": item.extraction_class,
-                            "attributes": item.attributes,
-                            "preset": schema_preset
-                        }
-                        extracted_entities.append(ent_dict)
-                        grounded_spans.append({"start": start, "end": end, "text": stext, "attr": item.attributes, "class": item.extraction_class})
+                raw_extractions = data.get("extractions", []) if isinstance(data, dict) else []
+                if isinstance(data, list):
+                    raw_extractions = data
 
+                last_search_offset = 0
+                for item in raw_extractions:
+                    if not isinstance(item, dict):
+                        continue
+                    stext = item.get("extraction_text", "")
+                    if not stext or not isinstance(stext, str):
+                        continue
+                    eclass = item.get("extraction_class", "technical_entity")
+                    attr = item.get("attributes", {})
+                    if not isinstance(attr, dict):
+                        attr = {"value": stext}
+
+                    start, end = locate_character_offsets(text, stext, search_start=last_search_offset)
+                    if start > 0:
+                        last_search_offset = start
+
+                    ent_dict = {
+                        "text_span": stext,
+                        "start_char": start,
+                        "end_char": end,
+                        "extraction_class": eclass,
+                        "attributes": attr,
+                        "preset": schema_preset
+                    }
+                    extracted_entities.append(ent_dict)
+                    grounded_spans.append({"start": start, "end": end, "text": stext, "attr": attr, "class": eclass})
+
+                if extracted_entities:
                     return {
                         "entities": extracted_entities,
                         "grounded_spans": grounded_spans,
                         "count": len(extracted_entities),
                         "preset": schema_preset,
-                        "provider": "gemini",
-                        "model": res["model"]
+                        "provider": active_provider,
+                        "model": model_to_use
                     }
-                except Exception as e:
-                    self.logger.warning(f"Error parsing Gemini LangExtract response: {e}", module="langextract")
+            except Exception as e:
+                self.logger.warning(f"Error calling {active_provider} for LangExtract ({e}). Switching to fallback.", module="langextract")
 
         # Fallback heuristic extractor
         fallback_res = self._fallback_heuristic_extractor(text, schema_preset)
@@ -355,29 +451,45 @@ Rule:
         entities = []
         spans = []
 
-        patterns = []
+        stop_words = {
+            "THE", "AND", "FOR", "NOT", "ALL", "CAN", "USE", "HOW", "WHY", "WHAT", "FROM", "WITH",
+            "WHEN", "WHERE", "THIS", "THAT", "THEN", "THESE", "THOSE", "EACH", "EVERY", "SOME", "ANY",
+            "INTO", "OVER", "UNDER", "AFTER", "BEFORE", "WHICH", "WILL", "WOULD", "COULD", "SHOULD",
+            "ALSO", "MORE", "MOST", "LESS", "ONLY", "VERY", "JUST", "ABOUT", "EVEN", "MADE", "MAKE"
+        }
+
         if schema_preset == "technical_components":
             patterns = [
-                (r'\b(ATmega\w+|ESP32\w*|STM32\w*|PIC\w*|MPU\d+|LM\d+|NE555|MAX\d+|RP2040|nRF\d+|BME\d+|ADS\d+)\b', "microcontroller_ic"),
-                (r'\b(\d+(?:\.\d+)?\s*(?:kΩ|MΩ|Ω|pF|nF|µF|uF|mF|V|mA|A|MHz|GHz|kHz))\b', "component_spec")
+                (r'\b(ATmega\w+|ESP32\w*|STM32\w*|PIC\w*|MPU\d+|LM\d+|NE555|MAX\d+|RP2040|nRF\d+|BME\d+|ADS\d+|AD\d+)\b', "microcontroller_ic", True),
+                (r'\b(\d+(?:\.\d+)?\s*(?:kΩ|MΩ|Ω|pF|nF|µF|uF|mF|V|mA|A|MHz|GHz|kHz))\b', "component_spec", True),
+                (r'\b([A-Z]{2,}[0-9]*)\b', "technical_term", False)
             ]
         elif schema_preset in ("engineering_exercise_sheet", "academic_course_materials"):
             patterns = [
-                (r'\b(Task\s*\d+:[^\(\n]+|\bProblem\s*\d+:?[^\(\n]+)', "task_header"),
-                (r'\b(\d+\s*points?)\b', "points_allocation"),
-                (r'\b([A-Z][a-zA-Z0-9_,\s]{0,10}\s*=\s*[\-0-9\.\s]+(?:[a-zA-ZΩµμ%]+|dBm|dB|Hz|kHz|MHz|GHz|mW|W|mV|V|pW|nW|Ω))\b', "engineering_param"),
-                (r'\b(GNURadio|Signal Source|LTI-Systems|Signal Theory|Signal Flow Graph|LNA|SNR|dBm|coaxial line)\b', "topic_concept")
+                (r'\b(Task\s*\d+:[^\(\n]+|\bProblem\s*\d+:?[^\(\n]+)', "task_header", False),
+                (r'\b(\d+\s*points?)\b', "points_allocation", True),
+                (r'\b([A-Z][a-zA-Z0-9_,\s]{0,10}\s*=\s*[\-0-9\.\s]+(?:[a-zA-ZΩµμ%]+|dBm|dB|Hz|kHz|MHz|GHz|mW|W|mV|V|pW|nW|Ω))\b', "engineering_param", True),
+                (r'\b(GNURadio|Signal Source|LTI-Systems|Signal Theory|Signal Flow Graph|LNA|SNR|dBm|coaxial line)\b', "topic_concept", True)
             ]
         else:
             patterns = [
-                (r'\b(\d+(?:\.\d+)?\s*(?:V|VAC|VDC|mA|A|MHz|kHz|GHz|W|mW|dBm|Ω|kΩ))\b', "spec_value"),
-                (r'\b([A-Z][a-zA-Z0-9_\-]{2,})\b', "technical_term")
+                (r'\b(\d+(?:\.\d+)?\s*(?:kΩ|MΩ|Ω|pF|nF|µF|uF|mF|V|VAC|VDC|mA|A|MHz|GHz|kHz|Hz|W|mW|kW|dBm|dB))\b', "spec_value", True),
+                (r'\b(ATmega\w+|ESP32\w*|STM32\w*|PIC\w*|MPU\d+|LM\d+|NE555|MAX\d+|RP2040|nRF\d+|BME\d+|ADS\d+|AD\d+)\b', "component_ic", True),
+                (r'\b([A-Z]{2,}[0-9]*|[A-Z][0-9]+[A-Z0-9]*)\b', "technical_term", False)
             ]
 
-        for pat, ent_type in patterns:
-            for match in re.finditer(pat, text, re.IGNORECASE):
-                val = match.group(0)
+        seen_spans = set()
+        for pat, ent_type, is_case_insensitive in patterns:
+            flags = re.IGNORECASE if is_case_insensitive else 0
+            for match in re.finditer(pat, text, flags):
+                val = match.group(0).strip()
+                if not is_case_insensitive and val.upper() in stop_words:
+                    continue
                 start, end = match.span()
+                if (start, end) in seen_spans:
+                    continue
+                seen_spans.add((start, end))
+
                 ent = {
                     "text_span": val,
                     "start_char": start,

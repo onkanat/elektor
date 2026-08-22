@@ -20,7 +20,7 @@ Originally built for the Elektor Magazine Archive (1974–2025), the pipeline ha
 | **FAZ 8** | **Chat Arenası Tam Markdown & LaTeX Matematik Formül Desteği + İnsan Onaylı RLHF/DPO Puanlama Katmanı**: Chat Arenası (`SectionModelChat.tsx`) ve Veri Seti İnceleyicide (`SectionDatasetViewer.tsx`) KaTeX ile karmaşık LaTeX formülleri, matrisler ve Markdown tablolarının canlı rendering entegrasyonu; ham metin hata analizi için KaTeX On/Off (Aç/Kapa) anahtarı; insan onaylı veri seti puanlama (👍 Beğendim / 👎 Beğenmedim) ve tahribatsız silme (🗑️ Veri Setinden Sil / Excluded) API katmanı. | ✅ **Tamamlandı** |
 | **FAZ 9** | **OpenAI-Uyumlu API Standardına Geçiş & Sunucu Performans / Hata Ayıklama Oturumu**: Ham Ollama istemcisinden evrensel `OpenAI` (`v1/chat/completions`) SDK standardına geçiş; vLLM, Ollama v1, SGLang ve Cloud API tak-çalıştır desteği; sunucu soket/zaman aşımı iyileştirmeleri, bellek sızıntısı ve kod refactoring oturumu. Ön uç terminal panelinde akıllı kaydırma kilidi (auto-scroll-lock) ile canlı log akışında sayfa yenilense dahi geçmiş okuma kolaylığı sağlandı. | ✅ **Tamamlandı** |
 | **FAZ 10** | **Multimodal Tarama & Çizim / Grafik Anlamlandırma Motoru (DeepSeek-OCR)**: Taralı PDF'lerdeki teknik çizimleri, devre şemalarını, grafik şemaları ve görsel tabloları anlamlandırmak için `deepseek-ocr:3b-bf16` vizyon modeli entegrasyonu, akıllı yerleşim/kutu filtreleme (smart bounding box filtering) ve otomatik VRAM offload mekanizması. 2x 16GB GPU üzerinde Paralel Sharding (Port 11434 & 11435) ile SQLite WAL modunda eşzamanlı çalışma desteği. | ✅ **Tamamlandı** |
-| **FAZ 11** | **Otomatik Multimodal Görsel İnce-Ayar Veri Seti Motoru (Visual Instruction Tuning / LLaVA Format)**: PDF'lerden kırpılan teknik çizim, şema ve grafiklerin (`downloads/extracted_images/`) `deepseek-ocr:3b-bf16` ile otomatik etiketlenerek LLaVA/Qwen-VL uyumlu bağımsız **Görsel Veri Seti** (`multimodal_visual_dataset.jsonl`) olarak paketlenmesi. | 💡 **Gelecek Vizyonu (Planlanan)** |
+| **FAZ 11** | **Otomatik Multimodal Görsel İnce-Ayar Veri Seti Motoru (Visual Instruction Tuning / LLaVA Format)**: PDF'lerden kırpılan teknik çizim, şema ve grafiklerin (`downloads/extracted_images/`) VLM (`deepseek-ocr:3b-bf16`, `qwen3.5:4b`) ile otomatik etiketlenerek LLaVA/Qwen-VL uyumlu bağımsız **Görsel Veri Seti** (`multimodal_visual_dataset.jsonl`), WebP optimizasyonu ve `multimodal_catalog.md` olarak paketlenmesi. | ✅ **Tamamlandı** |
 | **FAZ 12** | **Google LangExtract Entegrasyonu & Karakter Bazlı Kaynak Bağlama (Source Grounding)**: Google'ın `langextract` kütüphanesinin **Gemini API** (Google GenAI), **OpenAI** ve **Ollama** sağlayıcıları ile entegrasyonu; hassas karakter offset aralıkları (`start_char`, `end_char`), hazır mühendislik ve ders kitabı şemaları (`engineering_exercise_sheet`), etkileşimli HTML görselleştirme raporları ve `langextract_grounded_dataset.jsonl` ihracı. | ✅ **Tamamlandı** |
 | **FAZ 13** | **Kiwix OpenZIM Kataloğu & Ansiklopedi Veri Hattı (`kiwix`)**: OpenZIM (`.zim`) formatındaki Wikipedia (Türkçe/İngilizce), StackOverflow ve akademik ansiklopedi arşivlerini `libzim` ile doğrudan okuyup SQLite `articles` tablosuna ve eğitime hazır JSONL veri setlerine dönüştüren yüksek hızlı veri alım hattı. | ✅ **Tamamlandı** |
 | **FAZ 14** | **Gemini API Sağlamlaştırma & Token Bütçe Yöneticisi**: `gemini-3.6-flash`, `gemini-3.5-flash` desteği, `httpx.Limits` bağlantı havuzlama, jitter içeren üstel geri çekilme ve SQLite tabanlı `TokenBudgetManager` ile Google Developer Program kredi denetimi. | ✅ **Tamamlandı** |
@@ -29,6 +29,7 @@ Originally built for the Elektor Magazine Archive (1974–2025), the pipeline ha
 | **FAZ 17** | **DeepSeek-OCR Multimodal Markdown Kataloğu**: Şema ve devre kırpmalarını görsel etiketleri (`Figure: images/crop.webp`) ve teknik dökümleriyle ihraç eden `multimodal_catalog.md` raporu. | ✅ **Tamamlandı** |
 | **FAZ 18** | **Managed Agents Environment Hooks & Scheduled Triggers**: `.agents/hooks.json` altında Pre-tool Security Gate (`rm -rf /` ve bütçe engeli), Post-tool Dataset Linter (Python AST, LaTeX kontrolü) ve otonom `run.py trigger` zamanlayıcısı. | ✅ **Tamamlandı** |
 | **FAZ 19** | **Hugging Face Hub & Google Vertex AI Gemini Tuning**: Gelişmiş dataset kartları, Unsloth/Axolotl kitleri ve Google Vertex AI Supervised Fine-Tuning reçetesi (`vertex_ai_tuning.json`). | ✅ **Tamamlandı** |
+| **FAZ 20** | **Bulut Şablonları & Çift Dilli Veri İzolasyonu (Ollama Cloud, Gemini & Heuristic Fallback)**: Üretime hazır `templates/ollama_cloud.json` (`minimax-m3`, `gpt-oss:120b`) ve `templates/gemini.json` (`gemini-3.6-flash`) şablonları; dinamik ortam değişkeni `${VAR_NAME}` çözümleme; İngilizce ve Türkçe JSONL veri setlerinin mutlak izolasyonu; `tools/` altında 3 yeni tanı aracı (`test_gemini_config.py`, `test_ollama_cloud.py`, `test_langextract.py`) ve LangExtract çoklu sağlayıcı sezgisel kurtarma motoru. | ✅ **Tamamlandı** |
 
 ---
 
@@ -80,6 +81,8 @@ Generates 4 distinct, production-grade synthetic coding dataset split categories
 ```
 elektor/
   ├── config.json               # Active project configuration settings
+  ├── templates/                # Production cloud templates (ollama_cloud.json, gemini.json, USER_GUIDE.md)
+  ├── tools/                    # Diagnostic & verification test suite (test_ollama_cloud.py, test_gemini_config.py, test_langextract.py)
   ├── projects_index.json       # Project registry and active project tracker
   ├── projects_*.json           # Individual project configuration files
   ├── run.py                    # Unified Command Line Interface (CLI)
@@ -98,11 +101,11 @@ elektor/
   │    ├── extractor.py         # PDF text extraction & SQLite metadata indexing
   │    ├── code_extractor.py    # Rendergit repo flattener & AST code parser
   │    ├── kiwix_extractor.py   # Kiwix OpenZIM (.zim) catalog archive extractor
-  │    ├── langextract_engine.py# Google LangExtract engine with dynamic few-shot generator & presets
-  │    ├── analyzer.py          # LLM enrichment & grounded DPO pair synthesizer
+  │    ├── langextract_engine.py# Google LangExtract engine with dynamic few-shot generator, multi-provider & heuristic fallback
+  │    ├── analyzer.py          # LLM enrichment & grounded DPO pair synthesizer (isolated EN & TR)
   │    ├── visual_dataset_builder.py # Multimodal Visual dataset & Markdown catalog builder
   │    ├── vector_store.py      # Word-boundary chunking & Qdrant DB indexer
-  │    ├── dataset_builder.py   # JSONL & Parquet training dataset exporter
+  │    ├── dataset_builder.py   # JSONL & Parquet training dataset exporter (isolated EN & TR)
   │    ├── hf_deployer.py       # Hugging Face Hub automated deployment
   │    ├── cloud_gpu_offloader.py# Cloud GPU (Unsloth/Axolotl/Vertex AI) offloader
   │    ├── self_test.py         # 5-Stage autonomous system health diagnostic module
@@ -110,7 +113,7 @@ elektor/
   ├── database/                 # Dedicated SQLite database directory (*.db)
   ├── exports/                  # Project-isolated dataset export directory
   ├── frontend/                 # React + Vite Web UI with Hata Ayıklama Konsolu & LangExtract panel
-  ├── tests/                    # Pytest test suite (43 test cases)
+  ├── tests/                    # Pytest test suite (51 test cases)
   └── README.md
 ```
 
@@ -121,25 +124,64 @@ elektor/
 ### System Dependencies
 - **Python 3.11+**
 - **Tesseract OCR CLI**: Installed and available in PATH (e.g. `/opt/homebrew/bin/tesseract` on macOS).
-- **Ollama Local LLM Server**: Installed and running locally (`http://127.0.0.1:11434`). Pull required models:
+- **Ollama Local / Cloud**: Local server (`http://127.0.0.1:11434`) or Ollama Cloud (`https://ollama.com/v1`).
+- **Google Gemini API**: Free Tier Developer API key for `gemini-3.6-flash`.
+
+---
+
+## 🚀 Running Diagnostic Tools & Pipeline
+
+### 1. Cloud & Diagnostic Verification Tools (`tools/`)
+- **Google Gemini 4-Stage Test** (Connectivity, JSON Schema, Translation, Multimodal OCR):
   ```bash
-  ollama pull nomic-embed-text:latest
-  ollama pull qwen3.5:4b
-  ollama pull gpt-oss:120b-cloud
+  PYTHONPATH=. uv run python tools/test_gemini_config.py --config templates/gemini.json
+  ```
+- **Ollama Cloud Diagnostic & Model Probe**:
+  ```bash
+  # Model probing:
+  PYTHONPATH=. uv run python tools/test_ollama_cloud.py --probe-models
+
+  # Run test with template:
+  PYTHONPATH=. uv run python tools/test_ollama_cloud.py --config templates/ollama_cloud.json
+  ```
+- **LangExtract Multi-Provider Grounding & Fallback Test**:
+  ```bash
+  PYTHONPATH=. uv run python tools/test_langextract.py --provider gemini
+  PYTHONPATH=. uv run python tools/test_langextract.py --provider ollama
+  PYTHONPATH=. uv run python tools/test_langextract.py --provider fallback
   ```
 
-### Python & Frontend Setup
-1. **Python Environment**:
-   ```bash
-   pip install pypdf pypdfium2 ollama openai qdrant-client pandas pytest fastapi uvicorn libzim bs4 html2text
-   ```
-2. **Frontend Web UI Build**:
-   ```bash
-   cd frontend
-   npm install
-   npm run build
-   cd ..
-   ```
+### 2. Web UI Dashboard (FastAPI + React)
+Launch the unified web dashboard:
+```bash
+python run.py api
+# Or directly via uvicorn:
+python -m uvicorn api_server:app --reload --port 3456
+```
+Open `http://localhost:3456` in your browser.
+
+### 3. Pipeline Execution with Templates
+```bash
+# Run with Google Gemini:
+PYTHONPATH=. uv run python run.py --config templates/gemini.json
+
+# Run with Ollama Cloud:
+PYTHONPATH=. uv run python run.py --config templates/ollama_cloud.json
+```
+
+---
+
+## 🔬 Unit Tests & Verification
+Run the unit test suite:
+```bash
+PYTHONPATH=. uv run pytest tests/
+```
+
+### 4. Kiwix OpenZIM Catalog Extractor (`kiwix`)
+Extract ZIM archives directly into SQLite database:
+```bash
+python run.py kiwix --zim downloads/wikipedia_tr_all.zim --limit 100
+```
 
 ---
 
@@ -175,43 +217,9 @@ elektor/
 
 ---
 
-## 📖 Usage & Execution Guide (Kullanım Rehberi)
-
-### 1. Web UI Dashboard (FastAPI + React)
-Launch the unified web dashboard:
-```bash
-python run.py api
-# Or directly via uvicorn:
-python -m uvicorn api_server:app --reload --port 3456
-```
-Open `http://localhost:3456` in your browser.
-
-### 2. Autonomous System Self-Test (`self_test`)
-Diagnose system health across SQLite DB, Qdrant vector store, Ollama server, DeepSeek-OCR VLM, and Pytest suite:
-```bash
-python run.py self_test
-```
-
-### 3. Kiwix OpenZIM Catalog Extractor (`kiwix`)
-Extract ZIM archives directly into SQLite database:
-```bash
-python run.py kiwix --zim downloads/wikipedia_tr_all.zim --limit 100
-```
-
-### 4. Command Line Interface (CLI)
-- **Full Pipeline Run**:
-  ```bash
-  python run.py pipeline --limit 10
-  ```
-- **Google LangExtract Extraction**:
-  ```bash
-  python run.py langextract --provider ollama --preset engineering_exercise_sheet --limit 10 --visualize
-  ```
-
----
-
 ## 🔬 Unit Tests & Verification
-Run unit tests to verify AST code parsing, repository flattening, Kiwix ZIM extraction, DPO verification, and project merger logic:
+Run the complete unit test suite across all modules (23 passing unit tests):
 ```bash
-PYTHONPATH=. python -m pytest tests/
+PYTHONPATH=. uv run pytest tests/
 ```
+

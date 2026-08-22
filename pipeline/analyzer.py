@@ -22,6 +22,7 @@ class ArchiveAnalyzer:
         self.qa_count = self.config.get("sft_qa_count", self.config.get("qa_count_per_article", 10))
         self.llm_persona = self.config.get("llm_persona", "You are an expert embedded systems engineer, technical writer, and AI trainer.")
         self.llm_subject = self.config.get("llm_subject", "analog and digital circuit design, microcontrollers, embedded systems, RF communication, power electronics, and test equipment.")
+        self.generation_language = self.config.get("generation_language", "bilingual").lower()
         self.direct_tr_generation = self.config.get("direct_tr_generation", True)
         self.enable_dpo_verification = self.config.get("enable_dpo_verification", True)
         self.generate_multi_turn_chat = self.config.get("generate_multi_turn_chat", True)
@@ -109,6 +110,7 @@ class ArchiveAnalyzer:
                 dpo_pairs TEXT,
                 tr_sft_qa TEXT,
                 tr_dpo_pairs TEXT,
+                multi_turn_chat TEXT,
                 processed_at TEXT,
                 FOREIGN KEY (article_id) REFERENCES articles(id)
             )
@@ -122,6 +124,10 @@ class ArchiveAnalyzer:
             cursor.execute("ALTER TABLE enrichments ADD COLUMN tr_sft_qa TEXT")
         if "tr_dpo_pairs" not in existing_cols:
             cursor.execute("ALTER TABLE enrichments ADD COLUMN tr_dpo_pairs TEXT")
+        if "multi_turn_chat" not in existing_cols:
+            cursor.execute("ALTER TABLE enrichments ADD COLUMN multi_turn_chat TEXT")
+        if "tr_multi_turn_chat" not in existing_cols:
+            cursor.execute("ALTER TABLE enrichments ADD COLUMN tr_multi_turn_chat TEXT")
         if "human_rating" not in existing_cols:
             cursor.execute("ALTER TABLE enrichments ADD COLUMN human_rating INTEGER DEFAULT 0")
         if "is_excluded" not in existing_cols:
@@ -172,7 +178,27 @@ class ArchiveAnalyzer:
                 
             response = client.chat.completions.create(**chat_kwargs)
             content = response.choices[0].message.content or ""
-            return json.loads(content)
+            
+            # Clean think tags and markdown code blocks
+            clean_content = content.strip()
+            if "<think>" in clean_content and "</think>" in clean_content:
+                clean_content = clean_content.split("</think>", 1)[1].strip()
+            if clean_content.startswith("```json"):
+                clean_content = clean_content[7:]
+            elif clean_content.startswith("```"):
+                clean_content = clean_content[3:]
+            if clean_content.endswith("```"):
+                clean_content = clean_content[:-3]
+            clean_content = clean_content.strip()
+
+            try:
+                return json.loads(clean_content)
+            except Exception:
+                import re
+                match = re.search(r'(\{.*\})', clean_content, re.DOTALL)
+                if match:
+                    return json.loads(match.group(1))
+                raise
         except Exception as e:
             print(f"  LLM JSON call error (Model: {model}): {e}")
             return None
@@ -189,10 +215,20 @@ class ArchiveAnalyzer:
             "Analyze the document text and output a single JSON object. Follow the requested structure strictly."
         )
         
+        multi_turn_schema = (
+            ",\n"
+            "  \"multi_turn_chat\": [\n"
+            "    {\"role\": \"user\", \"content\": \"User technical question/problem in English\"},\n"
+            "    {\"role\": \"assistant\", \"content\": \"Assistant technical guidance/troubleshooting in English\"},\n"
+            "    {\"role\": \"user\", \"content\": \"User detailed follow-up response in English\"},\n"
+            "    {\"role\": \"assistant\", \"content\": \"Assistant solution/explanation in English\"}\n"
+            "  ]"
+        ) if self.generate_multi_turn_chat else ""
+
         user_prompt = (
             f"Article Title: {title}\n"
             f"Article Text:\n{truncated_text}\n\n"
-            f"Generate a JSON object containing EXACTLY {self.qa_count} advanced Q&A pairs and 1 DPO pair with the following key structure:\n"
+            f"Generate a JSON object containing EXACTLY {self.qa_count} advanced Q&A pairs, 1 DPO pair{' and 1 multi-turn dialog' if self.generate_multi_turn_chat else ''} with the following key structure:\n"
             "{\n"
             "  \"summary\": \"English summary of the document/article (2-4 detailed sentences)\",\n"
             "  \"topics\": [\"Topic 1\", \"Topic 2\", \"Topic 3\"],\n"
@@ -204,7 +240,7 @@ class ArchiveAnalyzer:
             "    \"question\": \"Detailed question in English\",\n"
             "    \"chosen\": \"Correct, detailed explanation/solution in English\",\n"
             "    \"rejected\": \"Misleading response containing a plausible misconception, incorrect factual claim, or flawed reasoning in English\"\n"
-            "  }\n"
+            f"  }}{multi_turn_schema}\n"
             "}\n\n"
             "Guidelines:\n"
             f"1. Generate EXACTLY {self.qa_count} distinct Q&A items in 'sft_qa'.\n"
@@ -217,17 +253,36 @@ class ArchiveAnalyzer:
         result = self.call_ollama_json(system_prompt, user_prompt, model=self.model_name, num_predict=self.analyzer_max_tokens)
         
         if not result:
-            raise RuntimeError(f"Ollama model '{self.model_name}' failed to generate analysis for article {article_id}.")
+            result = {
+                "summary": "Summary unavailable.",
+                "topics": [],
+                "sft_qa": [],
+                "dpo_pair": {"question": "", "chosen": "", "rejected": ""},
+                "multi_turn_chat": []
+            }
             
         sft_qa = result.get("sft_qa", [])
         dpo_pair = result.get("dpo_pair", {})
         dpo_pairs_list = [dpo_pair] if dpo_pair and dpo_pair.get("question") else []
         
+        if self.enable_dpo_verification and dpo_pairs_list:
+            verified_dpo = []
+            for dp in dpo_pairs_list:
+                if self.verify_dpo_pair(dp.get("question", ""), dp.get("chosen", ""), dp.get("rejected", ""), truncated_text):
+                    dp["quality_status"] = "validated"
+                    verified_dpo.append(dp)
+                else:
+                    print(f"  English DPO Pair failed quality verification for [{title}]. Marking for review.")
+                    dp["quality_status"] = "flagged"
+                    verified_dpo.append(dp)
+            dpo_pairs_list = verified_dpo
+
         return {
             "summary": result.get("summary", ""),
-            "topics": json.dumps(result.get("topics", [])),
-            "sft_qa": json.dumps(sft_qa),
-            "dpo_pairs": json.dumps(dpo_pairs_list)
+            "topics": json.dumps(result.get("topics", []), ensure_ascii=False),
+            "sft_qa": json.dumps(sft_qa, ensure_ascii=False),
+            "dpo_pairs": json.dumps(dpo_pairs_list, ensure_ascii=False),
+            "multi_turn_chat": json.dumps(result.get("multi_turn_chat", []), ensure_ascii=False)
         }
 
     def verify_dpo_pair(self, question, chosen, rejected, source_text):
@@ -315,6 +370,7 @@ class ArchiveAnalyzer:
             "topics": json.dumps(result.get("topics", []), ensure_ascii=False),
             "tr_sft_qa": json.dumps(sft_qa, ensure_ascii=False),
             "tr_dpo_pairs": json.dumps(dpo_pairs_list, ensure_ascii=False),
+            "tr_multi_turn_chat": json.dumps(result.get("multi_turn_chat", []), ensure_ascii=False),
             "multi_turn_chat": json.dumps(result.get("multi_turn_chat", []), ensure_ascii=False)
         }
 
@@ -648,7 +704,7 @@ class ArchiveAnalyzer:
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             unit_id, project_id, instruction, code, output_expl,
-                            tr_inst, output_expl if self.direct_tr_generation else "", category, datetime.now().timestamp()
+                            tr_inst, "", category, datetime.now().timestamp()
                         ))
                         self.conn.commit()
                         count1 += 1
@@ -744,136 +800,181 @@ class ArchiveAnalyzer:
             
         placeholders = ",".join(["?"] * len(active_ids))
         
-        # --- PASS 1: Technical Analysis (Direct Turkish vs English) ---
-        if enrich_pass not in ["all", "english"]:
-            pass1_rows = []
-        else:
-            if self.direct_tr_generation:
-                where_cond = "(e.id IS NULL OR e.tr_sft_qa IS NULL OR e.tr_sft_qa = '')"
-            else:
-                where_cond = "(e.id IS NULL OR e.sft_qa IS NULL OR e.sft_qa = '' OR e.sft_qa = '[]' OR e.summary = 'Summary unavailable.')"
-
+        # --- PASS 1: Technical Analysis (English Pass) ---
+        should_run_english = (
+            self.generation_language in ["bilingual", "en"] or 
+            (self.generation_language == "tr" and not self.direct_tr_generation)
+        )
+        
+        if should_run_english and enrich_pass in ["all", "english"]:
             cursor.execute(f"""
                 SELECT a.id, a.title, a.extracted_text 
                 FROM articles a
                 LEFT JOIN enrichments e ON a.id = e.article_id
-                WHERE {where_cond} AND a.extracted_text IS NOT NULL AND a.extracted_text != ''
+                WHERE (e.id IS NULL OR e.sft_qa IS NULL OR e.sft_qa = '' OR e.sft_qa = '[]' OR e.summary = 'Summary unavailable.' OR e.summary IS NULL)
+                AND a.extracted_text IS NOT NULL AND a.extracted_text != ''
                 AND a.id IN ({placeholders})
             """, active_ids)
             pass1_rows = cursor.fetchall()
-        
-        if pass1_rows:
-            mode_str = "Direct Turkish" if self.direct_tr_generation else "English"
-            print(f"Pass 1: Found {len(pass1_rows)} articles awaiting {mode_str} enrichment ({self.qa_count} Q&As each) in range [{start}:{end if end is not None else len(all_ids)}].")
-            count1 = 0
-            for row in pass1_rows:
-                article_id, title, text = row
-                try:
-                    processed_at = datetime.now().isoformat()
-                    if self.direct_tr_generation:
-                        tr_data = self.analyze_article_direct_turkish(article_id, title, text)
-                        cursor.execute("""
-                            INSERT OR REPLACE INTO enrichments (
-                                article_id, summary, topics, turkish_title, turkish_summary, sft_qa, dpo_pairs, tr_sft_qa, tr_dpo_pairs, processed_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            article_id,
-                            tr_data["turkish_summary"],
-                            tr_data["topics"],
-                            tr_data["turkish_title"],
-                            tr_data["turkish_summary"],
-                            tr_data["tr_sft_qa"],
-                            tr_data["tr_dpo_pairs"],
-                            tr_data["tr_sft_qa"],
-                            tr_data["tr_dpo_pairs"],
-                            processed_at
-                        ))
-                    else:
+            
+            if pass1_rows:
+                print(f"Pass 1 (English): Found {len(pass1_rows)} articles awaiting English enrichment ({self.qa_count} Q&As each) in range [{start}:{end if end is not None else len(all_ids)}].")
+                count1 = 0
+                for row in pass1_rows:
+                    article_id, title, text = row
+                    try:
+                        processed_at = datetime.now().isoformat()
                         eng_data = self.analyze_article_english(article_id, title, text)
                         cursor.execute("""
-                            INSERT OR REPLACE INTO enrichments (
-                                article_id, summary, topics, turkish_title, turkish_summary, sft_qa, dpo_pairs, tr_sft_qa, tr_dpo_pairs, processed_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO enrichments (
+                                article_id, summary, topics, turkish_title, turkish_summary, sft_qa, dpo_pairs, multi_turn_chat, processed_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ON CONFLICT(article_id) DO UPDATE SET
+                                summary=excluded.summary,
+                                topics=excluded.topics,
+                                sft_qa=excluded.sft_qa,
+                                dpo_pairs=excluded.dpo_pairs,
+                                multi_turn_chat=excluded.multi_turn_chat,
+                                processed_at=excluded.processed_at
                         """, (
                             article_id,
                             eng_data["summary"],
                             eng_data["topics"],
-                            title,       # Placeholder title, will be translated in Pass 2
-                            "",          # Placeholder summary, will be translated in Pass 2
+                            title,       # Default turkish_title fallback
+                            "",          # Placeholder turkish_summary
                             eng_data["sft_qa"],
                             eng_data["dpo_pairs"],
-                            "",          # Placeholder tr_sft_qa, translated in Pass 2
-                            "",          # Placeholder tr_dpo_pairs, translated in Pass 2
+                            eng_data.get("multi_turn_chat", "[]"),
                             processed_at
                         ))
-                    self.conn.commit()
-                    count1 += 1
-                except Exception as e:
-                    print(f"Error in Pass 1 for article {article_id}: {e}")
-                    self.conn.rollback()
-            
-            print(f"Pass 1 complete. Enriched {count1} articles ({mode_str} Mode) with {self.qa_count} Q&A pairs each.")
-            
-            # Unload main model from VRAM/RAM
-            print(f"Unloading main analyzer model ('{self.model_name}') from server memory...")
-            from pipeline.llm_client import unload_ollama_model
-            unload_ollama_model(self.config, self.model_name)
-        else:
-            print("Pass 1: No articles require enrichment in the specified range.")
-            
-        # --- PASS 2: Turkish Translation (Only executed if direct_tr_generation is False) ---
-        if not self.direct_tr_generation and enrich_pass in ["all", "turkish"]:
-            cursor.execute(f"""
-                SELECT e.article_id, a.title, e.summary, e.sft_qa, e.dpo_pairs, e.turkish_summary
-                FROM enrichments e
-                JOIN articles a ON e.article_id = a.id
-                WHERE (e.tr_sft_qa IS NULL OR e.tr_sft_qa = '' OR e.turkish_summary IS NULL OR e.turkish_summary = '')
-                AND e.article_id IN ({placeholders})
-            """, active_ids)
-            pass2_rows = cursor.fetchall()
-            
-            if pass2_rows:
-                print(f"\nPass 2: Found {len(pass2_rows)} articles awaiting Turkish translation with TranslateGemma in range [{start}:{end if end is not None else len(all_ids)}].")
-                count2 = 0
-                for row in pass2_rows:
-                    article_id, title, summary, sft_qa_raw, dpo_pairs_raw, existing_tr_summary = row
-                    if not summary or summary == "Summary unavailable.":
-                        continue
-                        
-                    try:
-                        tr_res = self.translate_enrichments_to_turkish(title, summary, sft_qa_raw, dpo_pairs_raw)
-                        
-                        target_tr_summary = existing_tr_summary if existing_tr_summary else tr_res["turkish_summary"]
-                        
-                        cursor.execute("""
-                            UPDATE enrichments
-                            SET turkish_title = ?, turkish_summary = ?, tr_sft_qa = ?, tr_dpo_pairs = ?
-                            WHERE article_id = ?
-                        """, (
-                            tr_res["turkish_title"],
-                            target_tr_summary,
-                            tr_res["tr_sft_qa"],
-                            tr_res["tr_dpo_pairs"],
-                            article_id
-                        ))
                         self.conn.commit()
-                        count2 += 1
+                        count1 += 1
                     except Exception as e:
-                        err_msg = f"Error in Pass 2 for article {article_id}: {e}"
-                        print(f"  {err_msg}")
-                        self.logger.error(err_msg, module="analyzer")
+                        print(f"Error in English Pass for article {article_id}: {e}")
                         self.conn.rollback()
-                        
-                print(f"Pass 2 complete. Translated {count2} articles into Turkish using TranslateGemma.")
                 
-                # Unload TranslateGemma model from VRAM/RAM
-                print(f"Unloading translation model ('{self.translator_model}') from server memory...")
+                print(f"Pass 1 (English) complete. Enriched {count1} articles with {self.qa_count} English Q&A pairs each.")
+                
+                # Unload main model from VRAM/RAM
+                print(f"Unloading main analyzer model ('{self.model_name}') from server memory...")
                 from pipeline.llm_client import unload_ollama_model
-                unload_ollama_model(self.config, self.translator_model)
+                unload_ollama_model(self.config, self.model_name)
             else:
-                print("Pass 2: No articles require translation.")
+                print("Pass 1 (English): No articles require English enrichment in the specified range.")
+
+        # --- PASS 2: Turkish Enrichment (Direct Turkish Generation vs Translation) ---
+        should_run_turkish = self.generation_language in ["bilingual", "tr"]
+
+        if should_run_turkish:
+            if self.direct_tr_generation:
+                # Direct Turkish Generation Mode
+                if enrich_pass in ["all", "turkish"]:
+                    cursor.execute(f"""
+                        SELECT a.id, a.title, a.extracted_text 
+                        FROM articles a
+                        LEFT JOIN enrichments e ON a.id = e.article_id
+                        WHERE (e.id IS NULL OR e.tr_sft_qa IS NULL OR e.tr_sft_qa = '' OR e.tr_sft_qa = '[]' OR e.turkish_summary IS NULL OR e.turkish_summary = '' OR e.turkish_summary = 'Özet bulunamadı.')
+                        AND a.extracted_text IS NOT NULL AND a.extracted_text != ''
+                        AND a.id IN ({placeholders})
+                    """, active_ids)
+                    tr_direct_rows = cursor.fetchall()
+
+                    if tr_direct_rows:
+                        print(f"\nPass 2 (Direct Turkish): Found {len(tr_direct_rows)} articles awaiting Direct Turkish enrichment ({self.qa_count} Q&As each) in range [{start}:{end if end is not None else len(all_ids)}].")
+                        count_tr = 0
+                        for row in tr_direct_rows:
+                            article_id, title, text = row
+                            try:
+                                processed_at = datetime.now().isoformat()
+                                tr_data = self.analyze_article_direct_turkish(article_id, title, text)
+                                cursor.execute("""
+                                    INSERT INTO enrichments (
+                                        article_id, turkish_title, turkish_summary, topics, tr_sft_qa, tr_dpo_pairs, tr_multi_turn_chat, processed_at
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                    ON CONFLICT(article_id) DO UPDATE SET
+                                        turkish_title=excluded.turkish_title,
+                                        turkish_summary=excluded.turkish_summary,
+                                        topics=COALESCE(enrichments.topics, excluded.topics),
+                                        tr_sft_qa=excluded.tr_sft_qa,
+                                        tr_dpo_pairs=excluded.tr_dpo_pairs,
+                                        tr_multi_turn_chat=excluded.tr_multi_turn_chat,
+                                        processed_at=excluded.processed_at
+                                """, (
+                                    article_id,
+                                    tr_data["turkish_title"],
+                                    tr_data["turkish_summary"],
+                                    tr_data["topics"],
+                                    tr_data["tr_sft_qa"],
+                                    tr_data["tr_dpo_pairs"],
+                                    tr_data.get("tr_multi_turn_chat", "[]"),
+                                    processed_at
+                                ))
+                                self.conn.commit()
+                                count_tr += 1
+                            except Exception as e:
+                                print(f"Error in Direct Turkish Pass for article {article_id}: {e}")
+                                self.conn.rollback()
+
+                        print(f"Pass 2 (Direct Turkish) complete. Enriched {count_tr} articles directly in Turkish.")
+                        print(f"Unloading main analyzer model ('{self.model_name}') from server memory...")
+                        from pipeline.llm_client import unload_ollama_model
+                        unload_ollama_model(self.config, self.model_name)
+                    else:
+                        print("Pass 2 (Direct Turkish): No articles require Turkish enrichment in the specified range.")
+            else:
+                # 2-Pass Translation Mode (TranslateGemma)
+                if enrich_pass in ["all", "turkish"]:
+                    cursor.execute(f"""
+                        SELECT e.article_id, a.title, e.summary, e.sft_qa, e.dpo_pairs, e.turkish_summary
+                        FROM enrichments e
+                        JOIN articles a ON e.article_id = a.id
+                        WHERE (e.tr_sft_qa IS NULL OR e.tr_sft_qa = '' OR e.turkish_summary IS NULL OR e.turkish_summary = '')
+                        AND e.article_id IN ({placeholders})
+                    """, active_ids)
+                    pass2_rows = cursor.fetchall()
+                    
+                    if pass2_rows:
+                        print(f"\nPass 2 (Translation): Found {len(pass2_rows)} articles awaiting Turkish translation with TranslateGemma in range [{start}:{end if end is not None else len(all_ids)}].")
+                        count2 = 0
+                        for row in pass2_rows:
+                            article_id, title, summary, sft_qa_raw, dpo_pairs_raw, existing_tr_summary = row
+                            if not summary or summary == "Summary unavailable.":
+                                continue
+                                
+                            try:
+                                tr_res = self.translate_enrichments_to_turkish(title, summary, sft_qa_raw, dpo_pairs_raw)
+                                
+                                target_tr_summary = existing_tr_summary if existing_tr_summary else tr_res["turkish_summary"]
+                                
+                                cursor.execute("""
+                                    UPDATE enrichments
+                                    SET turkish_title = ?, turkish_summary = ?, tr_sft_qa = ?, tr_dpo_pairs = ?
+                                    WHERE article_id = ?
+                                """, (
+                                    tr_res["turkish_title"],
+                                    target_tr_summary,
+                                    tr_res["tr_sft_qa"],
+                                    tr_res["tr_dpo_pairs"],
+                                    article_id
+                                ))
+                                self.conn.commit()
+                                count2 += 1
+                            except Exception as e:
+                                err_msg = f"Error in Pass 2 for article {article_id}: {e}"
+                                print(f"  {err_msg}")
+                                self.logger.error(err_msg, module="analyzer")
+                                self.conn.rollback()
+                                
+                        print(f"Pass 2 (Translation) complete. Translated {count2} articles into Turkish using TranslateGemma.")
+                        
+                        # Unload TranslateGemma model from VRAM/RAM
+                        print(f"Unloading translation model ('{self.translator_model}') from server memory...")
+                        from pipeline.llm_client import unload_ollama_model
+                        unload_ollama_model(self.config, self.translator_model)
+                    else:
+                        print("Pass 2 (Translation): No articles require translation.")
         else:
-            print("Pass 2: Skipped (Direct Turkish Generation mode is active).")
+            print("Turkish Pass: Skipped (generation_language is English-only).")
             
         print("All enrichment steps completed successfully.")
 

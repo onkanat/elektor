@@ -1,61 +1,12 @@
 {
-  "active_project_id": "sdr_engineers",
+  "active_project_id": "extract",
   "projects": {
-    "sdr_engineers": {
-      "project_id": "sdr_engineers",
-      "project_name": "Software-Defined Radio for Engineers",
-      "config_file": "config.json",
-      "created_at": 1785614042.054173,
-      "last_accessed": 1786049808.6572149
-    },
-    "türk": {
-      "project_id": "türk",
-      "project_name": "Türk_tarih_seti",
-      "config_file": "projects_türk.json",
-      "created_at": 1785658919.086047,
-      "last_accessed": 1785744674.8134022
-    },
-    "octave": {
-      "project_id": "octave",
-      "project_name": "Octave kod eğitim",
-      "config_file": "projects_octave.json",
-      "created_at": 1785754367.266581,
-      "last_accessed": 1785790159.480861
-    },
-    "rendergit_01": {
-      "project_id": "rendergit_01",
-      "project_name": "RenderGit_Python_veriseti",
-      "config_file": "projects_rendergit_01.json",
-      "created_at": 1785876193.314294,
-      "last_accessed": 1785876193.314294
-    },
-    "rendergit_03": {
-      "project_id": "rendergit_03",
-      "project_name": "RenderGit_Python_veriseti_part3",
-      "config_file": "projects_rendergit_03.json",
-      "created_at": 1785911339.765253,
-      "last_accessed": 1785911339.7652538
-    },
-    "rendergit_02": {
-      "project_id": "rendergit_02",
-      "project_name": "RenderGit_Python_veriseti_part2",
-      "config_file": "projects_rendergit_02.json",
-      "created_at": 1785884857.9988904,
-      "last_accessed": 1785884856.8594983
-    },
-    "rendergit_merged_all": {
-      "project_id": "rendergit_merged_all",
-      "project_name": "RenderGit Consolidated Master Dataset",
-      "config_file": "projects_rendergit_merged_all.json",
-      "created_at": 1785918696.948826,
-      "last_accessed": 1785918696.948826
-    },
-    "rapberry_pi_pico_all": {
-      "project_id": "rapberry_pi_pico_all",
-      "project_name": "Raspberry-Pi-Pico-All",
-      "config_file": "projects_rapberry_pi_pico_all.json",
-      "created_at": 1786049236.37803,
-      "last_accessed": 1786049835.872344
+    "extract": {
+      "project_id": "extract",
+      "project_name": "test_extract",
+      "config_file": "projects_extract.json",
+      "created_at": 1787245364.8434708,
+      "last_accessed": 1787299678.495404
     }
   }
 }

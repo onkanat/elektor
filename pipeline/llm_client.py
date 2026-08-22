@@ -6,18 +6,62 @@ _clients_pool = {}
 _async_clients_pool = {}
 _client_config_hash = None
 
+from pathlib import Path
+
+def _load_dotenv_if_needed():
+    """Loads environment variables from local/home .env and zsh config files if available."""
+    if os.environ.get("OLLAMA_API_KEY") and os.environ.get("GEMINI_API_KEY"):
+        return
+
+    env_paths = [
+        Path(".env"),
+        Path.home() / ".env",
+        Path.home() / ".zshrc",
+        Path.home() / ".zprofile",
+        Path.home() / ".zshenv"
+    ]
+    for p in env_paths:
+        if p.exists():
+            try:
+                with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#"):
+                            if line.startswith("export "):
+                                line = line[7:].strip()
+                            if "=" in line:
+                                k, v = line.split("=", 1)
+                                k = k.strip()
+                                v = v.strip().strip("'\"")
+                                if k in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY", "OLLAMA_API_KEY") and v:
+                                    if not os.environ.get(k):
+                                        os.environ[k] = v
+            except Exception:
+                pass
+
 def _resolve_endpoint_and_key(config: dict):
+    _load_dotenv_if_needed()
     base_url = config.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL") or config.get("ollama_url", "http://localhost:11434")
+    if isinstance(base_url, str) and base_url.startswith("${") and base_url.endswith("}"):
+        env_var = base_url[2:-1]
+        base_url = os.environ.get(env_var, "http://localhost:11434")
+        
     if not base_url.endswith("/v1") and not base_url.endswith("/v1/"):
         base_url = f"{base_url.rstrip('/')}/v1"
     
-    api_key = (
+    raw_api_key = (
         config.get("openai_api_key") 
         or config.get("ollama_api_key") 
         or os.environ.get("OPENAI_API_KEY") 
         or os.environ.get("OLLAMA_API_KEY") 
         or "ollama"
     )
+    if isinstance(raw_api_key, str) and raw_api_key.startswith("${") and raw_api_key.endswith("}"):
+        env_var = raw_api_key[2:-1]
+        api_key = os.environ.get(env_var) or os.environ.get("OLLAMA_API_KEY") or os.environ.get("OPENAI_API_KEY") or "ollama"
+    else:
+        api_key = raw_api_key
+
     timeout = float(config.get("openai_timeout", 600.0))
     return base_url, api_key, timeout
 

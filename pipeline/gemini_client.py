@@ -113,6 +113,39 @@ class TokenBudgetManager:
             self.logger.warning(f"Could not fetch monthly consumption: {e}", module="gemini_client")
             return {"total_tokens": 0, "estimated_cost_tl": 0.0, "budget_percent": 0.0}
 
+def _load_dotenv_if_needed():
+    """Loads environment variables from local/home .env and zsh config files if available."""
+    if os.environ.get("GEMINI_API_KEY"):
+        return
+
+    env_paths = [
+        Path(".env"),
+        Path.home() / ".env",
+        Path.home() / ".zshrc",
+        Path.home() / ".zprofile",
+        Path.home() / ".zshenv"
+    ]
+    for p in env_paths:
+        if p.exists():
+            try:
+                with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#"):
+                            if line.startswith("export "):
+                                line = line[7:].strip()
+                            if "=" in line:
+                                k, v = line.split("=", 1)
+                                k = k.strip()
+                                v = v.strip().strip("'\"")
+                                if k in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY") and v:
+                                    if not os.environ.get(k):
+                                        os.environ[k] = v
+                                        if k == "GOOGLE_API_KEY" and not os.environ.get("GEMINI_API_KEY"):
+                                            os.environ["GEMINI_API_KEY"] = v
+            except Exception:
+                pass
+
 class GeminiClient:
     """
     Production-grade, connection-pooled client for Gemini API.
@@ -125,13 +158,19 @@ class GeminiClient:
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
     def __init__(self, config: Optional[Dict[str, Any]] = None, api_key: Optional[str] = None):
+        _load_dotenv_if_needed()
         self.config = config or {}
         if api_key is not None:
-            self.api_key = api_key
+            self.api_key = str(api_key).strip()
         elif "gemini_api_key" in self.config:
-            self.api_key = self.config.get("gemini_api_key", "")
+            self.api_key = str(self.config.get("gemini_api_key", "")).strip()
         else:
-            self.api_key = os.environ.get("GEMINI_API_KEY", "")
+            self.api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+
+        if self.api_key.startswith("${") and self.api_key.endswith("}"):
+            env_var = self.api_key[2:-1]
+            self.api_key = (os.environ.get(env_var) or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+
         self.default_model = self.config.get("gemini_model", "gemini-3.6-flash")
         self.timeout = float(self.config.get("gemini_timeout", 90.0))
         self.max_retries = int(self.config.get("gemini_max_retries", 4))
@@ -203,10 +242,37 @@ class GeminiClient:
         # Handle Structured JSON Schema
         if response_schema:
             gen_config["responseMimeType"] = "application/json"
+            raw_schema = None
             if isinstance(response_schema, type) and issubclass(response_schema, BaseModel):
-                gen_config["responseSchema"] = response_schema.model_json_schema()
+                raw_schema = response_schema.model_json_schema()
             elif isinstance(response_schema, dict):
-                gen_config["responseSchema"] = response_schema
+                raw_schema = response_schema
+
+            if raw_schema:
+                # Inlining $defs / $ref because Gemini REST API does not support $defs / definitions
+                def inline_schema_refs(schema_dict: dict) -> dict:
+                    if not isinstance(schema_dict, dict):
+                        return schema_dict
+                    defs = schema_dict.get("$defs", {}) or schema_dict.get("definitions", {})
+
+                    def resolve(node):
+                        if isinstance(node, dict):
+                            if "$ref" in node:
+                                ref_path = node["$ref"]
+                                ref_name = ref_path.split("/")[-1]
+                                if ref_name in defs:
+                                    return resolve(defs[ref_name].copy())
+                            return {k: resolve(v) for k, v in node.items() if k not in ("$defs", "definitions")}
+                        elif isinstance(node, list):
+                            return [resolve(elem) for elem in node]
+                        return node
+
+                    cleaned = resolve(schema_dict)
+                    cleaned.pop("$defs", None)
+                    cleaned.pop("definitions", None)
+                    return cleaned
+
+                gen_config["responseSchema"] = inline_schema_refs(raw_schema)
 
         payload["generationConfig"] = gen_config
 
