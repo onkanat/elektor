@@ -75,5 +75,18 @@ class TestScheduledTriggers(unittest.TestCase):
         res = manager.run_trigger_audit_pass(limit=10, mode="strict")
         self.assertEqual(res["status"], "up_to_date")
 
+    @patch("pipeline.judge_engine.JudgeEngine.judge_batch_submit")
+    def test_trigger_batch_mode(self, mock_batch_submit):
+        mock_batch_submit.return_value = {
+            "status": "submitted",
+            "job_id": "batches/trigger_batch_001",
+            "total_requests": 1
+        }
+
+        manager = ScheduledTriggersManager(self.config)
+        res = manager.run_trigger_audit_pass(limit=10, mode="strict", use_batch_api=True)
+        self.assertEqual(res["status"], "batch_submitted")
+        self.assertEqual(res["batch_job"]["job_id"], "batches/trigger_batch_001")
+
 if __name__ == "__main__":
     unittest.main()

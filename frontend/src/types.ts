@@ -7,9 +7,16 @@ export interface PipelineConfig {
   db_path: string;
   qdrant_db_path: string;
   ollama_url: string;
+  openai_timeout?: number;
+  analyzer_max_chars?: number;
+  analyzer_max_tokens?: number;
+
   model_embedding: string;
   model_analyzer: string;
   model_translator: string;
+  model_vision?: string;
+  enable_vision_ocr?: boolean;
+
   llm_persona: string;
   llm_subject: string;
   generation_language: string;
@@ -41,6 +48,11 @@ export interface PipelineConfig {
   kiwix_download_url?: string;
   kiwix_namespaces?: string[];
   kiwix_min_chars?: number;
+  kiwix_extract_mode?: 'auto' | 'stackexchange' | 'wiki';
+  kiwix_min_chosen_score?: number;
+  kiwix_min_vote_diff?: number;
+  kiwix_batch_size?: number;
+  [key: string]: any;
 }
 
 export interface HealthInfo {

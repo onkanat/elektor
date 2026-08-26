@@ -423,6 +423,11 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
                       <div style={{ color: '#38bdf8', fontWeight: 600, marginBottom: '0.3rem' }}>
                         Instruction (Soru): {item.instruction}
                       </div>
+                      {item.input && (
+                        <div style={{ background: 'rgba(56, 189, 248, 0.08)', padding: '0.4rem 0.6rem', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.2)', marginBottom: '0.4rem', fontSize: '0.78rem', color: '#93c5fd' }}>
+                          <strong>Bağlam / Etiketler:</strong> {item.input}
+                        </div>
+                      )}
                       <div style={{ color: '#34d399', whiteSpace: 'pre-wrap' }}>
                         Response (Cevap): {item.output || item.response}
                       </div>
@@ -432,9 +437,38 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
                   {/* If DPO format */}
                   {item.prompt && (
                     <div>
+                      {item.metadata && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.4rem', fontSize: '0.75rem', alignItems: 'center' }}>
+                          {item.metadata.source && (
+                            <span className="badge" style={{ background: 'rgba(148, 163, 184, 0.15)', color: '#cbd5e1', border: '1px solid rgba(148, 163, 184, 0.3)' }}>
+                              📦 {item.metadata.source}
+                            </span>
+                          )}
+                          {item.metadata.chosen_score !== undefined && (
+                            <span className="badge online" style={{ fontSize: '0.72rem' }}>
+                              🏆 Chosen Skor: +{item.metadata.chosen_score} {item.metadata.chosen_is_accepted ? '(Kabul Edildi)' : ''}
+                            </span>
+                          )}
+                          {item.metadata.rejected_score !== undefined && (
+                            <span className="badge warning" style={{ fontSize: '0.72rem' }}>
+                              ⚠️ Rejected Skor: {item.metadata.rejected_score}
+                            </span>
+                          )}
+                          {item.metadata.quality_status && (
+                            <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8' }}>
+                              {item.metadata.quality_status}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <div style={{ color: '#38bdf8', fontWeight: 600, marginBottom: '0.3rem' }}>
                         Prompt: {item.prompt}
                       </div>
+                      {item.input && (
+                        <div style={{ background: 'rgba(56, 189, 248, 0.08)', padding: '0.4rem 0.6rem', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.2)', marginBottom: '0.4rem', fontSize: '0.78rem', color: '#93c5fd' }}>
+                          <strong>Girdi / Detay:</strong> {item.input}
+                        </div>
+                      )}
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.5rem' }}>
                         <div style={{ background: 'rgba(16, 185, 129, 0.1)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
                           <span style={{ color: '#34d399', fontWeight: 600 }}>✓ Chosen (Tercih Edilen):</span>
@@ -542,14 +576,58 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
                     const titleStr = row.title || row.turkish_title || row.filename || `Kayıt #${row.article_id || row.id}`;
                     const subtitle = row.year ? `Yıl: ${row.year}` : (row.article_id ? `Article ID: ${row.article_id}` : (row.file_path ? `Path: ${row.file_path}` : ''));
 
+                    let tagsList: string[] = [];
+                    if (row.tags) {
+                      try {
+                        tagsList = typeof row.tags === 'string' ? JSON.parse(row.tags) : row.tags;
+                      } catch {
+                        tagsList = String(row.tags).split(',').map((s: string) => s.trim()).filter(Boolean);
+                      }
+                    }
+
                     return (
                       <tr key={i} style={{ cursor: 'pointer' }} onClick={() => setSelectedRowModal(row)}>
                         <td style={{ fontWeight: 600, color: 'var(--accent-cyan)' }}>{row.id}</td>
-                        <td style={{ fontWeight: 500, minWidth: '180px' }}>
-                          <div>{titleStr}</div>
-                          {subtitle && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>{subtitle}</div>}
+                        <td style={{ fontWeight: 500, minWidth: '220px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                            <span>{titleStr}</span>
+                            {row.source_type && (
+                              <span className="badge" style={{ fontSize: '0.68rem', background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', padding: '0.05rem 0.35rem' }}>
+                                {row.source_type}
+                              </span>
+                            )}
+                          </div>
+                          
+                          {/* Badges Bar (Tags, Score, Accepted, Vetoed) */}
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.3rem', alignItems: 'center' }}>
+                            {row.vote_score !== undefined && row.vote_score !== null && row.vote_score !== 0 && (
+                              <span style={{ background: row.vote_score > 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)', color: row.vote_score > 0 ? '#34d399' : '#fb7185', padding: '0.08rem 0.35rem', borderRadius: '4px', fontSize: '0.68rem', fontWeight: 600 }}>
+                                ▲ {row.vote_score} oy
+                              </span>
+                            )}
+                            {row.is_accepted === 1 && (
+                              <span style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', padding: '0.08rem 0.35rem', borderRadius: '4px', fontSize: '0.68rem', fontWeight: 600 }}>
+                                ✓ Kabul Edildi
+                              </span>
+                            )}
+                            {row.is_vetoed === 1 && (
+                              <span style={{ background: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24', padding: '0.08rem 0.35rem', borderRadius: '4px', fontSize: '0.68rem' }}>
+                                🚫 Kapatılmış/Veto
+                              </span>
+                            )}
+                            {tagsList.slice(0, 3).map((tag, tIdx) => (
+                              <span key={tIdx} style={{ background: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8', padding: '0.08rem 0.3rem', borderRadius: '4px', fontSize: '0.68rem', border: '1px solid rgba(56, 189, 248, 0.25)' }}>
+                                #{tag}
+                              </span>
+                            ))}
+                            {tagsList.length > 3 && (
+                              <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>+{tagsList.length - 3}</span>
+                            )}
+                          </div>
+
+                          {subtitle && <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>{subtitle}</div>}
                         </td>
-                        <td style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', maxWidth: '500px', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.4 }}>
+                        <td style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', maxWidth: '480px', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.4 }}>
                           {textPreview}
                         </td>
                         <td>
@@ -577,7 +655,7 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
             <div className="modal-backdrop" onClick={() => setSelectedRowModal(null)}>
               <div className="modal-card" style={{ maxWidth: '850px', width: '92%' }} onClick={(e) => e.stopPropagation()}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
-                  <h3 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                     📖 Metin Detayı: {selectedRowModal.title || selectedRowModal.filename || `ID #${selectedRowModal.id || selectedRowModal.article_id}`}
                     {selectedRowModal.is_excluded === 1 && (
                       <span className="badge offline" style={{ fontSize: '0.7rem', textDecoration: 'line-through' }}>🗑️ İhraç Dışı (Silindi)</span>
@@ -602,6 +680,42 @@ export const SectionDatasetViewer: React.FC<SectionDatasetViewerProps> = ({
                     <button className="btn btn-secondary" style={{ padding: '0.2rem 0.6rem' }} onClick={() => setSelectedRowModal(null)}>✕ Kapat</button>
                   </div>
                 </div>
+
+                {/* StackExchange / Kiwix Metadata Banner in Modal */}
+                {(selectedRowModal.tags || selectedRowModal.vote_score || selectedRowModal.is_accepted === 1 || selectedRowModal.is_vetoed === 1 || selectedRowModal.source_type) && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem', padding: '0.5rem 0.75rem', background: 'rgba(15, 23, 42, 0.7)', borderRadius: '6px', border: '1px solid var(--border-color)', alignItems: 'center', fontSize: '0.78rem' }}>
+                    {selectedRowModal.source_type && (
+                      <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.2)', color: '#a5b4fc' }}>
+                        Kaynak: {selectedRowModal.source_type}
+                      </span>
+                    )}
+                    {selectedRowModal.vote_score !== undefined && (
+                      <span className="badge" style={{ background: selectedRowModal.vote_score > 0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(244, 63, 94, 0.2)', color: selectedRowModal.vote_score > 0 ? '#34d399' : '#fb7185' }}>
+                        ▲ Net Skor: {selectedRowModal.vote_score}
+                      </span>
+                    )}
+                    {selectedRowModal.is_accepted === 1 && (
+                      <span className="badge online" style={{ fontSize: '0.72rem' }}>
+                        ✓ Kabul Edilmiş Yanıt İçeriyor
+                      </span>
+                    )}
+                    {selectedRowModal.is_vetoed === 1 && (
+                      <span className="badge warning" style={{ fontSize: '0.72rem' }}>
+                        🚫 Topluluk Vetosu / Kapatılmış Soru
+                      </span>
+                    )}
+                    {selectedRowModal.tags && (
+                      <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>Etiketler:</span>
+                        {(typeof selectedRowModal.tags === 'string' ? (selectedRowModal.tags.startsWith('[') ? JSON.parse(selectedRowModal.tags) : selectedRowModal.tags.split(',')) : selectedRowModal.tags).map((t: string, idx: number) => (
+                          <span key={idx} style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', padding: '0.05rem 0.35rem', borderRadius: '4px', fontSize: '0.7rem', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                            #{t.trim()}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div style={{ maxHeight: '60vh', overflowY: 'auto', background: 'var(--bg-primary)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', fontSize: '0.85rem', lineHeight: 1.6, color: 'var(--text-primary)' }}>
                   <MathMarkdownRenderer

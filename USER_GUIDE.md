@@ -177,12 +177,52 @@ Yüzlerce saatlik GPU emeğini korumak için 2 aşamalı güvenlik akışı suna
     - Test başarıyla geçtiğinde aktifleşir ve tek tıkla veri setini ile otomatik **Dataset Card (`README.md`)** belgesini Hugging Face Hub'a yükler.
 
 ### 6.2 ⚡ Bulut GPU Fine-Tuning Kiti Sekmesi
-- **Base Model Seçimi**: `unsloth/Qwen2.5-Coder-7B-Instruct`, `unsloth/Llama-3.1-8B-Instruct` vb.
+- **Base Model Seçimi**: `unsloth/Qwen3.5-2B` (varsayılan), `unsloth/Qwen2.5-Coder-7B-Instruct`, `unsloth/Llama-3.1-8B-Instruct` vb.
 - **Tek Tıkla Paket Üretimi**:
   - `unsloth_finetune.py`: 5 kat hızlı Unsloth LoRA eğitim betiği.
   - `axolotl_config.yaml`: Çoklu GPU Axolotl konfigürasyonu.
   - `run_cloud_gpu.sh`: RunPod bağımlılık kurulumu ve çalıştırma betiği.
   - Üretilen paket `exports/<project_id>/cloud_payload/` dizininde hazır hâle getirilir.
+
+### 6.3 🪐 Antigravity-IDE & Google Colab + Unsloth Entegrasyon Kılavuzu
+Unsloth'un resmi VS Code kılavuzunda (`https://unsloth.ai/docs/get-started/install/vs-code`) anlatılan uzaktan Colab GPU'su ile fine-tuning iş akışı, **Antigravity-IDE** ile %100 uyumludur.
+
+#### 1. Eklenti Kurulumu
+Antigravity-IDE veya VS Code içinde Eklentiler (Extensions) sekmesini açın (`Cmd+Shift+X` / `Ctrl+Shift+X`):
+- **Google Colab** (Google resmi eklentisi)
+- **Jupyter** (Microsoft resmi eklentisi)
+
+#### 2. Notebook'ların Üretilmesi
+CLI üzerinden tüm veri seti kategorileriniz için Antigravity-IDE uyumlu Colab notebook'larını tek komutla üretin:
+```bash
+# Tüm kategoriler için (SFT, DPO, Chat, LangExtract) notebook üret:
+python run.py colab --project <proje_adi> --type all
+
+# Belirli bir kategori için (örn: DPO veya SFT) üret:
+python run.py colab --project <proje_adi> --type dpo --model unsloth/Qwen3.5-2B
+```
+Üretilen dosyalar `exports/<proje_adi>/cloud_payload/` altında hazır bulunur:
+- `unsloth_colab_sft_<proje>.ipynb`: SFT / Kod ince ayar notebook'u (`SFTTrainer`)
+- `unsloth_colab_dpo_<proje>.ipynb`: DPO / Tercih doğrulaması notebook'u (`DPOTrainer`)
+- `unsloth_colab_chat_<proje>.ipynb`: Çok turlu teknik diyalog notebook'u
+- `unsloth_colab_langextract_<proje>.ipynb`: Karakter çapalı yapılandırılmış çıkarım notebook'u
+
+#### 3. IDE İçinden Colab GPU Kernel'ına Bağlanma
+1. İlgili `.ipynb` dosyasını Antigravity-IDE içinde açın.
+2. Sağ üst köşedeki **"Select Kernel"** (Çekirdek Seç) butonuna tıklayın.
+3. Listeden **"Colab"** $\rightarrow$ **"+ Add New Colab Server"** seçeneğini belirleyin ve Google hesabınızla giriş yapın.
+4. Donanım hızlandırıcı olarak **GPU (T4, V100 veya A100)** seçin.
+5. Bağlantı kurulduktan sonra hücreleri doğrudan Colab GPU'su üzerinde `Shift+Enter` ile IDE içinden çalıştırın.
+
+#### 4. GGUF İhracı & Yerel Antigravity IDE Entegrasyonu
+Eğitim tamamlandığında notebook Hücre 6 otomatik olarak Q4_K_M GGUF formatını ve Ollama `Modelfile` dosyasını oluşturur. Yerel makinenizde şu komutla tek tıkla Ollama'ya aktarabilirsiniz:
+```bash
+ollama create <proje_adi>-custom -f outputs/<proje_adi>-gguf/Modelfile
+```
+Artık Antigravity-IDE'nin kod tamamlama veya yan panel AI sohbet asistanı doğrudan eğittiğiniz modele bağlanabilir!
+
+#### 5. Antigravity AI Ajanı Desteği
+Eğitim sırasında karşılaşabileceğiniz CUDA Out-of-Memory (OOM), batch size, gradient accumulation veya LoRA parametre hatalarını Antigravity AI Chat paneline sorabilir, `Cmd+I` ile notebook hücrelerini anında düzelttirebilirsiniz.
 
 ---
 
@@ -247,18 +287,50 @@ LangExtract tarafından işlenen dökümanlar için `exports/<project_id>/langex
 
 ---
 
-## 10. 📦 Kiwix OpenZIM Ansiklopedi Veri Hattı (Faz 13)
+## 10. 📦 Kiwix OpenZIM & StackExchange Veri Hattı (Faz 13)
 
-Kiwix veri alım hattı, İnternet erişimi kısıtlı veya devasa çevrimdışı arşivleri (Wikipedia Türkçe/İngilizce, StackOverflow, Vikisözlük) doğrudan sentetik veri setlerine dönüştürür.
+Kiwix veri alım hattı (`pipeline/kiwix_extractor.py`), devasa çevrimdışı OpenZIM (`.zim`) arşivlerini (Wikipedia Türkçe/İngilizce, StackExchange, StackOverflow, Vikisözlük) doğrudan yüksek kaliteli sentetik, SFT ve DPO veri setlerine dönüştürür.
 
 - **Kullanım (CLI)**:
   ```bash
-  python run.py kiwix --zim downloads/wikipedia_tr_all.zim --limit 100
+  # Otomatik mod (StackExchange / Wiki tespitli)
+  python run.py kiwix --zim downloads/ham.stackexchange.com_en_all_2026-02.zim --limit 500
+
+  # StackExchange modu ve özel batch boyutu ile
+  python run.py kiwix --zim downloads/ham.stackexchange.com_en_all_2026-02.zim --mode stackexchange --batch-size 500
+
+  # Doğrudan indirme URL'si ile
+  python run.py kiwix --url "https://download.kiwix.org/zim/stack_exchange/ham.stackexchange.com_en_all_2026-02.zim" --limit 100
   ```
-- **Filtreleme & Temizlik**:
-  - `libzim.Archive` API okuyucusu.
-  - `BeautifulSoup4` + `html2text` ile şablon ve HTML gürültülerinden arındırılmış temiz Markdown üretimi.
-  - Minimum karakter filtresi (`kiwix_min_chars: 300`).
+
+- **Web Arayüzü ile Kullanım (React Web UI)**:
+  1. **Yapılandırma Paneli (`SectionConfig.tsx` / `ConfigEditorModal.tsx`)**:
+     - **İşleme Modu (Input Mode):** `Kiwix Mode (OpenZIM & StackExchange .zim Arşivleri)` seçeneğini seçin.
+     - **Ayrıştırma Modu (Mode):** `Auto` (otomatik algılama), `StackExchange (Soru/Cevap & DPO)` veya `Wiki / Ansiklopedi (Markdown)` seçin.
+     - **Toplu Kayıt & DPO Eşikleri:** Toplu kayıt boyutu (`kiwix_batch_size`), DPO asgari oy farkı (`kiwix_min_vote_diff`) ve asgari chosen skoru (`kiwix_min_chosen_score`) değerlerini ayarlayın.
+     - `📦 Kiwix Zim Arşivi Çıkar` butonuna tıklayarak işlemi canlı log terminalinde izleyin.
+  2. **Veritabanı ve Satır İnceleme (`SectionDatasetViewer.tsx` -> SQLite Görünümü)**:
+     - `articles` tablosunda çıkarılan her soru için:
+       - 🏷️ **Etiket Rozetleri:** `#rf`, `#antennas`, `#transceiver` etiketleri satırda gösterilir.
+       - ▲ **Oy Rozeti:** Sorunun net oylama puanı (`▲ 14 oy`).
+       - ✓ **Kabul Edilen Yanıt:** Çözümün soru sahibi tarafından onaylandığını belirten yeşil rozet.
+       - 🚫 **Veto/Kapatılma:** `[closed]`, `[duplicate]` sorular için sarı veto rozeti.
+     - **Detay / Metin Butonu (🔍):** Açılan modalda özet metadata barı ve KaTeX matematik formül/kod bloğu render'ı incelenebilir.
+  3. **Veri Seti Önizleme Kartları (JSONL / Parquet)**:
+     - **DPO Dosyaları (`dpo_dataset.jsonl`):** `🏆 Chosen Skor: +25 (Kabul Edildi)` vs `⚠️ Rejected Skor: +1` karşılaştırma kartları ile kaynak arşiv bilgisi gösterilir.
+     - **SFT Dosyaları (`sft_dataset.jsonl`):** Soru başlığının altında etiketleri ve bağlamı içeren `Bağlam / Etiketler` paneli gösterilir.
+
+- **StackExchange & RLHF / DPO Çıkarım Yetenekleri**:
+  - **Soru & Etiket Ayrıştırma:** Soru başlığı, soru gövdesi, etiketler (`[rf]`, `[antennas]`) ve soru skoru (`data-score`).
+  - **Kabul Edilen Yanıt & SFT:** Soru sahibi tarafından onaylanan (`accepted-answer`) veya en yüksek oylu yanıt doğrudan SFT talimatı ve Chat formatına aktarılır.
+  - **DPO / ORPO İkili Eşleme:** Kabul edilen/yüksek oylu yanıt (*chosen*) ile düşük oylu/sıfır puanlı yanıtlar (*rejected*) `kiwix_min_vote_diff` (varsayılan: 2) farkına göre ikili DPO kaydı olarak eşlenir.
+  - **Topluluk Vetosu & Kapatılma Tespiti:** Kapatılmış (`[closed]`, `[duplicate]`) sorular ve veto gerekçeleri otomatik tespit edilerek etiketlenir.
+
+- **Performans & Temizlik Optimizasyonları**:
+  - `libzim` binary taraması ve resim, SVG, CSS, JS ikililerinin yol öneki seviyesinde filtrelenmesi.
+  - Kod bloklarının (```lang ... ```) ve LaTeX matematik formüllerinin (`$...$`, `$$...$$`) korunması.
+  - SQLite WAL modu (`PRAGMA synchronous = NORMAL; PRAGMA journal_mode = WAL;`) ve 500'lük `executemany` toplu kayıt (batch commit).
+  - `python run.py export` komutu çalıştırıldığında Kiwix verileri doğrudan `sft_dataset.jsonl`, `dpo_dataset.jsonl`, `chat_dataset.jsonl` ve `.parquet` formatlarında derlenir.
 
 ---
 

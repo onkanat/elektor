@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { PipelineConfig, PipelineState } from '../types';
 import { ResetConfirmModal } from './ResetConfirmModal';
+import { ConfigEditorModal } from './ConfigEditorModal';
 
 interface SectionConfigProps {
   config: PipelineConfig;
@@ -18,8 +19,7 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
   const [formData, setFormData] = useState<PipelineConfig>(config);
   const [limitInput, setLimitInput] = useState<string>('5');
   const [resetInput, setResetInput] = useState<boolean>(false);
-  const [jsonText, setJsonText] = useState<string>(JSON.stringify(config, null, 2));
-  const [isEditingJson, setIsEditingJson] = useState<boolean>(false);
+  const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const [showResetModal, setShowResetModal] = useState<boolean>(false);
   const [pendingCommand, setPendingCommand] = useState<{ cmd: string; limit?: string }>({ cmd: 'pipeline', limit: '5' });
@@ -34,7 +34,6 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
 
   useEffect(() => {
     setFormData(config);
-    setJsonText(JSON.stringify(config, null, 2));
   }, [config]);
 
   // Auto-scroll terminal log widget to bottom when logs update (only if user is already near bottom)
@@ -58,25 +57,12 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
     }
     const updated = { ...formData, [name]: val };
     setFormData(updated);
-    setJsonText(JSON.stringify(updated, null, 2));
   };
 
   const handleSaveForm = async () => {
     await onUpdateConfig(formData);
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
-  };
-
-  const handleSaveJson = async () => {
-    try {
-      const parsed = JSON.parse(jsonText);
-      await onUpdateConfig(parsed);
-      setFormData(parsed);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
-    } catch (e) {
-      alert('Geçersiz JSON formatı! Lütfen kontrol edin.');
-    }
   };
 
   const handleProbePorts = async () => {
@@ -123,6 +109,16 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
 
   return (
     <div className="grid-2">
+      <ConfigEditorModal
+        isOpen={showConfigModal}
+        config={formData}
+        onClose={() => setShowConfigModal(false)}
+        onSave={async (newCfg) => {
+          await onUpdateConfig(newCfg);
+          setFormData(newCfg);
+        }}
+      />
+
       <ResetConfirmModal
         isOpen={showResetModal}
         projectName={formData.dataset_name || formData.project_id || 'sdr_engineers'}
@@ -158,21 +154,43 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
             <option value="book">Book Mode (Tek veya Çoklu PDF Kitap Bölümleme)</option>
             <option value="folder">Folder Mode (Özyinelemeli Klasör + Akıllı Çoklu Kitap Bölümleme)</option>
             <option value="rendergit">Rendergit Mode (Git Kod Reposu / GitHub URL)</option>
+            <option value="kiwix">Kiwix Mode (OpenZIM & StackExchange .zim Arşivleri)</option>
           </select>
         </div>
 
         <div className="form-group">
-          <label>{formData.input_mode === 'rendergit' ? 'Repo Adresi / Git URL veya Dizin (Input Path)' : 'Döküman / Klasör / Çoklu Dosya Yolu (Input Path)'}</label>
+          <label>
+            {formData.input_mode === 'rendergit'
+              ? 'Repo Adresi / Git URL veya Dizin (Input Path)'
+              : formData.input_mode === 'kiwix'
+              ? 'ZIM Arşiv Dosya Yolu (Input Path)'
+              : 'Döküman / Klasör / Çoklu Dosya Yolu (Input Path)'}
+          </label>
           <input
             type="text"
             name="input_path"
             className="form-control"
             value={formData.input_path}
             onChange={handleChange}
-            placeholder={formData.input_mode === 'rendergit' ? 'https://github.com/karpathy/rendergit veya /path/to/repo' : '/Users/.../cilt1.pdf, /Users/.../cilt2.pdf veya Klasör Yolu'}
+            placeholder={
+              formData.input_mode === 'rendergit'
+                ? 'https://github.com/karpathy/rendergit veya /path/to/repo'
+                : formData.input_mode === 'kiwix'
+                ? 'downloads/ham.stackexchange.com_en_all_2026-02.zim'
+                : '/Users/.../cilt1.pdf, /Users/.../cilt2.pdf veya Klasör Yolu'
+            }
           />
           <span style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem', display: 'block' }}>
-            💡 {formData.input_mode === 'rendergit' ? <strong>Rendergit Modu:</strong> : <strong>Klasör Modu:</strong>} Klasördeki/Repodaki kodlar AST ve rendergit formatıyla otomatik veri setine dönüştürülür.
+            💡 {formData.input_mode === 'rendergit' ? (
+              <strong>Rendergit Modu:</strong>
+            ) : formData.input_mode === 'kiwix' ? (
+              <strong>Kiwix ZIM Modu:</strong>
+            ) : (
+              <strong>Klasör Modu:</strong>
+            )}{' '}
+            {formData.input_mode === 'kiwix'
+              ? 'OpenZIM arşivindeki StackExchange Q&A, etiketler, oylar ve wiki makaleleri doğrudan SFT/DPO veri setine aktarılır.'
+              : 'Klasördeki/Repodaki kodlar AST ve rendergit formatıyla otomatik veri setine dönüştürülür.'}
           </span>
         </div>
 
@@ -452,7 +470,7 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
                 name="kiwix_zim_path"
                 className="form-control"
                 style={{ fontSize: '0.82rem' }}
-                placeholder="downloads/wikipedia_tr_all.zim"
+                placeholder="downloads/ham.stackexchange.com_en_all_2026-02.zim"
                 value={formData.kiwix_zim_path || ''}
                 onChange={handleChange}
               />
@@ -472,6 +490,47 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
             </div>
           </div>
 
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem', marginTop: '0.6rem' }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '0.78rem' }}>Ayrıştırma Modu (Mode)</label>
+              <select
+                name="kiwix_extract_mode"
+                className="form-control"
+                style={{ fontSize: '0.82rem' }}
+                value={formData.kiwix_extract_mode || 'auto'}
+                onChange={handleChange}
+              >
+                <option value="auto">Auto (Otomatik Algıla)</option>
+                <option value="stackexchange">StackExchange (Soru/Cevap & DPO)</option>
+                <option value="wiki">Wiki / Ansiklopedi (Markdown)</option>
+              </select>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '0.78rem' }}>Toplu Kayıt (Batch Size)</label>
+              <input
+                type="number"
+                name="kiwix_batch_size"
+                className="form-control"
+                style={{ fontSize: '0.82rem' }}
+                value={formData.kiwix_batch_size ?? 500}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '0.78rem' }}>DPO Min. Oy Farkı</label>
+              <input
+                type="number"
+                name="kiwix_min_vote_diff"
+                className="form-control"
+                style={{ fontSize: '0.82rem' }}
+                value={formData.kiwix_min_vote_diff ?? 2}
+                onChange={handleChange}
+              />
+            </div>
+          </div>
+
           <div style={{ marginTop: '0.8rem', display: 'flex', justifyContent: 'flex-end' }}>
             <button
               className={`btn btn-primary ${isRunning ? 'btn-disabled' : ''}`}
@@ -484,17 +543,18 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
           </div>
         </div>
 
-        {/* JSON / Form Görünüm Anahtarı */}
+        {/* config.json Form Düzenleyici Modal & Kaydet Butonları */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem' }}>
           <button
+            type="button"
             className="btn btn-secondary"
-            onClick={() => setIsEditingJson(!isEditingJson)}
-            style={{ fontSize: '0.8rem' }}
+            onClick={() => setShowConfigModal(true)}
+            style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem', borderColor: 'var(--accent-blue)', color: '#60a5fa' }}
           >
-            {isEditingJson ? '📝 Form Görünümüne Dön' : '⚙️ config.json Doğrudan Düzenle'}
+            <span>⚙️</span> config.json Doğrudan Düzenle
           </button>
 
-          <button className="btn btn-primary" onClick={isEditingJson ? handleSaveJson : handleSaveForm}>
+          <button type="button" className="btn btn-primary" onClick={handleSaveForm}>
             💾 Yapılandırmayı Kaydet
           </button>
         </div>
@@ -502,17 +562,6 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
         {saveSuccess && (
           <div style={{ marginTop: '0.75rem', color: '#34d399', fontSize: '0.85rem' }}>
             ✓ config.json başarıyla güncellendi!
-          </div>
-        )}
-
-        {isEditingJson && (
-          <div style={{ marginTop: '1rem' }}>
-            <textarea
-              className="form-control"
-              style={{ height: '220px', fontFamily: 'monospace', fontSize: '0.8rem' }}
-              value={jsonText}
-              onChange={(e) => setJsonText(e.target.value)}
-            />
           </div>
         )}
       </div>

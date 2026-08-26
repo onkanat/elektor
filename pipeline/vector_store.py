@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
-from pipeline.llm_client import get_openai_client
+from pipeline.llm_client import get_openai_client, get_embedding_client
 
 class ArchiveVectorStore:
     def __init__(self, config_path="config.json"):
@@ -46,7 +46,7 @@ class ArchiveVectorStore:
     def get_embedding_dimension(self):
         """Get embedding dimension by running a test vector"""
         try:
-            client = get_openai_client(self.config)
+            client = get_embedding_client(self.config)
             res = client.embeddings.create(model=self.model_embedding, input=["test"])
             return len(res.data[0].embedding)
         except Exception as e:
@@ -137,7 +137,7 @@ class ArchiveVectorStore:
             for chunk_idx, chunk in enumerate(chunks):
                 try:
                     # Get embedding vector
-                    client = get_openai_client(self.config)
+                    client = get_embedding_client(self.config)
                     res = client.embeddings.create(model=self.model_embedding, input=[chunk])
                     vector = res.data[0].embedding
                     

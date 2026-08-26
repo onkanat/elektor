@@ -139,12 +139,16 @@ class ArchiveExtractor:
         
         cursor = self.conn.cursor()
         query = "SELECT id, title, extracted_text FROM articles"
-        if limit:
-            try:
-                lim_val = int(limit)
-                query += f" LIMIT {lim_val}"
-            except Exception:
-                pass
+        if isinstance(limit, tuple):
+            start, end = limit
+            lim_val = (end - start) if end is not None else None
+            offset_val = start
+            if lim_val is not None:
+                query += f" LIMIT {lim_val} OFFSET {offset_val}"
+            elif offset_val:
+                query += f" LIMIT -1 OFFSET {offset_val}"
+        elif isinstance(limit, int):
+            query += f" LIMIT {limit}"
         cursor.execute(query)
         articles = cursor.fetchall()
         

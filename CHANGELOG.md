@@ -5,6 +5,49 @@ All notable changes to the **Elektor Universal PDF & Rendergit Code Dataset Gene
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [19.5.0] - 2026-08-24
+
+### Added
+- **Hybrid Local/Cloud Embedding Router (`pipeline/llm_client.py` & `pipeline/vector_store.py`)**:
+  - Added `get_embedding_client()` with automatic cloud-to-local fallback: when the primary LLM is configured on Ollama Cloud (`https://ollama.com/v1`), vector embeddings automatically route to local Ollama (`http://localhost:11434/v1`) or dedicated `embedding_url` to bypass missing cloud `/v1/embeddings` endpoints.
+- **Sequence-Aware JSON & LaTeX Preservation Parser (`pipeline/analyzer.py`)**:
+  - Upgraded `_parse_json_robust` with RFC 8259 sequence-aware backslash handling and `JSONDecoder(strict=False).raw_decode()`.
+  - Preserves mathematical LaTeX commands starting with control letters (`\frac`, `\beta`, `\theta`, `\tau`, `\text`, `\rho`, `\begin`, `\nabla`) from being corrupted into JSON control characters (`\f`, `\b`, `\t`, `\r`).
+  - Gracefully fixes unescaped backslashes (`\mu`, `\Omega`, `\d+`) without double-escaping existing valid `\\` pairs.
+- **Tuple & Slice Range Limit Support (`run.py`, `pipeline/kiwix_extractor.py`, `pipeline/extractor.py`)**:
+  - Full support for slice limits (`--limit 6:11`, `100:200`) across all subcommands (`extract`, `kiwix`, `enrich`, `embed`, `pipeline`).
+  - Added SQLite offset querying (`LIMIT count OFFSET start`) in `ArchiveExtractor.run_langextract_all()`.
+- **Comprehensive Documentation Suite (`tools/docs/`)**:
+  - Created [`tools/docs/kiwix_zim_mode.md`](file:///Users/hakankilicaslan/Git/elektor/tools/docs/kiwix_zim_mode.md) detailing Kiwix ZIM architecture, auto DPO/SFT extraction, Web UI integration, and CLI workflows.
+  - Updated [`tools/docs/phase1_extraction.md`](file:///Users/hakankilicaslan/Git/elektor/tools/docs/phase1_extraction.md) with Kiwix extraction engine, updated mermaid diagram, and new SQLite columns (`source_type`, `tags`, `vote_score`, `is_accepted`, `is_vetoed`, `metadata_json`).
+  - Updated [`tools/README.md`](file:///Users/hakankilicaslan/Git/elektor/tools/README.md) with central documentation index.
+
+---
+
+## [19.4.0] - 2026-08-24
+
+### Added
+- **Kiwix ZIM StackExchange RLHF / DPO & SFT Pipeline (`pipeline/kiwix_extractor.py`)**:
+  - Full StackExchange DOM parser: extracts question title, tags (`<a class="post-tag">`), question score (`data-score`), question body, closed/veto notices, and answers with vote scores.
+  - Automatic DPO/ORPO pair synthesis: pairs accepted/top-voted answers (*chosen*) against downvoted/low-score answers (*rejected*) with configurable score delta (`kiwix_min_vote_diff: 2`).
+  - Automatic SFT Q&A generation: structures domain-tagged question prompts mapped to accepted/gold-standard answers.
+  - Dual-mode extraction: auto-detects or switches between `stackexchange` and `wiki` (encyclopedic Markdown) modes (`--mode auto|stackexchange|wiki`).
+  - High-speed zero-dependency HTML-to-Markdown cleaner: converts `<pre><code>` to Markdown code fences, preserves LaTeX KaTeX/MathJax expressions (`$...$`, `$$...$$`), lists, and blockquotes.
+  - High-performance batch writing: commits SQLite records in batches (default 500) using WAL mode (`PRAGMA synchronous = NORMAL; PRAGMA journal_mode = WAL;`).
+- **Kiwix Web UI & Visual Inspection Suite (`frontend/src/`)**:
+  - **Interactive Configuration Panel (`SectionConfig.tsx` & `ConfigEditorModal.tsx`)**: Added `kiwix` input mode, extraction mode selector (`auto`, `stackexchange`, `wiki`), SQLite batch commit size (`kiwix_batch_size`), and DPO vote delta sliders/inputs.
+  - **Rich SQLite Table & Detail Modal (`SectionDatasetViewer.tsx`)**: Displays StackExchange domain tag pills (`#rf`, `#antennas`), net vote score badges (`▲ 14 oy`), green accepted solution badges (`✓ Kabul Edildi`), and community veto/closed warning badges (`🚫 Kapatılmış/Veto`). Detail modal provides top metadata cards and live KaTeX mathematical formula rendering.
+  - **Dataset Preview Cards (`SectionDatasetViewer.tsx`)**: Displays `🏆 Chosen Score` vs `⚠️ Rejected Score` comparison cards for DPO datasets and domain tag context boxes for SFT datasets.
+  - **TypeScript Definitions (`types.ts`)**: Added `kiwix_extract_mode`, `kiwix_min_chosen_score`, `kiwix_min_vote_diff`, and `kiwix_batch_size` to `PipelineConfig`.
+- **FastAPI Kiwix Pipeline Integration (`api_server.py`)**:
+  - Connected `/api/pipeline/run` endpoint to pass `--mode` and `--batch-size` CLI arguments to the Kiwix background extractor.
+- **Direct Dataset Compilation from Kiwix (`pipeline/dataset_builder.py`)**:
+  - `DatasetBuilder.export_datasets()` now directly compiles ground-truth SFT and DPO records from Kiwix SQLite tables into `sft_dataset.jsonl`, `dpo_dataset.jsonl`, `chat_dataset.jsonl` and `.parquet` files without requiring prior LLM inference.
+- **Kiwix Test Suite (`tests/test_kiwix_extractor.py`)**:
+  - Comprehensive unit and integration test suite testing HTML fragment cleaning, StackExchange DOM parsing, real `.zim` archive extraction, and dataset compilation.
+
+---
+
 ## [19.3.0] - 2026-08-22
 
 ### Added

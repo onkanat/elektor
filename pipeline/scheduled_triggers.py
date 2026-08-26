@@ -40,15 +40,25 @@ class ScheduledTriggersManager:
         limit: int = 50,
         mode: str = "strict",
         threshold: float = 7.0,
-        auto_rewrite: bool = True
+        auto_rewrite: bool = True,
+        use_batch_api: bool = False
     ) -> Dict[str, Any]:
         """
         Scans SQLite database for unjudged enrichments and executes an automated Judge pass
-        within the active token budget limit.
+        within the active token budget limit. Supports Gemini Batch API (%50 cost discount).
         """
-        self.logger.info(f"Trigger started: Running {mode} judge pass on unreviewed records (limit: {limit})...", module="scheduled_triggers")
+        self.logger.info(f"Trigger started: Running {mode} judge pass on unreviewed records (limit: {limit}, Batch API: {use_batch_api})...", module="scheduled_triggers")
         
-        # 1. Check Token Budget
+        # 1. First, auto-sync any completed pending Gemini Batch Jobs
+        engine = JudgeEngine(self.config)
+        try:
+            sync_res = engine.judge_batch_sync()
+            if sync_res.get("synced_count", 0) > 0:
+                self.logger.info(f"Auto-synced {sync_res['synced_count']} completed batch evaluation records into database.", module="scheduled_triggers")
+        except Exception as e:
+            self.logger.warning(f"Batch auto-sync notice: {e}", module="scheduled_triggers")
+
+        # 2. Check Token Budget
         client = get_gemini_client(self.config)
         budget_info = client.budget_manager.get_monthly_consumption()
         if budget_info.get("budget_percent", 0) >= 100:
@@ -56,7 +66,7 @@ class ScheduledTriggersManager:
             self.logger.warning(msg, module="scheduled_triggers")
             return {"status": "budget_exceeded", "message": msg, "stats": {}}
 
-        # 2. Check pending unjudged count
+        # 3. Check pending unjudged count
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='enrichments'")
@@ -76,17 +86,25 @@ class ScheduledTriggersManager:
             self.logger.info(msg, module="scheduled_triggers")
             return {"status": "up_to_date", "message": msg, "stats": {"unjudged_count": 0}}
 
-        # 3. Execute Judge Engine
         target_mode = "hybrid_editor" if (auto_rewrite and mode == "hybrid_editor") else mode
-        engine = JudgeEngine(self.config)
-        stats = engine.judge_all(limit=limit, mode=target_mode, threshold=threshold)
 
-        return {
-            "status": "completed",
-            "message": f"Successfully evaluated {stats.get('total', 0)} records.",
-            "stats": stats,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        }
+        # 4. Execute either Gemini Batch API or Synchronous Online Judge
+        if use_batch_api:
+            batch_result = engine.judge_batch_submit(limit=limit, mode=target_mode, threshold=threshold)
+            return {
+                "status": "batch_submitted",
+                "batch_job": batch_result,
+                "message": f"Submitted Gemini Batch Job for {batch_result.get('total_requests', 0)} items (%50 discount applied).",
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            }
+        else:
+            stats = engine.judge_all(limit=limit, mode=target_mode, threshold=threshold)
+            return {
+                "status": "completed",
+                "message": f"Successfully evaluated {stats.get('total', 0)} records.",
+                "stats": stats,
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            }
 
     def start_recurring_scheduler(
         self,

@@ -291,6 +291,8 @@ Examples:
     judge_parser.add_argument("--mode", type=str, choices=["strict", "hybrid_editor"], default="strict", help="Judge mode: 'strict' (fast scoring) or 'hybrid_editor' (targeted rewrite)")
     judge_parser.add_argument("--threshold", type=float, default=7.0, help="Approval threshold score (1.0 - 10.0, default: 7.0)")
     judge_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit number of articles to judge")
+    judge_parser.add_argument("--batch", action="store_true", help="Submit asynchronous batch job via Gemini Batch API (50%% discount, zero rate limits)")
+    judge_parser.add_argument("--sync-batch", action="store_true", help="Sync results of completed Gemini Batch prediction jobs into SQLite")
     
     # LangExtract subcommand
     lx_parser = subparsers.add_parser("langextract", help="Run Google LangExtract grounded entity extraction on project articles")
@@ -304,6 +306,8 @@ Examples:
     kiwix_parser = subparsers.add_parser("kiwix", help="Extract text and metadata from Kiwix (.zim) open catalog archives")
     kiwix_parser.add_argument("--zim", type=str, default=None, help="Path to local .zim archive file")
     kiwix_parser.add_argument("--url", type=str, default=None, help="Direct Kiwix catalog download URL")
+    kiwix_parser.add_argument("--mode", type=str, choices=["auto", "stackexchange", "wiki"], default="auto", help="Extraction mode (auto, stackexchange, wiki)")
+    kiwix_parser.add_argument("--batch-size", type=int, default=500, help="Batch commit size for database inserts (default: 500)")
     kiwix_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit number of articles to extract")
     kiwix_parser.add_argument("--reset", action="store_true", help="Reset all databases before extracting")
 
@@ -312,12 +316,20 @@ Examples:
     trigger_parser.add_argument("--limit", type=parse_limit, default=50, help="Batch limit for records to audit")
     trigger_parser.add_argument("--mode", type=str, choices=["strict", "hybrid_editor"], default="strict", help="Judge mode for trigger")
     trigger_parser.add_argument("--threshold", type=float, default=7.0, help="Approval threshold score")
+    trigger_parser.add_argument("--batch", action="store_true", help="Submit asynchronous batch prediction via Gemini Batch API")
     trigger_parser.add_argument("--daemon", action="store_true", help="Run continuously as background cron scheduler")
     trigger_parser.add_argument("--interval", type=int, default=3600, help="Interval in seconds for daemon mode (default: 3600s)")
 
     # Hooks subcommand (Audit and test Managed Agents Environment Hooks)
     hooks_parser = subparsers.add_parser("hooks", help="Test and inspect Managed Agents Environment Hooks (.agents/hooks.json)")
     hooks_parser.add_argument("--check", action="store_true", help="Run self-check on security gate and dataset linter hooks")
+
+    # Colab subcommand (Google Colab & Antigravity-IDE Unsloth Notebook Generator)
+    colab_parser = subparsers.add_parser("colab", help="Generate Google Colab & Antigravity-IDE compatible Unsloth training notebooks")
+    colab_parser.add_argument("--project", type=str, default=None, help="Target project ID (defaults to active project)")
+    colab_parser.add_argument("--model", type=str, default="unsloth/Qwen3.5-2B", help="Base model target (default: unsloth/Qwen3.5-2B)")
+    colab_parser.add_argument("--type", type=str, choices=["all", "sft", "dpo", "chat", "langextract"], default="all", help="Dataset type for notebook (default: all)")
+    colab_parser.add_argument("--hf-dataset", type=str, default="", help="Hugging Face Dataset repo ID (default: onkanat/<project_id>-dataset)")
     
     args = parser.parse_args()
     
@@ -454,7 +466,17 @@ Examples:
         from pipeline.judge_engine import JudgeEngine
         engine = JudgeEngine(config_or_path=args.config)
         limit_val = args.limit if isinstance(args.limit, int) else None
-        engine.judge_all(limit=limit_val, mode=args.mode, threshold=args.threshold)
+        
+        if getattr(args, "sync_batch", False):
+            print("🔄 Polling and syncing pending Gemini Batch API jobs into SQLite database...")
+            res = engine.judge_batch_sync()
+            print(f"✅ Gemini Batch Sync Complete: {json.dumps(res, indent=2, ensure_ascii=False)}")
+        elif getattr(args, "batch", False):
+            print(f"🚀 Submitting asynchronous batch job to Gemini Batch API (%50 Discount, Zero Rate Limit)...")
+            res = engine.judge_batch_submit(limit=limit_val, mode=args.mode, threshold=args.threshold)
+            print(f"✅ Gemini Batch Job Submitted: {json.dumps(res, indent=2, ensure_ascii=False)}")
+        else:
+            engine.judge_all(limit=limit_val, mode=args.mode, threshold=args.threshold)
 
     elif args.command == "hf_upload":
         print("=== Step 5: Uploading Dataset to Hugging Face Hub ===")
@@ -527,6 +549,10 @@ Examples:
         print("=== Step 1 (Kiwix): ZIM Archive Extraction ===")
         from pipeline.kiwix_extractor import KiwixZimExtractor
         zim_extractor = KiwixZimExtractor(config_path=args.config)
+        if getattr(args, "mode", None):
+            zim_extractor.extract_mode = args.mode
+        if getattr(args, "batch_size", None):
+            zim_extractor.batch_size = args.batch_size
         try:
             zim_path = getattr(args, "zim", None)
             url = getattr(args, "url", None)
@@ -557,7 +583,7 @@ Examples:
             except KeyboardInterrupt:
                 print("\nScheduler stopped.")
         else:
-            res = mgr.run_trigger_audit_pass(limit=limit_val, mode=args.mode, threshold=args.threshold)
+            res = mgr.run_trigger_audit_pass(limit=limit_val, mode=args.mode, threshold=args.threshold, use_batch_api=getattr(args, "batch", False))
             print(f"Trigger Output: {json.dumps(res, indent=2, ensure_ascii=False)}")
 
     elif args.command == "hooks":
@@ -578,6 +604,55 @@ Examples:
         print(f"   Result: {post_ok}")
         
         print("\n✅ Hooks diagnostic check completed successfully.")
+
+    elif args.command == "colab":
+        from pipeline.cloud_gpu_offloader import CloudGPUOffloader
+        offloader = CloudGPUOffloader()
+        
+        project_id = args.project
+        if not project_id:
+            try:
+                with open("config.json", "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    db_path = cfg.get("db_path", "database/extract.db")
+                    project_id = Path(db_path).stem
+            except Exception:
+                project_id = "extract"
+
+        target_model = args.model or "unsloth/Qwen3.5-2B"
+        hf_ds = args.hf_dataset
+        ds_type = getattr(args, "type", "all").lower()
+
+        print(f"=== Google Colab & Antigravity-IDE Unsloth Generator ===")
+        print(f"  Project Target : {project_id}")
+        print(f"  Base Model     : {target_model}")
+        print(f"  Dataset Type   : {ds_type.upper()}")
+        print(f"  HF Dataset     : {hf_ds if hf_ds else f'onkanat/{project_id}-dataset'}")
+
+        if ds_type == "all":
+            res = offloader.generate_all_colab_notebooks(project_id=project_id, base_model=target_model, hf_dataset=hf_ds)
+            print(f"\n✅ All Colab & Antigravity-IDE Notebooks generated successfully in: {res['payload_dir']}/")
+            for dt, fn in res["generated_notebooks"].items():
+                print(f"   - [{dt.upper()}]: {res['payload_dir']}/{fn}")
+        else:
+            target_dir = Path("exports") / project_id / "cloud_payload"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            nb_filename = f"unsloth_colab_{ds_type}_{project_id}.ipynb"
+            nb_path = target_dir / nb_filename
+            nb_json = offloader.generate_colab_ide_notebook(
+                project_id=project_id,
+                base_model=target_model,
+                hf_dataset=hf_ds,
+                dataset_type=ds_type
+            )
+            with open(nb_path, "w", encoding="utf-8") as f:
+                json.dump(nb_json, f, indent=2, ensure_ascii=False)
+            print(f"\n✅ Colab & Antigravity-IDE Notebook generated successfully -> {nb_path}")
+
+        print("\n💡 Antigravity-IDE & VS Code ile Çalıştırma Adımları:")
+        print("  1. Bu notebook dosyasını Antigravity-IDE / VS Code içinde açın.")
+        print("  2. Sağ üstten 'Select Kernel' -> 'Colab' -> '+ Add New Colab Server' seçin.")
+        print("  3. GPU (T4 / V100 / A100) seçerek hücreleri Shift+Enter ile uzaktan çalıştırın.")
 
 if __name__ == "__main__":
     main()

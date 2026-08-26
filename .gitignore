@@ -9,6 +9,11 @@ __pycache__/
 *.db
 *.db-journal
 *.db-wal
+*.db-shm
+database/
+downloads/*.zim
+downloads/*.pdf
+downloads/extracted_images/
 qdrant_*/
 projects_*.json
 !projects_index.json

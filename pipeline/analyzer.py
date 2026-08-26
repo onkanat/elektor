@@ -191,14 +191,89 @@ class ArchiveAnalyzer:
                 clean_content = clean_content[:-3]
             clean_content = clean_content.strip()
 
-            try:
-                return json.loads(clean_content)
-            except Exception:
+            def _parse_json_robust(raw_str: str):
                 import re
-                match = re.search(r'(\{.*\})', clean_content, re.DOTALL)
+                if not raw_str or not raw_str.strip():
+                    return None
+                
+                cleaned = raw_str.strip()
+                if "```json" in cleaned:
+                    cleaned = cleaned.split("```json", 1)[1]
+                if "```" in cleaned:
+                    cleaned = cleaned.split("```", 1)[0]
+                cleaned = cleaned.strip()
+
+                start_brace = cleaned.find("{")
+                target = cleaned[start_brace:] if start_brace != -1 else cleaned
+
+                # 1. Standard raw_decode
+                try:
+                    obj, _ = json.JSONDecoder(strict=False).raw_decode(target)
+                    return obj
+                except Exception:
+                    pass
+
+                # 2. Protect common LaTeX commands starting with b, f, n, r, t from becoming control chars
+                latex_cmds = (
+                    "frac", "font", "forall", "fbox", "flat",
+                    "beta", "bar", "begin", "binom", "bullet", "bold", "bmatrix", "bmod",
+                    "text", "times", "theta", "tau", "tan", "tanh", "to", "top", "triangle", "tilde", "tag", "tfrac",
+                    "nabla", "neq", "not", "nu", "neg", "natural", "null",
+                    "rho", "right", "rangle", "sqrt", "quad", "qquad", "infty", "sum", "int", "partial"
+                )
+                for cmd in latex_cmds:
+                    target = re.sub(r"(?<!\\)\\" + cmd + r"(?![a-zA-Z])", r"\\\\" + cmd, target)
+
+                # 3. Sanitize backslashes: correctly escape invalid sequences without corrupting existing \\
+                def replace_slash(match):
+                    slashes = match.group(1)
+                    next_char = match.group(2)
+                    if len(slashes) % 2 == 0:
+                        return match.group(0)
+                    if next_char in ["\"", "\\", "/", "b", "f", "n", "r", "t"]:
+                        return match.group(0)
+                    if next_char == "u":
+                        rest = match.string[match.end():match.end()+4]
+                        if len(rest) == 4 and all(c in "0123456789abcdefABCDEF" for c in rest):
+                            return match.group(0)
+                    return slashes + "\\" + next_char
+
+                target_fixed = re.sub(r"(\\+)(.)", replace_slash, target, flags=re.DOTALL)
+
+                try:
+                    obj, _ = json.JSONDecoder(strict=False).raw_decode(target_fixed)
+                    return obj
+                except Exception:
+                    try:
+                        return json.loads(target_fixed, strict=False)
+                    except Exception:
+                        pass
+
+                # 4. Remove trailing commas in objects or arrays
+                target_fixed2 = re.sub(r',\s*([\}\]])', r'\1', target_fixed)
+                try:
+                    obj, _ = json.JSONDecoder(strict=False).raw_decode(target_fixed2)
+                    return obj
+                except Exception:
+                    try:
+                        return json.loads(target_fixed2, strict=False)
+                    except Exception:
+                        pass
+
+                # 5. Regex outer match fallback
+                match = re.search(r'(\{[\s\S]*\})', target_fixed2)
                 if match:
-                    return json.loads(match.group(1))
-                raise
+                    try:
+                        return json.loads(match.group(1), strict=False)
+                    except Exception:
+                        pass
+
+                return None
+
+            res = _parse_json_robust(clean_content)
+            if res is not None:
+                return res
+            return json.loads(clean_content)
         except Exception as e:
             print(f"  LLM JSON call error (Model: {model}): {e}")
             return None

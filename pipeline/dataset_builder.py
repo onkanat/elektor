@@ -74,44 +74,6 @@ class DatasetBuilder:
 
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
-        # Check if enrichments table exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='enrichments'")
-        if not cursor.fetchone():
-            print(f"Warning: No 'enrichments' table found in database ({self.db_path}). Skipping dataset export.")
-            conn.close()
-            return
-
-        # Check column existence in enrichments table
-        cursor.execute("PRAGMA table_info(enrichments)")
-        cols = [c[1] for c in cursor.fetchall()]
-        has_tr_qa = "tr_sft_qa" in cols and "tr_dpo_pairs" in cols
-        has_multi_turn = "multi_turn_chat" in cols
-        has_tr_multi_turn = "tr_multi_turn_chat" in cols
-        has_is_excluded = "is_excluded" in cols
-
-        where_clause = "WHERE (e.is_excluded IS NULL OR e.is_excluded = 0)" if has_is_excluded else ""
-        multi_turn_col = "e.multi_turn_chat" if has_multi_turn else "NULL"
-        tr_multi_turn_col = "e.tr_multi_turn_chat" if has_tr_multi_turn else "NULL"
-        tr_qa_cols = "e.tr_sft_qa, e.tr_dpo_pairs" if has_tr_qa else "NULL, NULL"
-
-        cursor.execute(f"""
-            SELECT a.title, a.year, e.summary, e.turkish_title, e.turkish_summary, 
-                   e.sft_qa, e.dpo_pairs, {tr_qa_cols}, {multi_turn_col}, {tr_multi_turn_col}
-            FROM enrichments e
-            JOIN articles a ON a.id = e.article_id
-            {where_clause}
-        """)
-        rows = cursor.fetchall()
-        
-        def safe_str(val):
-            if val is None:
-                return ""
-            if isinstance(val, dict):
-                val = val.get("text", val.get("question", val.get("answer", val.get("chosen", val.get("rejected", str(val))))))
-            elif isinstance(val, list):
-                val = " ".join(str(i) for i in val)
-            return str(val).strip()
 
         sft_records = []
         dpo_records = []
@@ -121,10 +83,45 @@ class DatasetBuilder:
         tr_sft_records = []
         tr_chat_records = []
         tr_dpo_records = []
-        
-        print(f"Compiling datasets from {len(rows)} enriched articles...")
-        
+
+        def safe_str(val):
+            if val is None:
+                return ""
+            if isinstance(val, dict):
+                val = val.get("text", val.get("question", val.get("answer", val.get("chosen", val.get("rejected", str(val))))))
+            elif isinstance(val, list):
+                val = " ".join(str(i) for i in val)
+            return str(val).strip()
+
         invalid_summaries = ["özet bulunamadı.", "özet bulunamadı", "summary unavailable.", "summary unavailable", ""]
+
+        # Check if enrichments table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='enrichments'")
+        if cursor.fetchone():
+            # Check column existence in enrichments table
+            cursor.execute("PRAGMA table_info(enrichments)")
+            cols = [c[1] for c in cursor.fetchall()]
+            has_tr_qa = "tr_sft_qa" in cols and "tr_dpo_pairs" in cols
+            has_multi_turn = "multi_turn_chat" in cols
+            has_tr_multi_turn = "tr_multi_turn_chat" in cols
+            has_is_excluded = "is_excluded" in cols
+
+            where_clause = "WHERE (e.is_excluded IS NULL OR e.is_excluded = 0)" if has_is_excluded else ""
+            multi_turn_col = "e.multi_turn_chat" if has_multi_turn else "NULL"
+            tr_multi_turn_col = "e.tr_multi_turn_chat" if has_tr_multi_turn else "NULL"
+            tr_qa_cols = "e.tr_sft_qa, e.tr_dpo_pairs" if has_tr_qa else "NULL, NULL"
+
+            cursor.execute(f"""
+                SELECT a.title, a.year, e.summary, e.turkish_title, e.turkish_summary, 
+                       e.sft_qa, e.dpo_pairs, {tr_qa_cols}, {multi_turn_col}, {tr_multi_turn_col}
+                FROM enrichments e
+                JOIN articles a ON a.id = e.article_id
+                {where_clause}
+            """)
+            rows = cursor.fetchall()
+            print(f"Compiling datasets from {len(rows)} enriched articles...")
+        else:
+            rows = []
 
         for row in rows:
             title, year, summary, tr_title, tr_summary, sft_qa_json, dpo_pairs_json, tr_sft_qa_json, tr_dpo_pairs_json, multi_turn_chat_json, tr_multi_turn_chat_json = row
@@ -303,9 +300,81 @@ class DatasetBuilder:
                     "input": "",
                     "output": clean_summary
                 })
-                
-        # Check and export synthetic_code_pairs table
 
+        # Check and export Kiwix StackExchange articles directly from articles table
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='articles'")
+        if cursor.fetchone():
+            cursor.execute("PRAGMA table_info(articles)")
+            art_cols = {c[1] for c in cursor.fetchall()}
+            if "metadata_json" in art_cols:
+                cursor.execute("""
+                    SELECT title, year, filename, source_type, tags, vote_score, is_accepted, is_vetoed, metadata_json
+                    FROM articles
+                    WHERE metadata_json IS NOT NULL AND metadata_json != ''
+                """)
+                kiwix_rows = cursor.fetchall()
+                if kiwix_rows:
+                    print(f"Compiling datasets from {len(kiwix_rows)} Kiwix/ZIM articles...")
+                    for k_row in kiwix_rows:
+                        k_title, k_year, k_fname, k_stype, k_tags_json, k_vote, k_is_acc, k_is_veto, k_meta_json = k_row
+                        try:
+                            k_meta = json.loads(k_meta_json) if k_meta_json else {}
+                        except Exception:
+                            continue
+
+                        tags_list = k_meta.get("tags") or []
+                        tags_str = ", ".join(tags_list) if isinstance(tags_list, list) else str(tags_list)
+                        q_body = k_meta.get("question_body", "")
+
+                        # SFT export
+                        sft_item = k_meta.get("sft_qa")
+                        if sft_item and isinstance(sft_item, dict) and sft_item.get("answer"):
+                            ans = safe_str(sft_item["answer"])
+                            inp_parts = []
+                            if tags_str:
+                                inp_parts.append(f"Tags: [{tags_str}]")
+                            if q_body:
+                                inp_parts.append(q_body)
+                            inp = "\n\n".join(inp_parts)
+
+                            sft_records.append({
+                                "instruction": safe_str(k_title),
+                                "input": inp,
+                                "output": ans
+                            })
+                            chat_records.append({
+                                "messages": [
+                                    {"role": "system", "content": f"You are an expert technical specialist in {tags_str or 'electronics and software engineering'}."},
+                                    {"role": "user", "content": f"{safe_str(k_title)}\n\n{inp}".strip()},
+                                    {"role": "assistant", "content": ans}
+                                ]
+                            })
+
+                        # DPO export
+                        dpo_list = k_meta.get("dpo_pairs") or []
+                        if isinstance(dpo_list, list):
+                            for dp in dpo_list:
+                                if not isinstance(dp, dict):
+                                    continue
+                                chosen = safe_str(dp.get("chosen"))
+                                rejected = safe_str(dp.get("rejected"))
+                                if chosen and rejected:
+                                    prompt_str = f"Question: {safe_str(k_title)}" + (f"\nTags: [{tags_str}]" if tags_str else "")
+                                    dpo_records.append({
+                                        "prompt": prompt_str,
+                                        "input": safe_str(q_body),
+                                        "chosen": chosen,
+                                        "rejected": rejected,
+                                        "metadata": {
+                                            "source": k_fname or "kiwix_archive",
+                                            "chosen_score": dp.get("chosen_score"),
+                                            "rejected_score": dp.get("rejected_score"),
+                                            "chosen_is_accepted": dp.get("chosen_is_accepted", False),
+                                            "dataset_type": "kiwix_stackexchange_dpo"
+                                        }
+                                    })
+
+        # Check and export synthetic_code_pairs table
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='synthetic_code_pairs'")
         if cursor.fetchone():
             cursor.execute("""

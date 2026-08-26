@@ -49,6 +49,10 @@ def _resolve_endpoint_and_key(config: dict):
     if not base_url.endswith("/v1") and not base_url.endswith("/v1/"):
         base_url = f"{base_url.rstrip('/')}/v1"
     
+    # Auto-upgrade http://ollama.com to https://ollama.com to avoid 301 Moved Permanently redirects
+    if base_url.startswith("http://ollama.com"):
+        base_url = "https://" + base_url[len("http://"):]
+    
     raw_api_key = (
         config.get("openai_api_key") 
         or config.get("ollama_api_key") 
@@ -78,9 +82,9 @@ def get_openai_client(config: dict) -> OpenAI:
     if current_hash not in _clients_pool:
         base_url, api_key, timeout = _resolve_endpoint_and_key(config)
         
-        # Configure robust connection pooling limits
+        # Configure robust connection pooling limits and enable follow_redirects
         limits = httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=60.0)
-        http_client = httpx.Client(limits=limits, timeout=timeout)
+        http_client = httpx.Client(limits=limits, timeout=timeout, follow_redirects=True)
         
         _clients_pool[current_hash] = OpenAI(
             base_url=base_url,
@@ -95,13 +99,31 @@ def get_async_openai_client(config: dict) -> AsyncOpenAI:
     base_url, api_key, timeout = _resolve_endpoint_and_key(config)
     
     limits = httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=60.0)
-    http_client = httpx.AsyncClient(limits=limits, timeout=timeout)
+    http_client = httpx.AsyncClient(limits=limits, timeout=timeout, follow_redirects=True)
     
     return AsyncOpenAI(
         base_url=base_url,
         api_key=api_key,
         http_client=http_client
     )
+
+def get_embedding_client(config: dict) -> OpenAI:
+    """Returns an OpenAI client instance specifically configured for vector embeddings.
+    If 'embedding_url' is set in config, uses it.
+    If 'ollama_url' points to cloud proxy (e.g. ollama.com), automatically falls back to local localhost:11434.
+    """
+    emb_cfg = dict(config)
+    if config.get("embedding_url"):
+        emb_cfg["ollama_url"] = config["embedding_url"]
+        emb_cfg["openai_base_url"] = config["embedding_url"]
+    else:
+        base_url = str(config.get("openai_base_url") or config.get("ollama_url", ""))
+        if "ollama.com" in base_url.lower():
+            # Ollama Cloud proxy does not support /v1/embeddings; route embeddings to local Ollama instance
+            emb_cfg["ollama_url"] = "http://localhost:11434/v1"
+            emb_cfg["openai_base_url"] = "http://localhost:11434/v1"
+            emb_cfg["openai_api_key"] = "ollama"
+    return get_openai_client(emb_cfg)
 
 def unload_ollama_model(config: dict, model_name: str):
     """Sends a native Ollama API request to unload the specified model from VRAM immediately."""

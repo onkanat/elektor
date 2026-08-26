@@ -531,16 +531,494 @@ save_total_limit: 2
 """
         return yaml_config
 
+    def generate_colab_ide_notebook(
+        self,
+        project_id: str,
+        base_model: str = "unsloth/Qwen3.5-2B",
+        hf_dataset: str = "",
+        dataset_type: str = "sft",
+        dataset_file: str = ""
+    ) -> dict:
+        """
+        Generates a Google Colab & Antigravity-IDE / VS Code compatible Jupyter Notebook (.ipynb)
+        tailored for remote GPU fine-tuning with Unsloth.
+        
+        Supports dataset types:
+        - 'sft': Supervised Fine-Tuning (SFTTrainer) for instruction/QA/code datasets
+        - 'dpo': Direct Preference Optimization (DPOTrainer) for chosen/rejected pairs
+        - 'chat': Multi-turn conversational dialog fine-tuning (SFTTrainer + Chat Template)
+        - 'langextract': Grounded structured entity extraction fine-tuning
+        """
+        clean_model = base_model.replace("-GGUF", "").replace("-gguf", "")
+        if "gguf" in base_model.lower():
+            clean_model = "unsloth/Qwen3.5-2B" if "2b" in base_model.lower() else "unsloth/Qwen2.5-Coder-7B-Instruct"
+
+        ds_target = hf_dataset if hf_dataset else f"onkanat/{project_id}-dataset"
+        d_type = dataset_type.lower()
+        if d_type not in ("sft", "dpo", "chat", "langextract"):
+            d_type = "sft"
+
+        titles = {
+            "sft": ("SFT (Supervised Fine-Tuning)", "SFTTrainer"),
+            "dpo": ("DPO (Direct Preference Optimization)", "DPOTrainer"),
+            "chat": ("Multi-Turn Technical Chat", "SFTTrainer"),
+            "langextract": ("Grounded LangExtract Structured Extraction", "SFTTrainer"),
+        }
+        type_title, trainer_class = titles.get(d_type, ("SFT Fine-Tuning", "SFTTrainer"))
+
+        gguf_dir = f"outputs/{project_id}-{d_type}-gguf"
+        lora_dir = f"outputs/{project_id}-{d_type}-lora"
+        out_dir = f"outputs/{project_id}-{d_type}"
+
+        # Markdown header cell
+        header_markdown = [
+            f"# ⚡ Unsloth {type_title} & GGUF Export Notebook\n",
+            f"[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/)\n\n",
+            f"**Proje Kimliği**: `{project_id}`  \n",
+            f"**Veri Seti Tipi**: `{d_type.upper()}`  \n",
+            f"**Hedef Taban Model**: `{clean_model}` (BF16 LoRA / 4-bit QLoRA)  \n",
+            f"**Hedef Veri Seti**: `{ds_target}` (Alt dosya: `{dataset_file if dataset_file else 'otomatik'}`)  \n",
+            f"**Eğitim Motoru**: Unsloth `{trainer_class}`  \n\n",
+            "### 🚀 Antigravity-IDE & VS Code Entegrasyon Kılavuzu:\n",
+            "1. **IDE İçinden Çalıştırma**: Bu dosyayı Antigravity-IDE içinde açın. Sağ üstteki **'Select Kernel'** butonuna tıklayıp **'Colab'** $\\rightarrow$ **'+ Add New Colab Server'** seçeneğiyle Google GPU (T4/V100/A100) oturumu bağlayın.\n",
+            "2. **Hücreleri Çalıştırma**: Tüm hücreleri `Shift + Enter` ile sırayla çalıştırın. Hesaplama uzak Colab GPU'sunda yapılırken kod ve log takibi IDE içinde kalır.\n",
+            "3. **AI Asistanı Desteği**: CUDA OOM, batch size veya LoRA hiperparametre hatalarında doğrudan Antigravity AI Chat paneline danışabilirsiniz.\n\n",
+            "---\n"
+        ]
+
+        # Cell 1: Environment & GPU Check
+        cell1_source = [
+            "# 🧪 HÜCRE 1: GPU & CUDA Ortam Kontrolü\n",
+            "!nvidia-smi\n\n",
+            "import torch\n",
+            "print('PyTorch Sürümü:', torch.__version__)\n",
+            "print('CUDA Kullanılabilir:', torch.cuda.is_available())\n",
+            "if torch.cuda.is_available():\n",
+            "    print('GPU Modeli:', torch.cuda.get_device_name(0))\n",
+            "    print('BF16 Desteği (Ampere+):', torch.cuda.is_bf16_supported())\n",
+            "    print('Toplam VRAM (GB):', round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 2))\n",
+            "else:\n",
+            "    print('⚠️ UYARI: GPU bulunamadı. Lütfen Colab menüsünden Runtime -> Change runtime type -> T4 GPU seçin.')"
+        ]
+
+        # Cell 2: Dependencies Installation
+        cell2_source = [
+            "# ⚙️ HÜCRE 2: Bağımlılıkların Kurulumu (Unsloth & Transformers v5)\n",
+            "!pip install --upgrade pip setuptools wheel --quiet\n",
+            "!pip install --upgrade --force-reinstall --no-cache-dir unsloth unsloth_zoo --quiet\n",
+            "!pip install --upgrade --no-cache-dir \"transformers>=5.0.0\" trl datasets accelerate peft bitsandbytes --quiet\n",
+            "print('✅ Tüm eğitim kütüphaneleri (Unsloth, TRL, PEFT, Datasets) başarıyla güncellendi!')"
+        ]
+
+        # Cell 3: Dataset Ingestion tailored for specific type
+        if d_type == "dpo":
+            cell3_source = [
+                "# 📊 HÜCRE 3: DPO Tercih Veri Seti Yükleme (Chosen vs. Rejected)\n",
+                "from datasets import load_dataset, DatasetDict\n",
+                "from pathlib import Path\n\n",
+                f"DATASET_ID = '{ds_target}'\n",
+                f"DATASET_FILE = '{dataset_file}'\n\n",
+                "def load_dpo_training_dataset(dataset_id: str, subfile: str = ''):\n",
+                "    local_path = Path(dataset_id)\n",
+                "    if local_path.exists():\n",
+                "        return load_dataset('json', data_files={'train': str(local_path)}, split='train')\n",
+                "    try:\n",
+                "        if subfile and subfile != 'auto':\n",
+                "            return load_dataset(dataset_id, data_files=subfile, split='train')\n",
+                "        ds = load_dataset(dataset_id)\n",
+                "        if isinstance(ds, DatasetDict):\n",
+                "            for pref in ['dpo', 'tr_dpo', 'preference', 'train']:\n",
+                "                if pref in ds: return ds[pref]\n",
+                "            return ds[list(ds.keys())[0]]\n",
+                "        return ds\n",
+                "    except Exception:\n",
+                "        for target in ['dpo_dataset.jsonl', 'tr_dpo_dataset.jsonl', 'dpo_preference_*.jsonl']:\n",
+                "            try:\n",
+                "                return load_dataset(dataset_id, data_files=target, split='train')\n",
+                "            except Exception:\n",
+                "                continue\n",
+                "        return load_dataset(dataset_id, data_files='*.jsonl', split='train')\n\n",
+                "dataset = load_dpo_training_dataset(DATASET_ID, DATASET_FILE)\n",
+                "print(f'✅ DPO Veri seti yüklendi! Örnek sayısı: {len(dataset)}')\n",
+                "print('Sütunlar:', dataset.column_names)\n",
+                "print('İlk Örnek (Prompt & Chosen/Rejected):', dataset[0])"
+            ]
+        elif d_type == "chat":
+            cell3_source = [
+                "# 📊 HÜCRE 3: Çok Turlu Diyalog (Chat) Veri Seti Yükleme\n",
+                "from datasets import load_dataset, DatasetDict\n",
+                "from pathlib import Path\n\n",
+                f"DATASET_ID = '{ds_target}'\n",
+                f"DATASET_FILE = '{dataset_file}'\n\n",
+                "def load_chat_training_dataset(dataset_id: str, subfile: str = ''):\n",
+                "    local_path = Path(dataset_id)\n",
+                "    if local_path.exists():\n",
+                "        return load_dataset('json', data_files={'train': str(local_path)}, split='train')\n",
+                "    try:\n",
+                "        if subfile and subfile != 'auto':\n",
+                "            return load_dataset(dataset_id, data_files=subfile, split='train')\n",
+                "        ds = load_dataset(dataset_id)\n",
+                "        if isinstance(ds, DatasetDict):\n",
+                "            for pref in ['chat', 'tr_chat', 'train']:\n",
+                "                if pref in ds: return ds[pref]\n",
+                "            return ds[list(ds.keys())[0]]\n",
+                "        return ds\n",
+                "    except Exception:\n",
+                "        return load_dataset(dataset_id, data_files='*chat*.jsonl', split='train')\n\n",
+                "dataset = load_chat_training_dataset(DATASET_ID, DATASET_FILE)\n",
+                "print(f'✅ Chat Veri seti yüklendi! Örnek sayısı: {len(dataset)}')\n",
+                "print('Sütunlar:', dataset.column_names)\n",
+                "print('İlk Diyalog Örneği:', dataset[0])"
+            ]
+        elif d_type == "langextract":
+            cell3_source = [
+                "# 📊 HÜCRE 3: Grounded LangExtract Yapılandırılmış Çıkarım Veri Seti Yükleme\n",
+                "from datasets import load_dataset, DatasetDict\n",
+                "from pathlib import Path\n\n",
+                f"DATASET_ID = '{ds_target}'\n",
+                f"DATASET_FILE = '{dataset_file}'\n\n",
+                "def load_langextract_dataset(dataset_id: str, subfile: str = ''):\n",
+                "    local_path = Path(dataset_id)\n",
+                "    if local_path.exists():\n",
+                "        return load_dataset('json', data_files={'train': str(local_path)}, split='train')\n",
+                "    try:\n",
+                "        if subfile and subfile != 'auto':\n",
+                "            return load_dataset(dataset_id, data_files=subfile, split='train')\n",
+                "        ds = load_dataset(dataset_id)\n",
+                "        if isinstance(ds, DatasetDict):\n",
+                "            for pref in ['langextract', 'grounded', 'train']:\n",
+                "                if pref in ds: return ds[pref]\n",
+                "            return ds[list(ds.keys())[0]]\n",
+                "        return ds\n",
+                "    except Exception:\n",
+                "        return load_dataset(dataset_id, data_files='*langextract*.jsonl', split='train')\n\n",
+                "dataset = load_langextract_dataset(DATASET_ID, DATASET_FILE)\n",
+                "print(f'✅ LangExtract Veri seti yüklendi! Örnek sayısı: {len(dataset)}')\n",
+                "print('Sütunlar:', dataset.column_names)\n",
+                "print('İlk Grounded Örnek:', dataset[0])"
+            ]
+        else:
+            # Default SFT
+            cell3_source = [
+                "# 📊 HÜCRE 3: SFT Veri Seti Yükleme ve Şema Doğrulama\n",
+                "from datasets import load_dataset, DatasetDict\n",
+                "from pathlib import Path\n\n",
+                f"DATASET_ID = '{ds_target}'\n",
+                f"DATASET_FILE = '{dataset_file}'\n\n",
+                "def load_training_dataset(dataset_id: str, subfile: str = ''):\n",
+                "    local_path = Path(dataset_id)\n",
+                "    if local_path.exists():\n",
+                "        return load_dataset('json', data_files={'train': str(local_path)}, split='train')\n",
+                "    try:\n",
+                "        if subfile and subfile != 'auto':\n",
+                "            return load_dataset(dataset_id, data_files=subfile, split='train')\n",
+                "        ds = load_dataset(dataset_id)\n",
+                "        if isinstance(ds, DatasetDict):\n",
+                "            for pref in ['golden_sft', 'code_sft', 'tr_code_sft', 'sft', 'train']:\n",
+                "                if pref in ds: return ds[pref]\n",
+                "            return ds[list(ds.keys())[0]]\n",
+                "        return ds\n",
+                "    except Exception:\n",
+                "        for target in ['golden_dpo_chosen_unsloth.jsonl', 'code_sft_dataset.jsonl', 'sft_dataset.jsonl']:\n",
+                "            try:\n",
+                "                return load_dataset(dataset_id, data_files=target, split='train')\n",
+                "            except Exception:\n",
+                "                continue\n",
+                "        return load_dataset(dataset_id, data_files='*.jsonl', split='train')\n\n",
+                "dataset = load_training_dataset(DATASET_ID, DATASET_FILE)\n",
+                "print(f'✅ SFT Veri seti yüklendi! Örnek sayısı: {len(dataset)}')\n",
+                "print('Sütunlar:', dataset.column_names)\n",
+                "print('İlk Örnek Önizleme:', dataset[0])"
+            ]
+
+        # Cell 4: Model & LoRA Initialization
+        cell4_source = [
+            "# 🚀 HÜCRE 4: Unsloth Model & LoRA Yapılandırması (BF16 LoRA / QLoRA)\n",
+            "import os, torch\n",
+            "from unsloth import FastLanguageModel\n\n",
+            f"MODEL_NAME = '{clean_model}'\n",
+            "MAX_SEQ_LENGTH = 2048\n\n",
+            "is_small_model = any(k in MODEL_NAME.lower() for k in ['2b', '3b', '0.5b', '1.5b'])\n",
+            "load_4bit = False if is_small_model else True\n\n",
+            "model, tokenizer = FastLanguageModel.from_pretrained(\n",
+            "    model_name=MODEL_NAME,\n",
+            "    max_seq_length=MAX_SEQ_LENGTH,\n",
+            "    dtype=None,\n",
+            "    load_in_4bit=load_4bit,\n",
+            "    load_in_16bit=not load_4bit,\n",
+            "    full_finetuning=False,\n",
+            ")\n\n",
+            "if tokenizer.pad_token is None:\n",
+            "    tokenizer.pad_token = tokenizer.eos_token\n",
+            "tokenizer.padding_side = 'right'\n\n",
+            "model = FastLanguageModel.get_peft_model(\n",
+            "    model,\n",
+            "    r=16,\n",
+            "    target_modules=['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'],\n",
+            "    lora_alpha=16,\n",
+            "    lora_dropout=0,\n",
+            "    bias='none',\n",
+            "    use_gradient_checkpointing='unsloth',\n",
+            "    random_state=3407,\n",
+            "    max_seq_length=MAX_SEQ_LENGTH,\n",
+            ")\n",
+            "print('✅ Unsloth LoRA Modeli Hazırlandı!')"
+        ]
+
+        # Cell 5: Training Execution
+        if d_type == "dpo":
+            cell5_source = [
+                "# 🎯 HÜCRE 5: DPO Eğitimi (Direct Preference Optimization)\n",
+                "from trl import DPOConfig, DPOTrainer\n\n",
+                "def format_dpo_example(example: dict) -> dict:\n",
+                "    prompt = (example.get('prompt') or example.get('instruction') or example.get('question') or '').strip()\n",
+                "    chosen = (example.get('chosen') or example.get('output') or example.get('response') or '').strip()\n",
+                "    rejected = (example.get('rejected') or example.get('bad_output') or '').strip()\n",
+                "    return {'prompt': prompt, 'chosen': chosen, 'rejected': rejected}\n\n",
+                "split_dataset = dataset.train_test_split(test_size=0.05, seed=3407, shuffle=True)\n",
+                "train_data = split_dataset['train'].map(format_dpo_example)\n",
+                "eval_data = split_dataset['test'].map(format_dpo_example)\n\n",
+                f"OUTPUT_DIR = '{out_dir}'\n",
+                f"LORA_OUTPUT_DIR = '{lora_dir}'\n\n",
+                "dpo_args = DPOConfig(\n",
+                "    output_dir=OUTPUT_DIR,\n",
+                "    max_length=MAX_SEQ_LENGTH,\n",
+                "    max_prompt_length=1024,\n",
+                "    beta=0.1,\n",
+                "    per_device_train_batch_size=1 if is_small_model else 2,\n",
+                "    per_device_eval_batch_size=1,\n",
+                "    gradient_accumulation_steps=8 if is_small_model else 4,\n",
+                "    num_train_epochs=3,\n",
+                "    learning_rate=5e-5,\n",
+                "    lr_scheduler_type='cosine',\n",
+                "    warmup_ratio=0.03,\n",
+                "    bf16=torch.cuda.is_bf16_supported(),\n",
+                "    fp16=not torch.cuda.is_bf16_supported(),\n",
+                "    logging_steps=10,\n",
+                "    eval_strategy='epoch',\n",
+                "    save_strategy='epoch',\n",
+                "    save_total_limit=2,\n",
+                "    seed=3407,\n",
+                "    report_to='none',\n",
+                ")\n\n",
+                "trainer = DPOTrainer(\n",
+                "    model=model,\n",
+                "    ref_model=None,\n",
+                "    tokenizer=tokenizer,\n",
+                "    train_dataset=train_data,\n",
+                "    eval_dataset=eval_data,\n",
+                "    args=dpo_args,\n",
+                ")\n\n",
+                "print('🔥 DPO Tercih Eğitimi Başlatılıyor...')\n",
+                "trainer.train()\n",
+                "model.save_pretrained(LORA_OUTPUT_DIR)\n",
+                "tokenizer.save_pretrained(LORA_OUTPUT_DIR)\n",
+                f"print(f'✅ DPO LoRA Adaptörü Kaydedildi: {{LORA_OUTPUT_DIR}}')"
+            ]
+        else:
+            cell5_source = [
+                "# 🎯 HÜCRE 5: Fine-Tuning Eğitimi ve Değerlendirme (Validation Loss)\n",
+                "from trl import SFTConfig, SFTTrainer\n\n",
+                "def build_chat_text(example: dict, tokenizer) -> dict:\n",
+                "    instruction = (example.get('instruction') or example.get('prompt') or example.get('question') or '').strip()\n",
+                "    user_input = (example.get('input') or example.get('context') or '').strip()\n",
+                "    output = (example.get('output') or example.get('response') or example.get('answer') or example.get('chosen') or '').strip()\n",
+                "    user_content = f'{instruction}\\n\\n{user_input}' if user_input else instruction\n",
+                "    if not user_content: user_content = 'Lütfen aşağıdaki görevi yapın.'\n",
+                "    if not output: output = 'Yanıt mevcut değil.'\n",
+                "    messages = [{'role': 'user', 'content': user_content}, {'role': 'assistant', 'content': output}]\n",
+                "    try:\n",
+                "        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)\n",
+                "    except Exception:\n",
+                "        text = f'### Instruction:\\n{user_content}\\n\\n### Response:\\n{output}'\n",
+                "    return {'text': text}\n\n",
+                "split_dataset = dataset.train_test_split(test_size=0.05, seed=3407, shuffle=True)\n",
+                "train_data = split_dataset['train'].map(lambda x: build_chat_text(x, tokenizer), remove_columns=dataset.column_names)\n",
+                "eval_data = split_dataset['test'].map(lambda x: build_chat_text(x, tokenizer), remove_columns=dataset.column_names)\n\n",
+                f"OUTPUT_DIR = '{out_dir}'\n",
+                f"LORA_OUTPUT_DIR = '{lora_dir}'\n\n",
+                "training_args = SFTConfig(\n",
+                "    output_dir=OUTPUT_DIR,\n",
+                "    max_seq_length=MAX_SEQ_LENGTH,\n",
+                "    dataset_text_field='text',\n",
+                "    dataset_num_proc=1,\n",
+                "    per_device_train_batch_size=1 if is_small_model else 2,\n",
+                "    per_device_eval_batch_size=1,\n",
+                "    gradient_accumulation_steps=8 if is_small_model else 4,\n",
+                "    num_train_epochs=3,\n",
+                "    learning_rate=1e-4,\n",
+                "    lr_scheduler_type='cosine',\n",
+                "    warmup_ratio=0.03,\n",
+                "    weight_decay=0.01,\n",
+                "    bf16=torch.cuda.is_bf16_supported(),\n",
+                "    fp16=not torch.cuda.is_bf16_supported(),\n",
+                "    optim='adamw_8bit',\n",
+                "    logging_steps=10,\n",
+                "    eval_strategy='epoch',\n",
+                "    save_strategy='epoch',\n",
+                "    save_total_limit=2,\n",
+                "    load_best_model_at_end=True,\n",
+                "    metric_for_best_model='eval_loss',\n",
+                "    greater_is_better=False,\n",
+                "    seed=3407,\n",
+                "    report_to='none',\n",
+                ")\n\n",
+                "trainer = SFTTrainer(\n",
+                "    model=model,\n",
+                "    tokenizer=tokenizer,\n",
+                "    train_dataset=train_data,\n",
+                "    eval_dataset=eval_data,\n",
+                "    dataset_text_field='text',\n",
+                "    max_seq_length=MAX_SEQ_LENGTH,\n",
+                "    dataset_num_proc=1,\n",
+                "    packing=False,\n",
+                "    args=training_args,\n",
+                ")\n\n",
+                "print('🔥 Fine-Tuning Eğitimi Başlatılıyor...')\n",
+                "trainer.train()\n\n",
+                "metrics = trainer.evaluate()\n",
+                "print('📈 Final Validation Loss:', metrics.get('eval_loss', 'N/A'))\n\n",
+                "model.save_pretrained(LORA_OUTPUT_DIR)\n",
+                "tokenizer.save_pretrained(LORA_OUTPUT_DIR)\n",
+                f"print(f'✅ LoRA Adapter Kaydedildi: {{LORA_OUTPUT_DIR}}')"
+            ]
+
+        # Cell 6: GGUF Export & Ollama Modelfile
+        cell6_source = [
+            "# 📦 HÜCRE 6: GGUF (Q4_K_M) Export, Ollama Modelfile & Antigravity IDE Entegrasyonu\n",
+            f"GGUF_OUTPUT_DIR = '{gguf_dir}'\n",
+            "print('📦 GGUF Export Başlatılıyor (Quantization: Q4_K_M)...')\n",
+            "model.save_pretrained_gguf(GGUF_OUTPUT_DIR, tokenizer, quantization_method='q4_k_m')\n",
+            f"print(f'🎉 GGUF Model Başarıyla Kaydedildi: {{GGUF_OUTPUT_DIR}}')\n\n",
+            "modelfile_content = f'''FROM ./unsloth.Q4_K_M.gguf\n",
+            "PARAMETER temperature 0.2\n",
+            "PARAMETER top_p 0.95\n",
+            "SYSTEM \"Sen kıdemli bir yazılım mimarı ve yapay zekâ uzmanısın.\"\n",
+            "'''\n",
+            "with open(f'{GGUF_OUTPUT_DIR}/Modelfile', 'w', encoding='utf-8') as f:\n",
+            "    f.write(modelfile_content)\n",
+            f"print(f'📄 Ollama Modelfile Oluşturuldu: {{GGUF_OUTPUT_DIR}}/Modelfile')\n\n",
+            f"print('💡 Yerel Ollama / Antigravity IDE\\'ye yüklemek için:')\n",
+            f"print('   ollama create {project_id}-{d_type} -f {gguf_dir}/Modelfile')\n",
+            "print('✨ Model hazır! Artık Antigravity IDE\\'nin kod tamamlama veya sohbet modeline bağlanabilir.')"
+        ]
+
+        notebook_json = {
+            "cells": [
+                {
+                    "cell_type": "markdown",
+                    "metadata": {},
+                    "source": header_markdown
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": cell1_source
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": cell2_source
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": cell3_source
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": cell4_source
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": cell5_source
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": cell6_source
+                }
+            ],
+            "metadata": {
+                "accelerator": "GPU",
+                "colab": {
+                    "provenance": []
+                },
+                "language_info": {
+                    "name": "python"
+                }
+            },
+            "nbformat": 4,
+            "nbformat_minor": 2
+        }
+        return notebook_json
+
+    def generate_all_colab_notebooks(
+        self,
+        project_id: str,
+        base_model: str = "unsloth/Qwen3.5-2B",
+        hf_dataset: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Generates dedicated Google Colab & Antigravity-IDE notebooks for all dataset categories:
+        - SFT (Supervised Fine-Tuning)
+        - DPO (Direct Preference Optimization)
+        - Chat (Multi-Turn Conversational Dialogs)
+        - LangExtract (Grounded Structured Entity Extraction)
+        
+        Saves all generated .ipynb files into exports/<project_id>/cloud_payload/
+        """
+        target_dir = self.exports_dir / project_id / "cloud_payload"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        dataset_types = ["sft", "dpo", "chat", "langextract"]
+        created_notebooks = {}
+
+        for d_type in dataset_types:
+            nb_filename = f"unsloth_colab_{d_type}_{project_id}.ipynb"
+            nb_path = target_dir / nb_filename
+            nb_json = self.generate_colab_ide_notebook(
+                project_id=project_id,
+                base_model=base_model,
+                hf_dataset=hf_dataset,
+                dataset_type=d_type
+            )
+            with open(nb_path, "w", encoding="utf-8") as f:
+                json.dump(nb_json, f, indent=2, ensure_ascii=False)
+            created_notebooks[d_type] = nb_filename
+
+        return {
+            "status": "success",
+            "project_id": project_id,
+            "payload_dir": str(target_dir),
+            "generated_notebooks": created_notebooks
+        }
+
     def prepare_cloud_payload(
         self,
         project_id: str,
-        base_model: str = "Qwen/Qwen3.5-2B",
+        base_model: str = "unsloth/Qwen3.5-2B",
         hf_dataset: str = "",
         dataset_file: str = ""
     ) -> Dict[str, Any]:
         """
         Prepares cloud GPU offloading package in exports/<project_id>/cloud_payload/
-        Includes Python script, 6-cell Jupyter Notebook (.ipynb), Axolotl YAML, and RunPod shell script.
+        Includes Python script, full suite of Google Colab & Antigravity-IDE Notebooks (.ipynb),
+        Axolotl YAML, RunPod shell script, and Vertex AI tuning configuration.
         """
         target_dir = self.exports_dir / project_id / "cloud_payload"
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -562,6 +1040,10 @@ save_total_limit: 2
 
         with open(axolotl_file, "w", encoding="utf-8") as f:
             f.write(axolotl_code)
+
+        # Generate all 4 Colab & Antigravity-IDE Notebooks (SFT, DPO, Chat, LangExtract)
+        all_colab = self.generate_all_colab_notebooks(project_id, base_model, hf_dataset)
+        colab_files = list(all_colab.get("generated_notebooks", {}).values())
 
         runpod_bash = f"""#!/usr/bin/env bash
 # Qwen3.5 / Unsloth High-Speed GPU Launcher for JupyterLab & Remote GPU
@@ -612,19 +1094,23 @@ python unsloth_finetune.py
         with open(vertex_file, "w", encoding="utf-8") as f:
             json.dump(vertex_config, f, indent=2, ensure_ascii=False)
 
+        generated_files = [
+            "unsloth_finetune.py",
+            notebook_filename,
+            "axolotl_config.yaml",
+            "run_cloud_gpu.sh",
+            "vertex_ai_tuning.json"
+        ] + colab_files
+
         return {
             "status": "success",
             "project_id": project_id,
             "payload_dir": str(target_dir),
             "notebook_filename": notebook_filename,
-            "generated_files": [
-                "unsloth_finetune.py",
-                notebook_filename,
-                "axolotl_config.yaml",
-                "run_cloud_gpu.sh",
-                "vertex_ai_tuning.json"
-            ]
+            "colab_notebooks": all_colab.get("generated_notebooks", {}),
+            "generated_files": generated_files
         }
 
     # Alias for API consistency
     generate_payload = prepare_cloud_payload
+

@@ -423,6 +423,11 @@ def run_pipeline_process(cmd, limit, reset, shards=1, shard_ports=None, enrich_p
         args.append("--reset")
     if cmd == "langextract":
         args.append("--visualize")
+    if cmd == "kiwix":
+        cfg = get_config()
+        k_mode = cfg.get("kiwix_extract_mode", "auto")
+        k_batch = cfg.get("kiwix_batch_size", 500)
+        args.extend(["--mode", str(k_mode), "--batch-size", str(k_batch)])
     if cmd in ["enrich", "pipeline", "export_visual"] and shards > 1 and shard_ports:
         args.extend(["--shards", str(shards), "--shard-ports", str(shard_ports)])
     if enrich_pass and enrich_pass != "all":
@@ -1339,6 +1344,71 @@ def download_cloud_notebook(project_id: str = Query(...)):
         media_type="application/x-ipynb+json"
     )
 
+@app.post("/api/cloud/generate-colab")
+def generate_colab_notebooks(payload: Dict[str, Any] = Body(...)):
+    """Generates Google Colab & Antigravity-IDE notebooks for SFT, DPO, Chat, or LangExtract."""
+    project_id = payload.get("project_id", "")
+    base_model = payload.get("base_model", "unsloth/Qwen3.5-2B")
+    hf_dataset = payload.get("hf_dataset", "")
+    dataset_type = payload.get("dataset_type", "all").lower()
+
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id alanı zorunludur.")
+
+    offloader = CloudGPUOffloader()
+    try:
+        if dataset_type == "all":
+            return offloader.generate_all_colab_notebooks(
+                project_id=project_id,
+                base_model=base_model,
+                hf_dataset=hf_dataset
+            )
+        else:
+            target_dir = Path("exports") / project_id / "cloud_payload"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            nb_filename = f"unsloth_colab_{dataset_type}_{project_id}.ipynb"
+            nb_path = target_dir / nb_filename
+            nb_json = offloader.generate_colab_ide_notebook(
+                project_id=project_id,
+                base_model=base_model,
+                hf_dataset=hf_dataset,
+                dataset_type=dataset_type
+            )
+            with open(nb_path, "w", encoding="utf-8") as f:
+                json.dump(nb_json, f, indent=2, ensure_ascii=False)
+            return {
+                "status": "success",
+                "project_id": project_id,
+                "dataset_type": dataset_type,
+                "notebook_filename": nb_filename,
+                "notebook_path": str(nb_path)
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Colab notebook üretim hatası: {str(e)}")
+
+@app.get("/api/cloud/download-colab")
+def download_colab_notebook(
+    project_id: str = Query(...),
+    dataset_type: str = Query("sft")
+):
+    """Downloads Google Colab & Antigravity-IDE notebook for specified dataset type."""
+    d_type = dataset_type.lower()
+    nb_filename = f"unsloth_colab_{d_type}_{project_id}.ipynb"
+    target_path = Path("exports") / project_id / "cloud_payload" / nb_filename
+    if not target_path.exists():
+        # Fallback to standard finetune notebook if specific one doesn't exist
+        fallback_path = Path("exports") / project_id / "cloud_payload" / f"unsloth_finetune_{project_id}.ipynb"
+        if fallback_path.exists():
+            target_path = fallback_path
+            nb_filename = f"unsloth_finetune_{project_id}.ipynb"
+        else:
+            raise HTTPException(status_code=404, detail=f"Notebook dosyası bulunamadı ({nb_filename}). Lütfen önce oluşturun.")
+    return FileResponse(
+        path=target_path,
+        filename=nb_filename,
+        media_type="application/x-ipynb+json"
+    )
+
 @app.get("/api/projects/logs")
 def get_project_error_logs(project_id: str = Query(...), max_lines: int = Query(100)):
     logger = get_project_logger(project_id)
@@ -1527,6 +1597,50 @@ def run_judge_task(payload: Dict[str, Any] = Body(...)):
     stats = engine.judge_all(limit=limit, mode=mode, threshold=threshold)
     return {"status": "success", "stats": stats}
 
+@app.post("/api/judge/batch/submit")
+def submit_judge_batch(payload: Dict[str, Any] = Body(...)):
+    """Submits asynchronous batch prediction job to Gemini Batch API (%50 Discount, Zero Rate Limit)."""
+    from pipeline.judge_engine import JudgeEngine
+    cfg = get_config()
+    mode = payload.get("mode", "strict")
+    threshold = float(payload.get("threshold", 7.0))
+    limit = payload.get("limit")
+    
+    engine = JudgeEngine(cfg)
+    result = engine.judge_batch_submit(limit=limit, mode=mode, threshold=threshold)
+    return result
+
+@app.get("/api/judge/batch/jobs")
+def list_judge_batch_jobs(limit: int = Query(50)):
+    """Lists recent Gemini Batch Prediction jobs and their live execution status."""
+    from pipeline.judge_engine import JudgeEngine
+    cfg = get_config()
+    engine = JudgeEngine(cfg)
+    return {"jobs": engine.list_batch_jobs(limit=limit)}
+
+@app.post("/api/judge/batch/sync")
+def sync_judge_batch_results(payload: Dict[str, Any] = Body(default={})):
+    """Polls and syncs completed Gemini Batch Prediction job outputs into SQLite database."""
+    from pipeline.judge_engine import JudgeEngine
+    cfg = get_config()
+    job_id = payload.get("job_id")
+    engine = JudgeEngine(cfg)
+    result = engine.judge_batch_sync(job_id=job_id)
+    return result
+
+@app.post("/api/judge/batch/cancel")
+@app.delete("/api/judge/batch/{job_id:path}")
+def cancel_or_delete_judge_batch(job_id: Optional[str] = None, payload: Dict[str, Any] = Body(default={})):
+    """Cancels and deletes a Gemini Batch Prediction job from SQLite tracking table."""
+    from pipeline.judge_engine import JudgeEngine
+    cfg = get_config()
+    target_job_id = job_id or payload.get("job_id")
+    if not target_job_id:
+        return {"status": "error", "message": "job_id is required."}
+    engine = JudgeEngine(cfg)
+    result = engine.delete_batch_job(target_job_id)
+    return result
+
 @app.get("/api/judge/stats")
 def get_judge_stats(project_id: Optional[str] = Query(None)):
     """Returns judge scores breakdown from SQLite database."""
@@ -1599,9 +1713,10 @@ def trigger_scheduled_audit(payload: Dict[str, Any] = Body(...)):
     limit = int(payload.get("limit", 50))
     mode = payload.get("mode", "strict")
     threshold = float(payload.get("threshold", 7.0))
+    use_batch_api = bool(payload.get("use_batch_api", False))
     
     mgr = ScheduledTriggersManager(cfg)
-    result = mgr.run_trigger_audit_pass(limit=limit, mode=mode, threshold=threshold)
+    result = mgr.run_trigger_audit_pass(limit=limit, mode=mode, threshold=threshold, use_batch_api=use_batch_api)
     return result
 
 @app.get("/api/hooks/audit")

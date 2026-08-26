@@ -22,7 +22,7 @@ Originally built for the Elektor Magazine Archive (1974–2025), the pipeline ha
 | **FAZ 10** | **Multimodal Tarama & Çizim / Grafik Anlamlandırma Motoru (DeepSeek-OCR)**: Taralı PDF'lerdeki teknik çizimleri, devre şemalarını, grafik şemaları ve görsel tabloları anlamlandırmak için `deepseek-ocr:3b-bf16` vizyon modeli entegrasyonu, akıllı yerleşim/kutu filtreleme (smart bounding box filtering) ve otomatik VRAM offload mekanizması. 2x 16GB GPU üzerinde Paralel Sharding (Port 11434 & 11435) ile SQLite WAL modunda eşzamanlı çalışma desteği. | ✅ **Tamamlandı** |
 | **FAZ 11** | **Otomatik Multimodal Görsel İnce-Ayar Veri Seti Motoru (Visual Instruction Tuning / LLaVA Format)**: PDF'lerden kırpılan teknik çizim, şema ve grafiklerin (`downloads/extracted_images/`) VLM (`deepseek-ocr:3b-bf16`, `qwen3.5:4b`) ile otomatik etiketlenerek LLaVA/Qwen-VL uyumlu bağımsız **Görsel Veri Seti** (`multimodal_visual_dataset.jsonl`), WebP optimizasyonu ve `multimodal_catalog.md` olarak paketlenmesi. | ✅ **Tamamlandı** |
 | **FAZ 12** | **Google LangExtract Entegrasyonu & Karakter Bazlı Kaynak Bağlama (Source Grounding)**: Google'ın `langextract` kütüphanesinin **Gemini API** (Google GenAI), **OpenAI** ve **Ollama** sağlayıcıları ile entegrasyonu; hassas karakter offset aralıkları (`start_char`, `end_char`), hazır mühendislik ve ders kitabı şemaları (`engineering_exercise_sheet`), etkileşimli HTML görselleştirme raporları ve `langextract_grounded_dataset.jsonl` ihracı. | ✅ **Tamamlandı** |
-| **FAZ 13** | **Kiwix OpenZIM Kataloğu & Ansiklopedi Veri Hattı (`kiwix`)**: OpenZIM (`.zim`) formatındaki Wikipedia (Türkçe/İngilizce), StackOverflow ve akademik ansiklopedi arşivlerini `libzim` ile doğrudan okuyup SQLite `articles` tablosuna ve eğitime hazır JSONL veri setlerine dönüştüren yüksek hızlı veri alım hattı. | ✅ **Tamamlandı** |
+| **FAZ 13** | **Kiwix OpenZIM & StackExchange RLHF / DPO Veri Hattı ve Web UI Entegrasyonu (`kiwix`)**: OpenZIM (`.zim`) formatındaki Wikipedia ve StackExchange arşivlerini `libzim` ile doğrudan okuyup etiketler (`tags`), soru/yanıt oyları (`data-score`), kabul edilen çözümler (`accepted-answer`) ve kapatılma bildirimleri ile ayrıştıran; doğrudan SFT ve DPO/ORPO çiftleri üreten ve React Web UI üzerinde zengin görsel rozetler ile yönetilen yüksek hızlı veri alım hattı. | ✅ **Tamamlandı** |
 | **FAZ 14** | **Gemini API Sağlamlaştırma & Token Bütçe Yöneticisi**: `gemini-3.6-flash`, `gemini-3.5-flash` desteği, `httpx.Limits` bağlantı havuzlama, jitter içeren üstel geri çekilme ve SQLite tabanlı `TokenBudgetManager` ile Google Developer Program kredi denetimi. | ✅ **Tamamlandı** |
 | **FAZ 15** | **Bağımsız LLM-as-a-Judge & Editor-in-Chief Hakemliği**: SFT ve DPO çiftlerinin teknik doğruluk, mantık ve Türkçe sentaks açısından 1-10 skalasında hızlı puanlanması (`strict`) ve sınırda kalanların cerrahi düzeltilmesi (`hybrid_editor`). `python run.py judge` CLI ve REST API desteği. | ✅ **Tamamlandı** |
 | **FAZ 16** | **LangExtract Kaynak Doğrulama & Dinamik Few-Shot Optimizasyonu**: `locate_character_offsets` ile kaynak metin hizalama, Pydantic şema zorlaması ve dökümana özel 1-shot dinamik sentezleme. | ✅ **Tamamlandı** |
@@ -37,7 +37,7 @@ Originally built for the Elektor Magazine Archive (1974–2025), the pipeline ha
 
 ### 1. Multi-Mode Ingestion (Çoklu Veri Alım Modları)
 - **Rendergit Mode (`input_mode: "rendergit"`)**: Clones Git repositories (or parses local source folders), flattens codebase structure into a unified Markdown file (`exports/<project_id>_rendergit.md`), and extracts Abstract Syntax Tree (AST) code units (classes, functions) into SQLite `code_units`.
-- **Kiwix ZIM Mode (`input_mode: "kiwix"`)**: Parses OpenZIM (`.zim`) encyclopedia/Wikipedia archives using `libzim`, converts HTML to clean Markdown with `BeautifulSoup4` + `html2text`, and indexes articles directly into SQLite.
+- **Kiwix ZIM Mode (`input_mode: "kiwix"`)**: Parses OpenZIM (`.zim`) encyclopedia and StackExchange archives using `libzim`. Features zero-dependency high-speed HTML cleaner preserving code blocks and LaTeX math (`$...$`, `$$...$$`), extracts question tags and vote scores, creates SFT and DPO/ORPO pairs directly without LLM inference, and is fully manageable through interactive React Web UI controls.
 - **Folder Mode (`input_mode: "folder"`)**: Recursively parses PDF document directories.
 - **Book Mode (`input_mode: "book"`)**: Splits large PDF textbooks or datasheets into contiguous chapters using PDF outline bookmarks, with a 10-page fallback slice generator.
 
@@ -177,10 +177,27 @@ Run the unit test suite:
 PYTHONPATH=. uv run pytest tests/
 ```
 
-### 4. Kiwix OpenZIM Catalog Extractor (`kiwix`)
-Extract ZIM archives directly into SQLite database:
+### 4. Kiwix OpenZIM & StackExchange Extractor (`kiwix`)
+Extract ZIM archives directly into SQLite and compile instant SFT/DPO datasets:
 ```bash
-python run.py kiwix --zim downloads/wikipedia_tr_all.zim --limit 100
+# Auto mode (auto-detects StackExchange vs Wiki)
+python run.py kiwix --zim downloads/ham.stackexchange.com_en_all_2026-02.zim --limit 500
+
+# StackExchange Q&A mode with custom batch commit size
+python run.py kiwix --zim downloads/ham.stackexchange.com_en_all_2026-02.zim --mode stackexchange --batch-size 500
+
+# Compile exported SFT and DPO datasets (JSONL & Parquet)
+python run.py export
+```
+
+### 5. Google Colab & Antigravity-IDE Unsloth Fine-Tuning (`colab`)
+Generate production-ready `.ipynb` notebooks for Antigravity-IDE / VS Code with remote Google Colab GPU connection:
+```bash
+# Generate notebooks for all dataset types (SFT, DPO, Chat, LangExtract)
+PYTHONPATH=. uv run python run.py colab --project <id> --type all
+
+# Target specific base model (e.g. unsloth/Qwen3.5-2B)
+PYTHONPATH=. uv run python run.py colab --project <id> --type dpo --model unsloth/Qwen3.5-2B
 ```
 
 ---
