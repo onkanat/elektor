@@ -17,3 +17,4 @@ python-dateutil>=2.9.0
 beautifulsoup4>=4.12.0
 html2text>=2024.2.26
 libzim>=3.10.0
+json-repair>=0.63.0

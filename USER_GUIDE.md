@@ -496,7 +496,50 @@ PYTHONPATH=. uv run python tools/test_langextract.py --provider fallback
 
 ---
 
-*Rehber Son Güncelleme: 2026-08-22 | Elektor Universal Pipeline v19.3*
+## 19. 🚀 Universal Dataset Orchestrator & Davranış Distilasyonu Motoru (Faz 21)
+
+Faz 21 ile birlikte, heterojen kaynakları (PDF kitaplar, Git repoları, Kiwix ZIM ansiklopedileri) tek elden orkestre eden global **`universal-dataset-orchestrator`** Antigravity Agent yeteneği ve **[`tools/orchestrator.py`](file:///Users/hakankilicaslan/Git/elektor/tools/orchestrator.py)** CLI motoru devreye alınmıştır.
+
+### 1. 5 Boyutlu Davranış Distilasyonu Rubriği
+Üretilen model yanıtları aşağıdaki 5 eksende 0-5 puan ile değerlendirilir:
+1. **Talimat Kapsama:** Prompttaki tüm teknik gereksinim ve kısıtlamaların eksiksiz karşılanması.
+2. **Format Sadakati:** Markdown, LaTeX (`$...$`, `$$...$$`), tablolar ve kod bloklarının hatasızlığı.
+3. **Dil & Üslup:** Disipline uygun yetkin Türkçe ve İngilizce akademik/mühendislik üslubu.
+4. **Yapısal Bütünlük:** Mantıksal akış, akıcı geçişler ve tutarlı başlık hiyerarşisi.
+5. **Sapma / Gürültü:** Konu dışı gevezeliklerin, tekrarların ve halüsinasyonların ayıklanması.
+
+### 2. İki Kademeli Çalışma (Two-Tier Compute) & VRAM Güvenlik Protokolü
+- **Seviye 1 (CPU/IO - Paralel):** PDF metin çıkarma (PyMuPDF), Kiwix ZIM okuma ve Rendergit AST kod bloklama çok çekirdekli paralel (`multiprocessing`) çalıştırılır.
+- **Seviye 2 (GPU/VRAM - Ardışık & Sharded):** 30B+ yerel modellerle (`nemotron-cascade-2:30b`, `qwen3-coder:30b`) yapılan zenginleştirme ve hakemlik adımları, GPU VRAM taşmalarını (OOM) önlemek için port başına kuyruğa alınarak ardışık (*sequential*) işletilir.
+- **Dinamik Port Havuzu:** `http://127.0.0.1:11434` (Yerel GPU 1), `http://127.0.0.1:11435` (Yerel GPU 2) ve `http://192.168.1.14:11434` (Uzak Sunucu GPU).
+
+### 3. CLI ve Ajan Komutları (`tools/orchestrator.py`)
+
+```bash
+# 1. GPU Havuzu ve Aktif Projelerin Sağlık Durumunu Listele:
+PYTHONPATH=. uv run python tools/orchestrator.py status
+
+# 2. PDF, Git Reposu veya ZIM Kaynaklı İzole Üretim Başlat:
+PYTHONPATH=. uv run python tools/orchestrator.py produce --input downloads/kitap.pdf --mode book --name kitap_projesi
+PYTHONPATH=. uv run python tools/orchestrator.py produce --input downloads/repos/micrograd --mode rendergit --name micrograd_code
+PYTHONPATH=. uv run python tools/orchestrator.py produce --input downloads/wiki.zim --mode kiwix --name wiki_zim
+
+# 3. 5-Boyutlu Davranış Hakemliğini (LLM-as-a-Judge) Çalıştır:
+PYTHONPATH=. uv run python tools/orchestrator.py judge --project kitap_projesi --mode strict --threshold 7.5
+PYTHONPATH=. uv run python tools/orchestrator.py judge --project kitap_projesi --mode hybrid_editor
+PYTHONPATH=. uv run python tools/orchestrator.py judge --project kitap_projesi --batch
+
+# 4. Altın SFT ve DPO Veri Setlerini Derle:
+PYTHONPATH=. uv run python tools/orchestrator.py compile-datasets --project kitap_projesi --min-diff 2.0
+```
+
+### 4. DPO ve Altın SFT Kürasyon Kuralları
+- **DPO Çifti:** Hakem puan farkı $\text{Puan}(\text{Chosen}) - \text{Puan}(\text{Rejected}) \ge 2.0$ olan adaylar `dpo_dataset.jsonl` olarak derlenir. Puan farkı $< 1.0$ olan kararsız örnekler elenir.
+- **Altın SFT:** Hakem modelin en yüksek puanı ($\ge 7.5/10$ veya $\ge 20/25$) verdiği yanıtlar tekilleştirilerek `golden_sft_dataset.jsonl` olarak derlenir.
+
+---
+
+*Rehber Son Güncelleme: 2026-09-04 | Elektor Universal Pipeline v20.0*
 
 
 

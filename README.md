@@ -200,6 +200,22 @@ PYTHONPATH=. uv run python run.py colab --project <id> --type all
 PYTHONPATH=. uv run python run.py colab --project <id> --type dpo --model unsloth/Qwen3.5-2B
 ```
 
+### 6. Universal Dataset Orchestrator & Davranış Distilasyonu Motoru (`orchestrator`)
+Orchestrate heterogeneous sources (PDF, Git repos, Kiwix ZIM) in parallel with isolated configs and 5-dimension rubric LLM-as-a-Judge:
+```bash
+# Check GPU pool health and active projects
+PYTHONPATH=. uv run python tools/orchestrator.py status
+
+# Run isolated pipeline for any source
+PYTHONPATH=. uv run python tools/orchestrator.py produce --input downloads/book.pdf --mode book --name my_book
+
+# Run 5-dimension behavior judge
+PYTHONPATH=. uv run python tools/orchestrator.py judge --project my_book --mode strict --threshold 7.5
+
+# Compile DPO preference pairs (min_diff >= 2.0) and Golden SFT
+PYTHONPATH=. uv run python tools/orchestrator.py compile-datasets --project my_book --min-diff 2.0
+```
+
 ---
 
 ## 🔧 Configuration Reference (`config.json` / `projects_<id>.json`)

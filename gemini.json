@@ -10,6 +10,7 @@
   "openai_timeout": 120,
   "analyzer_max_chars": 12000,
   "analyzer_max_tokens": 8192,
+  "embeding_url ": "http://localhost:11434/v1",
   "model_embedding": "nomic-embed-text:latest",
   "model_analyzer": "gemini-3.6-flash",
   "model_translator": "gemini-3.6-flash",
@@ -42,6 +43,9 @@
   "langextract_schema_preset": "generic_technical_qa",
   "kiwix_zim_path": "",
   "kiwix_download_url": "",
-  "kiwix_namespaces": ["A", ""],
+  "kiwix_namespaces": [
+    "A",
+    ""
+  ],
   "kiwix_min_chars": 300
 }

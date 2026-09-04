@@ -213,7 +213,16 @@ class ArchiveAnalyzer:
                 except Exception:
                     pass
 
-                # 2. Protect common LaTeX commands starting with b, f, n, r, t from becoming control chars
+                # 2. json_repair library (heals unescaped quotes, missing ':' delimiters, truncated JSON)
+                try:
+                    import json_repair
+                    repaired = json_repair.repair_json(target, return_objects=True)
+                    if isinstance(repaired, dict) and repaired:
+                        return repaired
+                except Exception:
+                    pass
+
+                # 3. Protect common LaTeX commands starting with b, f, n, r, t from becoming control chars
                 latex_cmds = (
                     "frac", "font", "forall", "fbox", "flat",
                     "beta", "bar", "begin", "binom", "bullet", "bold", "bmatrix", "bmod",
@@ -224,7 +233,7 @@ class ArchiveAnalyzer:
                 for cmd in latex_cmds:
                     target = re.sub(r"(?<!\\)\\" + cmd + r"(?![a-zA-Z])", r"\\\\" + cmd, target)
 
-                # 3. Sanitize backslashes: correctly escape invalid sequences without corrupting existing \\
+                # 4. Sanitize backslashes: correctly escape invalid sequences without corrupting existing \\
                 def replace_slash(match):
                     slashes = match.group(1)
                     next_char = match.group(2)
@@ -249,7 +258,16 @@ class ArchiveAnalyzer:
                     except Exception:
                         pass
 
-                # 4. Remove trailing commas in objects or arrays
+                # 5. Try json_repair on sanitized target
+                try:
+                    import json_repair
+                    repaired = json_repair.repair_json(target_fixed, return_objects=True)
+                    if isinstance(repaired, dict) and repaired:
+                        return repaired
+                except Exception:
+                    pass
+
+                # 6. Remove trailing commas in objects or arrays
                 target_fixed2 = re.sub(r',\s*([\}\]])', r'\1', target_fixed)
                 try:
                     obj, _ = json.JSONDecoder(strict=False).raw_decode(target_fixed2)
@@ -260,7 +278,7 @@ class ArchiveAnalyzer:
                     except Exception:
                         pass
 
-                # 5. Regex outer match fallback
+                # 7. Regex outer match fallback
                 match = re.search(r'(\{[\s\S]*\})', target_fixed2)
                 if match:
                     try:
@@ -286,8 +304,12 @@ class ArchiveAnalyzer:
         truncated_text = text[:self.analyzer_max_chars] if len(text) > self.analyzer_max_chars else text
         
         system_prompt = (
-            f"{self.llm_persona} "
-            "Analyze the document text and output a single JSON object. Follow the requested structure strictly."
+            f"{self.llm_persona}\n"
+            "You are a principal technical dataset architect. Analyze the document and generate a single strictly valid JSON object.\n\n"
+            "CRITICAL JSON SYNTAX RULES:\n"
+            "1. Output MUST be a single, valid JSON object without surrounding commentary.\n"
+            "2. NEVER use unescaped double quotes (\") inside string values. For any internal quotes, code terms, or emphasis within values, use SINGLE QUOTES (') or backticks (`). If double quotes are strictly needed, escape them as \\\".\n"
+            "3. Ensure all keys and string values are properly formatted with matching colons (:) and braces ({}, [])."
         )
         
         multi_turn_schema = (
@@ -322,7 +344,8 @@ class ArchiveAnalyzer:
             f"2. Answers MUST be detailed, thorough, and instructive according to the domain: {self.llm_subject}.\n"
             f"3. In the DPO pair, the rejected answer must contain a plausible misconception, incorrect factual claim, or flawed reasoning related to {self.llm_subject} and the article text.\n"
             "4. Format any mathematical equations or formulas using standard LaTeX notation, for example: \\(p = \\frac{n \\cdot n_{cyl}}{60 \\cdot a}\\) instead of plain text.\n"
-            "5. Return ONLY the valid JSON object. Do not include markdown code block formatting."
+            "5. QUOTE ESCAPING: Inside answers or questions, use single quotes (') for terms, never unescaped double quotes (\").\n"
+            "6. Return ONLY the valid JSON object."
         )
         
         result = self.call_ollama_json(system_prompt, user_prompt, model=self.model_name, num_predict=self.analyzer_max_tokens)
@@ -378,7 +401,12 @@ class ArchiveAnalyzer:
         
         system_prompt = (
             f"Sen uzman bir gömülü sistemler mimarı, teknik yazar ve Türkçe yapay zeka eğitmenisin. ({self.llm_persona})\n"
-            "Verilen döküman metnini derinlemesine incele ve doğrudan yüksek kaliteli Türkçe teknik içerik üreterek JSON objesi döndür."
+            "Verilen döküman metnini derinlemesine incele ve doğrudan yüksek kaliteli Türkçe teknik içerik üreterek JSON objesi döndür.\n\n"
+            "KRİTİK JSON SÖZDİZİMİ VE TIRNAK KURALLARI:\n"
+            "1. Çıktı SADECE tek ve geçerli bir JSON nesnesi olmalıdır.\n"
+            "2. JSON string değerleri (soru, cevap, özet vb.) içerisinde ASLA kaçırılmamış çift tırnak (\") kullanma. Metin içindeki terimler, kodlar veya vurgular için TEK TIRNAK (') veya ters tırnak (`) kullan. Çift tırnak kullanılması zorunluysa mutlaka \\\" olarak kaçır.\n"
+            "3. LaTeX matematik formüllerinde formül içi metinlerde tek tırnak (') kullan.\n"
+            "4. Yanıtı eksiksiz tamamla; tüm dizi ([]), nesne ({}) parantezlerini ve iki nokta (:) ayıraçlarını kusursuz kapat."
         )
         
         user_prompt = (
@@ -409,7 +437,8 @@ class ArchiveAnalyzer:
             f"2. Yanıtlar {self.llm_subject} alanına uygun, Türkçe teknik terimlerin korunduğu derinlikte olmalıdır.\n"
             "3. DPO çiftinde reddedilen (rejected) cevap, mantıklı görünen ancak gerçek bir mühendislik hatası (gerilim uyumsuzluğu, pin hatası, vb.) içermelidir.\n"
             "4. Matematiksel formülleri LaTeX notation ile yazın: \\(E = m c^2\\).\n"
-            "5. SADECE geçerli JSON formatı döndürün."
+            "5. TIRNAK KURALI: Cevap ve soru metinleri içinde çift tırnak (\") yerine tek tırnak (') kullanın.\n"
+            "6. SADECE geçerli JSON formatı döndürün."
         )
         
         result = self.call_ollama_json(system_prompt, user_prompt, model=self.model_name, num_predict=self.analyzer_max_tokens)

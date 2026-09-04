@@ -5,6 +5,29 @@ All notable changes to the **Elektor Universal PDF & Rendergit Code Dataset Gene
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [20.0.0] - 2026-09-04
+
+### Added
+- **`universal-dataset-orchestrator` Global Antigravity Agent Skill (`~/.gemini/config/skills/universal-dataset-orchestrator/SKILL.md`)**:
+  - Global agent skill orchestrating heterogeneous inputs (PDF books, Rendergit Git repos, Kiwix ZIM archives) with isolated dynamic configs.
+  - **5-Dimension Behavior Distillation Rubric** (*Talimat Kapsama, Format Sadakati, Dil & Üslup, Yapısal Bütünlük, Sapma/Gürültü*).
+  - **Two-Tier Compute & VRAM Security Protocol**: Multi-core parallel CPU/IO extraction + sequential/queued GPU LLM-as-a-Judge to prevent VRAM OOM.
+  - Multi-GPU & Remote Server Pool (`http://127.0.0.1:11434`, `http://127.0.0.1:11435`, `http://192.168.1.14:11434`).
+  - Native Agent commands: `dataset-üret`, `dataset-kalite-kontrol`, `dataset-dpo-derle`, `dataset-durum`.
+- **Python CLI Orchestrator Engine (`tools/orchestrator.py`)**:
+  - Subcommands: `create-config`, `produce`, `judge`, `compile-datasets`, `status`.
+  - Automatic DPO preference dataset compilation (minimum score delta $\ge 2.0$) and Golden SFT extraction (deduplicated top-tier chosen responses).
+  - Real-time GPU endpoint probing and multi-project status reporter.
+- **Google Colab & Antigravity-IDE Unsloth Fine-Tuning Integration (`pipeline/cloud_gpu_offloader.py`, `run.py`, `api_server.py`)**:
+  - Multi-dataset Colab notebook generator: `unsloth_colab_sft_<id>.ipynb`, `unsloth_colab_dpo_<id>.ipynb`, `unsloth_colab_chat_<id>.ipynb`, `unsloth_colab_langextract_<id>.ipynb`.
+  - Remote GPU kernel connection (`Select Kernel -> Colab`) in Antigravity-IDE and VS Code.
+  - CLI subcommand: `run.py colab --project <id> --type all`.
+  - FastAPI endpoints: `/api/cloud/generate-colab` and `/api/cloud/download-colab`.
+- **Test Suite (`tests/test_orchestrator.py`, `tests/test_cloud_gpu_offloader.py`)**:
+  - Unit tests for isolated config creation, DPO/Golden SFT compiling, endpoint probing, and Colab notebook generation (100% passing).
+
+---
+
 ## [19.5.0] - 2026-08-24
 
 ### Added
