@@ -345,7 +345,8 @@ class ArchiveAnalyzer:
             f"3. In the DPO pair, the rejected answer must contain a plausible misconception, incorrect factual claim, or flawed reasoning related to {self.llm_subject} and the article text.\n"
             "4. Format any mathematical equations or formulas using standard LaTeX notation, for example: \\(p = \\frac{n \\cdot n_{cyl}}{60 \\cdot a}\\) instead of plain text.\n"
             "5. QUOTE ESCAPING: Inside answers or questions, use single quotes (') for terms, never unescaped double quotes (\").\n"
-            "6. Return ONLY the valid JSON object."
+            "6. CRITICAL NEGATIVE CONSTRAINT: NEVER generate questions or answers about document licenses, copyright notices, trademarks, legal disclaimers, warranty status, colophon, build dates/versions, or tables of contents. Focus 100% on technical architecture, hardware specifications, electrical characteristics, register maps, programming interfaces, pinouts, algorithms, and engineering implementation.\n"
+            "7. Return ONLY the valid JSON object."
         )
         
         result = self.call_ollama_json(system_prompt, user_prompt, model=self.model_name, num_predict=self.analyzer_max_tokens)
@@ -438,7 +439,8 @@ class ArchiveAnalyzer:
             "3. DPO çiftinde reddedilen (rejected) cevap, mantıklı görünen ancak gerçek bir mühendislik hatası (gerilim uyumsuzluğu, pin hatası, vb.) içermelidir.\n"
             "4. Matematiksel formülleri LaTeX notation ile yazın: \\(E = m c^2\\).\n"
             "5. TIRNAK KURALI: Cevap ve soru metinleri içinde çift tırnak (\") yerine tek tırnak (') kullanın.\n"
-            "6. SADECE geçerli JSON formatı döndürün."
+            "6. KESİN NEGATİF KURAL: Doküman lisansları (Creative Commons vb.), telif hakkı (copyright), ticari markalar, yasal uyarılar/feragatnameler, garanti durumu, künye veya içindekiler tablosu hakkında ASLA soru veya cevap üretmeyin. %100 oranında donanım mimarisi, teknik özellikler, elektriksel değerler, yazmaç haritaları (registers), pin konfigürasyonları ve yazılım API'lerine odaklanın.\n"
+            "7. SADECE geçerli JSON formatı döndürün."
         )
         
         result = self.call_ollama_json(system_prompt, user_prompt, model=self.model_name, num_predict=self.analyzer_max_tokens)

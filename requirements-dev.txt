@@ -1,0 +1,9 @@
+# Test & development dependencies.
+# Not required to run the pipeline or the web UI — only for `pytest tests/`.
+# Install with:
+#   pip install -r requirements-dev.txt
+#
+# NOTE: httpx (needed by fastapi.testclient) is already listed in requirements.txt.
+
+pytest>=8.0.0
+pytest-asyncio>=1.0.0

@@ -113,7 +113,7 @@ elektor/
   ├── database/                 # Dedicated SQLite database directory (*.db)
   ├── exports/                  # Project-isolated dataset export directory
   ├── frontend/                 # React + Vite Web UI with Hata Ayıklama Konsolu & LangExtract panel
-  ├── tests/                    # Pytest test suite (51 test cases)
+  ├── tests/                    # Pytest test suite (61 tests)
   └── README.md
 ```
 
@@ -123,9 +123,33 @@ elektor/
 
 ### System Dependencies
 - **Python 3.11+**
-- **Tesseract OCR CLI**: Installed and available in PATH (e.g. `/opt/homebrew/bin/tesseract` on macOS).
+- **Node.js 20.19+ / 22.12+** (Vite 8 requirement) — only needed to build the React UI.
+- **Tesseract OCR CLI**: Installed and available in PATH (e.g. `/usr/bin/tesseract` on Linux, `/opt/homebrew/bin/tesseract` on macOS).
 - **Ollama Local / Cloud**: Local server (`http://127.0.0.1:11434`) or Ollama Cloud (`https://ollama.com/v1`).
 - **Google Gemini API**: Free Tier Developer API key for `gemini-3.6-flash`.
+
+### Python Environment
+```bash
+python3 -m venv .venv          # use the installed version; "python3.11" may not exist
+source .venv/bin/activate      # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+# Optional — only needed to run the test suite:
+pip install -r requirements-dev.txt
+```
+
+### 🎨 Frontend Build — REQUIRED for the Web UI
+`frontend/dist` is git-ignored and **not shipped with the repo**. `python run.py api` starts the API
+only; the SPA routes in `api_server.py` are registered **only if `frontend/dist` exists**. Without a
+build, `http://localhost:3456` returns **404** and the UI never appears.
+```bash
+cd frontend
+npm install
+npm run build                  # produces frontend/dist
+cd ..
+```
+For live development instead of a build: run `python run.py api` in one terminal and
+`cd frontend && npm run dev` in another (Vite on port 3000, proxying `/api` to 3456).
 
 ---
 
@@ -134,21 +158,21 @@ elektor/
 ### 1. Cloud & Diagnostic Verification Tools (`tools/`)
 - **Google Gemini 4-Stage Test** (Connectivity, JSON Schema, Translation, Multimodal OCR):
   ```bash
-  PYTHONPATH=. uv run python tools/test_gemini_config.py --config templates/gemini.json
+  PYTHONPATH=. python tools/test_gemini_config.py --config templates/gemini.json
   ```
 - **Ollama Cloud Diagnostic & Model Probe**:
   ```bash
   # Model probing:
-  PYTHONPATH=. uv run python tools/test_ollama_cloud.py --probe-models
+  PYTHONPATH=. python tools/test_ollama_cloud.py --probe-models
 
   # Run test with template:
-  PYTHONPATH=. uv run python tools/test_ollama_cloud.py --config templates/ollama_cloud.json
+  PYTHONPATH=. python tools/test_ollama_cloud.py --config templates/ollama_cloud.json
   ```
 - **LangExtract Multi-Provider Grounding & Fallback Test**:
   ```bash
-  PYTHONPATH=. uv run python tools/test_langextract.py --provider gemini
-  PYTHONPATH=. uv run python tools/test_langextract.py --provider ollama
-  PYTHONPATH=. uv run python tools/test_langextract.py --provider fallback
+  PYTHONPATH=. python tools/test_langextract.py --provider gemini
+  PYTHONPATH=. python tools/test_langextract.py --provider ollama
+  PYTHONPATH=. python tools/test_langextract.py --provider fallback
   ```
 
 ### 2. Web UI Dashboard (FastAPI + React)
@@ -163,18 +187,22 @@ Open `http://localhost:3456` in your browser.
 ### 3. Pipeline Execution with Templates
 ```bash
 # Run with Google Gemini:
-PYTHONPATH=. uv run python run.py --config templates/gemini.json
+PYTHONPATH=. python run.py --config templates/gemini.json
 
 # Run with Ollama Cloud:
-PYTHONPATH=. uv run python run.py --config templates/ollama_cloud.json
+PYTHONPATH=. python run.py --config templates/ollama_cloud.json
 ```
 
 ---
 
 ## 🔬 Unit Tests & Verification
-Run the unit test suite:
+Install the test dependencies first (they are **not** in `requirements.txt`):
 ```bash
-PYTHONPATH=. uv run pytest tests/
+pip install -r requirements-dev.txt
+```
+Then run the unit test suite:
+```bash
+PYTHONPATH=. pytest tests/
 ```
 
 ### 4. Kiwix OpenZIM & StackExchange Extractor (`kiwix`)
@@ -194,26 +222,46 @@ python run.py export
 Generate production-ready `.ipynb` notebooks for Antigravity-IDE / VS Code with remote Google Colab GPU connection:
 ```bash
 # Generate notebooks for all dataset types (SFT, DPO, Chat, LangExtract)
-PYTHONPATH=. uv run python run.py colab --project <id> --type all
+PYTHONPATH=. python run.py colab --project <id> --type all
 
 # Target specific base model (e.g. unsloth/Qwen3.5-2B)
-PYTHONPATH=. uv run python run.py colab --project <id> --type dpo --model unsloth/Qwen3.5-2B
+PYTHONPATH=. python run.py colab --project <id> --type dpo --model unsloth/Qwen3.5-2B
 ```
 
 ### 6. Universal Dataset Orchestrator & Davranış Distilasyonu Motoru (`orchestrator`)
 Orchestrate heterogeneous sources (PDF, Git repos, Kiwix ZIM) in parallel with isolated configs and 5-dimension rubric LLM-as-a-Judge:
 ```bash
 # Check GPU pool health and active projects
-PYTHONPATH=. uv run python tools/orchestrator.py status
+PYTHONPATH=. python tools/orchestrator.py status
 
 # Run isolated pipeline for any source
-PYTHONPATH=. uv run python tools/orchestrator.py produce --input downloads/book.pdf --mode book --name my_book
+PYTHONPATH=. python tools/orchestrator.py produce --input downloads/book.pdf --mode book --name my_book
 
 # Run 5-dimension behavior judge
-PYTHONPATH=. uv run python tools/orchestrator.py judge --project my_book --mode strict --threshold 7.5
+PYTHONPATH=. python tools/orchestrator.py judge --project my_book --mode strict --threshold 7.5
 
 # Compile DPO preference pairs (min_diff >= 2.0) and Golden SFT
-PYTHONPATH=. uv run python tools/orchestrator.py compile-datasets --project my_book --min-diff 2.0
+PYTHONPATH=. python tools/orchestrator.py compile-datasets --project my_book --min-diff 2.0
+```
+
+### 7. Unsloth GPU Fine-Tuning & Boilerplate Pruning (`clean_boilerplate`)
+Eliminates template shortcut learning and legal/colophon noise in Unsloth Desktop & Hugging Face TRL:
+- Sets `"input": ""` for SFT datasets to avoid rendering the `### Input:` block, training the model to follow instructions directly.
+- Formats DPO preference pairs strictly as `{"prompt": "...", "chosen": "...", "rejected": "..."}` without artificial context fields.
+- Prunes Colophons, Creative Commons licenses, Synopsys copyright notices, and Table of Contents pages from the training data.
+```bash
+# Clean database records and re-export clean datasets
+python run.py clean_boilerplate
+
+# Or trigger via FastAPI endpoint
+curl -X POST http://127.0.0.1:3456/api/clean-boilerplate
+```
+
+### 8. Multimodal Technical Catalog & Visual Dataset Builder (`export_visual`)
+Uses a two-stage visual OCR pipeline (`deepseek-ocr:3b-bf16` + `ornith-1.5:9b`) combined with PyMuPDF layout context enrichment to extract and synthesize hardware diagrams, pinout tables, and system architectures:
+```bash
+# Export WebP visual crops, multimodal_visual_dataset.jsonl, and multimodal_catalog.md
+python run.py export_visual
 ```
 
 ---
@@ -223,14 +271,14 @@ PYTHONPATH=. uv run python tools/orchestrator.py compile-datasets --project my_b
 ```json
 {
   "input_mode": "folder",
-  "input_path": "downloads/Exercisesheet1.pdf",
-  "db_path": "database/extract.db",
-  "qdrant_db_path": "qdrant_extract",
-  "ollama_url": "http://127.0.0.1:11434",
+  "input_path": "/home/hakan/PDF/raspberyy",
+  "db_path": "database/rp01.db",
+  "qdrant_db_path": "qdrant_rp01",
+  "ollama_url": "http://192.168.1.14:11434",
   "openai_timeout": 600,
   "model_embedding": "nomic-embed-text:latest",
-  "model_analyzer": "qwen3.5:4b",
-  "model_translator": "qwen3.5:4b",
+  "model_analyzer": "ornith-1.5:9b",
+  "model_translator": "ornith-1.5:9b",
   "llm_persona": "Professional Systems Engineer",
   "llm_subject": "Technical Documentation & Architecture",
   "generation_language": "bilingual",
@@ -239,20 +287,26 @@ PYTHONPATH=. uv run python tools/orchestrator.py compile-datasets --project my_b
   "direct_tr_generation": true,
   "enable_dpo_verification": true,
   "generate_multi_turn_chat": true,
-  "enable_langextract": true,
-  "enable_langextract_dynamic_examples": true,
+  "clean_alpaca_input": true,
+  "filter_boilerplate": true,
+  "enable_vision_ocr": true,
+  "model_vision": "deepseek-ocr:3b-bf16",
+  "enable_langextract": false,
+  "enable_langextract_dynamic_examples": false,
   "langextract_provider": "ollama",
-  "langextract_schema_preset": "generic_technical_qa",
-  "kiwix_zim_path": "downloads/wikipedia_tr_all.zim",
-  "kiwix_min_chars": 300
+  "langextract_schema_preset": "generic_technical_qa"
 }
 ```
 
 ---
 
 ## 🔬 Unit Tests & Verification
-Run the complete unit test suite across all modules (23 passing unit tests):
+Install the test dependencies (**not** included in `requirements.txt`):
 ```bash
-PYTHONPATH=. uv run pytest tests/
+pip install -r requirements-dev.txt
+```
+Run the complete unit test suite across all modules (61 passing, 4 skipped):
+```bash
+PYTHONPATH=. pytest tests/
 ```
 

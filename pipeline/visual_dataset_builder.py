@@ -23,7 +23,7 @@ class VisualDatasetBuilder:
         self.export_dir = Path("exports") / self.project_id
         self.export_images_dir = self.export_dir / "images"
         self.raw_images_dir = Path("downloads") / "extracted_images"
-        self.vision_model = self.config.get("model_vision", "deepseek-ocr:3b-bf16")
+        self.vision_model = self.config.get("model_vision", "gemma4:latest")
 
         self.optimizer = ImageOptimizer(max_dimension=1024, webp_quality=85)
 
@@ -153,9 +153,46 @@ class VisualDatasetBuilder:
             visual_description = ""
             try:
                 if webp_full_path.exists():
+                    import re
+                    raw_fn = item.get("raw_filename", "")
+                    doc_context = []
+                    if "rp2040" in raw_fn.lower():
+                        doc_context.append("RP2040 Datasheet (Raspberry Pi)")
+                    elif "rp2350" in raw_fn.lower():
+                        doc_context.append("RP2350 Datasheet (Raspberry Pi)")
+                    m = re.search(r"_p(\d+)_", raw_fn)
+                    page_text = ""
+                    if m:
+                        page_num = int(m.group(1))
+                        doc_context.append(f"Page {page_num}")
+                        # Extract ground truth text from original datasheet PDF if accessible
+                        pdf_dir = Path(self.config.get("input_path", "/home/hakan/PDF/raspberyy"))
+                        pdf_stem = raw_fn.split("_p")[0]
+                        candidate_pdf = pdf_dir / f"{pdf_stem}.pdf"
+                        if not candidate_pdf.exists() and pdf_dir.exists():
+                            for p in pdf_dir.glob("*.pdf"):
+                                if pdf_stem.lower() in p.name.lower():
+                                    candidate_pdf = p
+                                    break
+                        if candidate_pdf.exists():
+                            try:
+                                import pymupdf
+                                doc = pymupdf.open(str(candidate_pdf))
+                                if page_num < len(doc):
+                                    ptxt = doc[page_num].get_text().strip()
+                                    if ptxt and len(ptxt) > 20:
+                                        page_text = ptxt
+                                doc.close()
+                            except Exception:
+                                pass
+
+                    caption_ctx = " | ".join(doc_context) if doc_context else "Datasheet Technical Diagram"
+                    if page_text:
+                        caption_ctx += f"\nDatasheet Page Text / Pin Reference:\n{page_text}"
+
                     visual_description = v_mgr.describe_cropped_image(
                         image_path=str(webp_full_path),
-                        caption_context="Technical schematic / diagram analysis"
+                        caption_context=caption_ctx
                     )
             except Exception as e:
                 print(f"[{idx}/{len(image_mappings)}] [Port {port}] ❌ Exception for {webp_full_path.name}: {e}", flush=True)

@@ -19,6 +19,110 @@ class DatasetBuilder:
         self.dataset_name = self.config.get("dataset_name", "Document")
         self.dataset_name_tr = self.config.get("dataset_name_tr", "Döküman")
         self.generation_language = self.config.get("generation_language", "bilingual").lower()
+        self.clean_alpaca_input = self.config.get("clean_alpaca_input", True)
+        self.filter_boilerplate = self.config.get("filter_boilerplate", True)
+
+    BOILERPLATE_PATTERNS = [
+        r'\blicen[sc]e\b', r'\bcopyright\b', r'\bcreative commons\b', r'\bcc by-nd\b',
+        r'\bcc-by\b', r'\bsynopsys\b', r'\bdesignware\b', r'\bcolophon\b',
+        r'\bbuild-date\b', r'\bbuild-version\b', r'\bdisclaimer\b', r'\bindemnif\w*\b',
+        r'\bhigh risk activities\b', r'\ball rights reserved\b', r'\btable of contents\b',
+        r'\biçindekiler\b', r'\bfihrist\b', r'\btelif hakkı\b', r'\blisans\b',
+        r'\bgaranti muafiyeti\b', r'\byasal uyarı\b', r'\bstandard terms\b'
+    ]
+
+    @classmethod
+    def is_boilerplate_text(cls, text: str) -> bool:
+        if not text:
+            return False
+        import re
+        t_low = text.lower()
+        for pat in cls.BOILERPLATE_PATTERNS:
+            if re.search(pat, t_low):
+                return True
+        return False
+
+    @classmethod
+    def is_boilerplate_article(cls, title: str, text: str = "") -> bool:
+        t_low = (title or "").lower().strip()
+        if any(k in t_low for k in ["colophon", "table of contents", "içindekiler", "fihrist", "disclaimer", "revision history", "document history"]):
+            return True
+        prefix = (text or "")[:400].lower()
+        if "colophon" in prefix or "creative commons attribution" in prefix or "portions copyright" in prefix:
+            return True
+        return False
+
+    def clean_database_boilerplate(self, db_path: str = None) -> dict:
+        """Scans SQLite database, flags boilerplate/colophon articles as is_excluded=1,
+        and prunes non-technical/legal Q&A pairs from enrichments."""
+        target_db = db_path or self.db_path
+        conn = sqlite3.connect(target_db)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='articles'")
+        if not cursor.fetchone():
+            conn.close()
+            return {"status": "error", "message": "articles table not found"}
+
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='enrichments'")
+        if not cursor.fetchone():
+            conn.close()
+            return {"status": "error", "message": "enrichments table not found"}
+
+        cursor.execute("PRAGMA table_info(enrichments)")
+        cols = {c[1] for c in cursor.fetchall()}
+        if "is_excluded" not in cols:
+            cursor.execute("ALTER TABLE enrichments ADD COLUMN is_excluded INTEGER DEFAULT 0")
+            conn.commit()
+
+        cursor.execute("""
+            SELECT a.id, a.title, a.extracted_text, e.id, e.sft_qa, e.tr_sft_qa, e.dpo_pairs, e.tr_dpo_pairs 
+            FROM articles a 
+            LEFT JOIN enrichments e ON e.article_id = a.id
+        """)
+        rows = cursor.fetchall()
+
+        excluded_articles = 0
+        pruned_qas = 0
+
+        for row in rows:
+            aid, title, text, eid, sft, tr_sft, dpo, tr_dpo = row
+            if not eid:
+                continue
+
+            if self.is_boilerplate_article(title, text):
+                cursor.execute("UPDATE enrichments SET is_excluded = 1 WHERE id = ?", (eid,))
+                excluded_articles += 1
+            else:
+                for col_name, raw_val in [("sft_qa", sft), ("tr_sft_qa", tr_sft), ("dpo_pairs", dpo), ("tr_dpo_pairs", tr_dpo)]:
+                    if not raw_val:
+                        continue
+                    try:
+                        items = json.loads(raw_val)
+                    except Exception:
+                        continue
+                    if isinstance(items, list):
+                        clean_items = []
+                        for it in items:
+                            if not isinstance(it, dict):
+                                continue
+                            q = it.get("question", it.get("prompt", ""))
+                            a = it.get("answer", it.get("chosen", ""))
+                            if self.is_boilerplate_text(q) or self.is_boilerplate_text(a):
+                                pruned_qas += 1
+                            else:
+                                clean_items.append(it)
+                        if len(clean_items) != len(items):
+                            cursor.execute(f"UPDATE enrichments SET {col_name} = ? WHERE id = ?", (json.dumps(clean_items, ensure_ascii=False), eid))
+
+        conn.commit()
+        conn.close()
+        print(f"🧹 Boilerplate cleaner completed: {excluded_articles} articles excluded, {pruned_qas} Q&A items pruned.")
+        return {
+            "status": "success",
+            "excluded_articles": excluded_articles,
+            "pruned_qas": pruned_qas
+        }
 
     def _save_jsonl_and_parquet(self, file_path: Path, records: list, raw: bool = False):
         valid_records = []
@@ -126,6 +230,10 @@ class DatasetBuilder:
         for row in rows:
             title, year, summary, tr_title, tr_summary, sft_qa_json, dpo_pairs_json, tr_sft_qa_json, tr_dpo_pairs_json, multi_turn_chat_json, tr_multi_turn_chat_json = row
             display_tr_title = tr_title if tr_title else title
+
+            # Skip front-matter, colophon, and table-of-contents boilerplate articles
+            if self.filter_boilerplate and self.is_boilerplate_article(title, summary or ""):
+                continue
             
             # --- English Multi-turn Chat dataset ---
             has_valid_en_chat = False
@@ -152,10 +260,13 @@ class DatasetBuilder:
                                 continue
                             q = safe_str(item.get("question", ""))
                             a = safe_str(item.get("answer", ""))
+                            if self.filter_boilerplate and (self.is_boilerplate_text(q) or self.is_boilerplate_text(a)):
+                                continue
                             if q and a:
+                                sft_input = "" if self.clean_alpaca_input else f"Context: {self.dataset_name} ({year}) article '{title}'"
                                 sft_records.append({
                                     "instruction": q,
-                                    "input": f"Context: {self.dataset_name} ({year}) article '{title}'",
+                                    "input": sft_input,
                                     "output": a
                                 })
                                 if not has_valid_en_chat:
@@ -181,33 +292,38 @@ class DatasetBuilder:
                             q = safe_str(item.get("question", ""))
                             chosen = safe_str(item.get("chosen", ""))
                             rej = safe_str(item.get("rejected", ""))
+                            if self.filter_boilerplate and (self.is_boilerplate_text(q) or self.is_boilerplate_text(chosen) or self.is_boilerplate_text(rej)):
+                                continue
                             if q and chosen and rej:
-                                dpo_records.append({
+                                dpo_item = {
                                     "prompt": q,
-                                    "input": f"Context: {self.dataset_name} ({year}) article '{title}'",
                                     "chosen": chosen,
                                     "rejected": rej
-                                })
+                                }
+                                if not self.clean_alpaca_input:
+                                    dpo_item["input"] = f"Context: {self.dataset_name} ({year}) article '{title}'"
+                                dpo_records.append(dpo_item)
                 except Exception as e:
                     print(f"Error parsing English DPO pairs for article '{title}': {e}")
 
             # --- English Summary SFT ---
             clean_en_summary = summary.strip() if summary else ""
             if title and clean_en_summary and clean_en_summary.lower() not in invalid_summaries and len(clean_en_summary) > 20:
-                import random
-                en_templates = [
-                    "What is the article '{title}' published in {year} in {dataset} about? Please summarize briefly.",
-                    "Please provide a technical summary of the {year} {dataset} article titled '{title}'.",
-                    "Can you summarize the main technical concepts and mechanisms of '{title}' ({year}) from {dataset}?",
-                    "What key engineering topics are discussed in the {dataset} ({year}) publication '{title}'?",
-                    "Please summarize the purpose, methods, and results described in the article '{title}' ({year})."
-                ]
-                en_prompt = random.choice(en_templates).format(dataset=self.dataset_name, year=year, title=title)
-                sft_records.append({
-                    "instruction": en_prompt,
-                    "input": "",
-                    "output": clean_en_summary
-                })
+                if not (self.filter_boilerplate and self.is_boilerplate_article(title, clean_en_summary)):
+                    import random
+                    en_templates = [
+                        "What is the article '{title}' published in {year} in {dataset} about? Please summarize briefly.",
+                        "Please provide a technical summary of the {year} {dataset} article titled '{title}'.",
+                        "Can you summarize the main technical concepts and mechanisms of '{title}' ({year}) from {dataset}?",
+                        "What key engineering topics are discussed in the {dataset} ({year}) publication '{title}'?",
+                        "Please summarize the purpose, methods, and results described in the article '{title}' ({year})."
+                    ]
+                    en_prompt = random.choice(en_templates).format(dataset=self.dataset_name, year=year, title=title)
+                    sft_records.append({
+                        "instruction": en_prompt,
+                        "input": "",
+                        "output": clean_en_summary
+                    })
 
             # --- Turkish Multi-turn Chat dataset ---
             has_valid_tr_chat = False
@@ -235,10 +351,13 @@ class DatasetBuilder:
                                 continue
                             q = safe_str(item.get("question", ""))
                             a = safe_str(item.get("answer", ""))
+                            if self.filter_boilerplate and (self.is_boilerplate_text(q) or self.is_boilerplate_text(a)):
+                                continue
                             if q and a:
+                                tr_input = "" if self.clean_alpaca_input else f"Bağlam: {self.dataset_name_tr} ({year}) '{display_tr_title}' makalesi"
                                 tr_sft_records.append({
                                     "instruction": q,
-                                    "input": f"Bağlam: {self.dataset_name_tr} ({year}) '{display_tr_title}' makalesi",
+                                    "input": tr_input,
                                     "output": a
                                 })
                                 if not has_valid_tr_chat:
@@ -265,10 +384,11 @@ class DatasetBuilder:
                             chosen = safe_str(item.get("chosen", ""))
                             rej = safe_str(item.get("rejected", ""))
                             qual_status = item.get("quality_status", "validated")
+                            if self.filter_boilerplate and (self.is_boilerplate_text(q) or self.is_boilerplate_text(chosen) or self.is_boilerplate_text(rej)):
+                                continue
                             if q and chosen and rej:
-                                tr_dpo_records.append({
+                                tr_dpo_item = {
                                     "prompt": q,
-                                    "input": f"Bağlam: {self.dataset_name_tr} ({year}) '{display_tr_title}' makalesi",
                                     "chosen": chosen,
                                     "rejected": rej,
                                     "metadata": {
@@ -277,29 +397,33 @@ class DatasetBuilder:
                                         "source_title": display_tr_title,
                                         "quality_status": qual_status
                                     }
-                                })
+                                }
+                                if not self.clean_alpaca_input:
+                                    tr_dpo_item["input"] = f"Bağlam: {self.dataset_name_tr} ({year}) '{display_tr_title}' makalesi"
+                                tr_dpo_records.append(tr_dpo_item)
                 except Exception as e:
                     print(f"Error parsing Turkish DPO pairs for article '{display_tr_title}': {e}")
                     
             # --- Turkish Summary SFT ---
             clean_summary = tr_summary.strip() if tr_summary else ""
             if display_tr_title and clean_summary and clean_summary.lower() not in invalid_summaries and len(clean_summary) > 20:
-                import random
-                tr_templates = [
-                    "{dataset} bünyesinde {year} yılında yayınlanan '{title}' makalesi ne hakkındadır? Kısaca özetler misiniz?",
-                    "Lütfen {year} yılına ait '{title}' başlıklı {dataset} makalesinin özetini Türkçe olarak yazın.",
-                    "{dataset} içeriğindeki '{title}' ({year}) çalışmasının ana konusunu ve teknik içeriğini özetleyebilir misiniz?",
-                    "{year} basımı {dataset} içeriğindeki '{title}' yazısı hangi teknik konuları ele alıyor ve neyi özetliyor?",
-                    "'{title}' ({year}) isimli {dataset} makalesinin Türkçe özetini ve hedeflenen konuları paylaşır mısınız?",
-                    "{dataset} bünyesinde {year} yılında çıkan '{title}' makalesi hakkında bilgi verip kısaca özetler misiniz?",
-                    "'{title}' ({year}) başlıklı teknik {dataset} makalesinin içeriğini Türkçe olarak özetleyiniz."
-                ]
-                tr_prompt = random.choice(tr_templates).format(dataset=self.dataset_name_tr, year=year, title=display_tr_title)
-                tr_sft_records.append({
-                    "instruction": tr_prompt,
-                    "input": "",
-                    "output": clean_summary
-                })
+                if not (self.filter_boilerplate and self.is_boilerplate_article(display_tr_title, clean_summary)):
+                    import random
+                    tr_templates = [
+                        "{dataset} bünyesinde {year} yılında yayınlanan '{title}' makalesi ne hakkındadır? Kısaca özetler misiniz?",
+                        "Lütfen {year} yılına ait '{title}' başlıklı {dataset} makalesinin özetini Türkçe olarak yazın.",
+                        "{dataset} içeriğindeki '{title}' ({year}) çalışmasının ana konusunu ve teknik içeriğini özetleyebilir misiniz?",
+                        "{year} basımı {dataset} içeriğindeki '{title}' yazısı hangi teknik konuları ele alıyor ve neyi özetliyor?",
+                        "'{title}' ({year}) isimli {dataset} makalesinin Türkçe özetini ve hedeflenen konuları paylaşır mısınız?",
+                        "{dataset} bünyesinde {year} yılında çıkan '{title}' makalesi hakkında bilgi verip kısaca özetler misiniz?",
+                        "'{title}' ({year}) başlıklı teknik {dataset} makalesinin içeriğini Türkçe olarak özetleyiniz."
+                    ]
+                    tr_prompt = random.choice(tr_templates).format(dataset=self.dataset_name_tr, year=year, title=display_tr_title)
+                    tr_sft_records.append({
+                        "instruction": tr_prompt,
+                        "input": "",
+                        "output": clean_summary
+                    })
 
         # Check and export Kiwix StackExchange articles directly from articles table
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='articles'")

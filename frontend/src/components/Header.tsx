@@ -21,7 +21,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenQuickHelp,
   onOpenHFUploadModal,
 }) => {
-  const isOllamaOnline = health?.ollama_status === 'online';
+  const isOllamaOnline = Boolean(health?.ollama_online) || health?.ollama_status === 'online' || (health?.ollama_status ? health.ollama_status.startsWith('online') : false);
 
   return (
     <header className="app-header">

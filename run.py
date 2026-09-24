@@ -263,6 +263,10 @@ Examples:
     export_visual_parser.add_argument("--shards", type=int, default=1, help="Number of parallel GPU worker shards (default: 1 or auto-detect)")
     export_visual_parser.add_argument("--shard-ports", type=str, default=None, help="Comma-separated list of Ollama port numbers (e.g. 11434,11435)")
 
+    # Clean Boilerplate subcommand
+    clean_parser = subparsers.add_parser("clean_boilerplate", help="Scan database and prune non-technical/legal/colophon Q&A pairs")
+    clean_parser.add_argument("--db", type=str, default=None, help="Path to SQLite database to clean (defaults to config.json db_path)")
+
     # HF Upload subcommand
     hf_parser = subparsers.add_parser("hf_upload", help="Upload exported dataset to Hugging Face Hub")
     hf_parser.add_argument("--repo_id", type=str, required=True, help="Target Hugging Face repo ID (e.g. username/repo-name)")
@@ -477,6 +481,14 @@ Examples:
             print(f"✅ Gemini Batch Job Submitted: {json.dumps(res, indent=2, ensure_ascii=False)}")
         else:
             engine.judge_all(limit=limit_val, mode=args.mode, threshold=args.threshold)
+
+    elif args.command == "clean_boilerplate":
+        print("=== Step: Cleaning Boilerplate & Colophon Data ===")
+        builder = DatasetBuilder(config_path=args.config)
+        res = builder.clean_database_boilerplate(db_path=args.db)
+        print(f"✅ Cleaning complete: {res.get('excluded_articles', 0)} articles excluded, {res.get('pruned_qas', 0)} Q&A items pruned.")
+        print("Re-exporting clean datasets...")
+        builder.export_datasets()
 
     elif args.command == "hf_upload":
         print("=== Step 5: Uploading Dataset to Hugging Face Hub ===")

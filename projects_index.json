@@ -1,12 +1,12 @@
 {
-  "active_project_id": "extract",
+  "active_project_id": "rp01",
   "projects": {
-    "extract": {
-      "project_id": "extract",
-      "project_name": "test_extract",
-      "config_file": "projects_extract.json",
-      "created_at": 1787245364.8434708,
-      "last_accessed": 1787299678.495404
+    "rp01": {
+      "project_id": "rp01",
+      "project_name": "rp-pico",
+      "config_file": "projects_rp01.json",
+      "created_at": 1790193058.5006561,
+      "last_accessed": 1790193058.5006564
     }
   }
 }

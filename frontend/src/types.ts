@@ -59,6 +59,7 @@ export interface HealthInfo {
   status: string;
   port: number;
   ollama_status: string;
+  ollama_online?: boolean;
   ollama_url: string;
   available_models: string[];
   sqlite_exists: boolean;

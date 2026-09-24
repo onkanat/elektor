@@ -294,6 +294,17 @@ class ArchiveExtractor:
             
         return text
 
+    @staticmethod
+    def is_boilerplate_segment(title: str, text: str = "") -> bool:
+        """Identifies non-technical front-matter, colophon, and table-of-contents segments."""
+        t_low = (title or "").lower().strip()
+        if any(k in t_low for k in ["colophon", "table of contents", "içindekiler", "fihrist", "disclaimer", "revision history", "document history"]):
+            return True
+        prefix = (text or "")[:400].lower()
+        if "colophon" in prefix or "creative commons attribution" in prefix or "portions copyright" in prefix:
+            return True
+        return False
+
     def parse_printed_toc(self, reader, total_pages):
         """Scans front pages for printed Table of Contents (FİHRİST / İÇİNDEKİLER) with page numbers like 'S. 112', '127-149'"""
         import re
@@ -606,6 +617,9 @@ class ArchiveExtractor:
                 start_p = unique_nodes[i]["page"]
                 end_p = unique_nodes[i+1]["page"] - 1
                 if start_p <= end_p:
+                    if self.is_boilerplate_segment(ch_title):
+                        print(f"  [Skip Boilerplate] Skipping outline section: '{ch_title}'")
+                        continue
                     segments.append((ch_title, start_p, end_p))
         else:
             print(f"No digital bookmarks found in {pdf_path.name}. Attempting OCR & printed TOC heading detection...")
@@ -619,6 +633,9 @@ class ArchiveExtractor:
                     start_p = detected_headings[i]["page"]
                     end_p = detected_headings[i+1]["page"] - 1
                     if start_p <= end_p:
+                        if self.is_boilerplate_segment(ch_title):
+                            print(f"  [Skip Boilerplate] Skipping detected heading: '{ch_title}'")
+                            continue
                         segments.append((ch_title, start_p, end_p))
             else:
                 print(f"Splitting {pdf_path.name} into default 15-page segments.")

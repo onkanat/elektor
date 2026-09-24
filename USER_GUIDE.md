@@ -46,7 +46,9 @@ Platform; teknik dökümanları (PDF kitaplar, veri kâğıtları, dergi arşivl
 Projenin bağımlılıklarını izole ve kararlı bir şekilde çalıştırmak için sanal ortam (venv) kullanılması şiddetle tavsiye edilir:
 ```bash
 # 1. Sanal ortamı oluşturun (Python 3.11+)
-python3.11 -m venv .venv
+# NOT: Kurulu olan sürümü kullanın. Makinede tam olarak 3.11 yoksa
+# "python3.11" komutu "command not found" verir; "python3" kullanın.
+python3 -m venv .venv
 
 # 2. Sanal ortamı aktif edin
 # macOS/Linux:
@@ -56,7 +58,45 @@ source .venv/bin/activate
 
 # 3. Bağımlılıkları yükleyin
 pip install -r requirements.txt
+
+# 4. (İsteğe bağlı) Sadece testleri çalıştıracaksanız:
+pip install -r requirements-dev.txt
 ```
+
+### 🎨 Web Arayüzünü Derleme (Node.js + React/Vite) — ZORUNLU ADIM
+`python run.py api` **yalnızca API sunucusunu** ayağa kaldırır. Web arayüzü `frontend/dist`
+klasöründen servis edilir; bu klasör `.gitignore`'da olduğu için repoya dahil **gelmez**.
+Derleme yapılmadıysa sunucu sorunsuz çalışır ama `http://localhost:3456` adresi **404 Not Found**
+döner ve UI hiç görünmez (`api_server.py` içindeki SPA rotaları `frontend/dist` varsa kayıt edilir).
+
+**Node.js 20.19+ veya 22.12+** (Vite 8 gereksinimi) kurulu olmalıdır:
+
+```bash
+# Seçenek A — nvm ile (önerilen)
+nvm install --lts
+
+# Seçenek B — sudo yetkiniz varsa
+sudo apt install nodejs npm
+
+# Seçenek C — sudo olmadan, resmi tarball ile ~/.local altına
+curl -fL -o /tmp/node.tar.xz https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz
+mkdir -p ~/.local && tar -xJf /tmp/node.tar.xz -C ~/.local
+mv ~/.local/node-v24.21.0-linux-x64 ~/.local/node
+echo 'export PATH="$HOME/.local/node/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Ardından frontend'i derleyin:
+```bash
+cd frontend
+npm install
+npm run build      # frontend/dist klasörünü üretir
+cd ..
+```
+
+> **Geliştirme modu (derlemesiz):** Bir terminalde `python run.py api`, diğerinde
+> `cd frontend && npm run dev` çalıştırın. Vite, `http://localhost:3000` üzerinde açılır ve
+> `/api` isteklerini 3456 portuna proxy'ler (`frontend/vite.config.ts`).
 
 ### 🖥️ Web UI Dashboard'u Başlatma (FastAPI + React)
 Platformun birleşik web arayüzünü ve API sunucusunu iki şekilde başlatabilirsiniz:
@@ -224,6 +264,26 @@ Artık Antigravity-IDE'nin kod tamamlama veya yan panel AI sohbet asistanı doğ
 #### 5. Antigravity AI Ajanı Desteği
 Eğitim sırasında karşılaşabileceğiniz CUDA Out-of-Memory (OOM), batch size, gradient accumulation veya LoRA parametre hatalarını Antigravity AI Chat paneline sorabilir, `Cmd+I` ile notebook hücrelerini anında düzelttirebilirsiniz.
 
+### 6.4 🧹 Unsloth Desktop & GPU Fine-Tuning İçin Veri Temizliği (Ezberleme & Kirlilik Engelleme)
+
+Unsloth Desktop veya Hugging Face TRL ile GPU üzerinde LoRA/QLoRA eğitimi yaparken yaşanan en kritik iki problem:
+1. **Şablon Ezberlemesi (Shortcut Learning):** Alpaca formatında `"input"` alanına statik olarak `Context: <proje> (<yil>) ...` yazıldığında, Unsloth zorunlu olarak `### Input:` bloğu açar. Model soruya doğrudan odaklanmak yerine bu etiketi ezberler.
+2. **Hukuki / Künye Kirliliği (Boilerplate Poisoning):** Datasheet'lerin ilk sayfalarındaki Colophon, Creative Commons lisansları, Synopsys telif hakları ve feragatnameler gibi teknik olmayan konuların veri setini kirletmesi.
+
+#### Alınan Önlemler ve Çözüm:
+- **Temiz Alpaca Modu (`clean_alpaca_input: true`)**: SFT dosyalarında (`sft_dataset.jsonl`, `tr_sft_dataset.jsonl`) `"input": ""` (boş dize) olarak verilir. Unsloth Desktop şablonda `### Input:` bloğunu tamamen kapatarak temiz `### Instruction:` -> `### Response:` formatına geçer.
+- **Standart DPO Formatı**: DPO veri setinden yapay `input` alanı kaldırılmış, doğrudan `{"prompt": "...", "chosen": "...", "rejected": "..."}` formatına dönüştürülmüştür.
+- **Otomatik Hukuki / Künye Filtresi (`filter_boilerplate: true`)**: Colophon, telif hakkı, CC lisansı ve içindekiler tablosu içeren sorular otomatik elenir.
+
+#### Tek Komutla Veritabanı ve Veri Seti Temizleme:
+```bash
+# SQLite veritabanını tarar, künye/içindekileri dışlar ve temiz veri setlerini yeniden ihraç eder:
+python run.py clean_boilerplate
+
+# Web API üzerinden tetiklemek için:
+curl -X POST http://127.0.0.1:3456/api/clean-boilerplate
+```
+
 ---
 
 ## 7. 🚀 OpenAI-Uyumlu API & Performans Oturumu (Faz 9)
@@ -234,13 +294,19 @@ Eğitim sırasında karşılaşabileceğiniz CUDA Out-of-Memory (OOM), batch siz
 
 ---
 
-## 8. 👁️ Multimodal Vizyon (DeepSeek-OCR) & 2x GPU Paralel Sharding (Faz 10)
+## 8. 👁️ Multimodal Vizyon (DeepSeek-OCR) & İki Aşamalı Sentez Motoru (Faz 11)
 
-- **`deepseek-ocr:3b-bf16` Vizyon Entegrasyonu**: PDF belgelerindeki devre şemaları, pinout diyagramları, grafik şemaları ve görsel tablolar `<image>\n<|grounding|>` istem formatı ile anlamlandırılır.
-- **Akıllı Çerçeve & Düzen Analizi (Smart Layout Filtering)**: Ince ayraç çizgileri, küçük ikonlar ve sayfa kenarlıkları otomatik elenerek yalnızca gerçek teknik görseller VLM'e gönderilir.
-- **VRAM Offloading & 2x 16GB GPU Sharding**: 
-  - Vizyon taraması tüm döküman çıkarma aşaması boyunca VRAM'de sabit kalır ve extraction adımı bitince `extractor.close()` ile VRAM'den kaldırılır.
-  - 2 fiziksel 16GB GPU (Port 11434 & 11435) üzerinde SQLite WAL modunda (`PRAGMA journal_mode=WAL;`) kilitlenmesiz paralel zenginleştirme sağlanır.
+- **İki Aşamalı Görsel Boru Hattı**:
+  1. *Aşama 1 (Görsel & OCR)*: `deepseek-ocr:3b-bf16` ile devre şemalarından, pinout diyagramlarından ve grafiklerden tüm görsel tokenlar ve metinler piksellerden okunur.
+  2. *Aşama 2 (Orijinal PDF Bağlamı & Teknik Sentez)*: PyMuPDF ile orijinal PDF sayfasındaki pin tabloları ve donanım açıklamaları çekilerek `ornith-1.5:9b` (Qwen 3.5 9B tabanlı model) tarafından yayın kalitesinde GitHub-flavored Markdown'a dönüştürülür.
+- **Multimodal Katalog ve Görsel Veri Seti İhracı**:
+  ```bash
+  python run.py export_visual
+  ```
+  Komut çalıştırıldığında `exports/<project_id>/` altında:
+  - `multimodal_catalog.md`: Diyagram sınıflandırmaları, sinyal akış şemaları ve pinout tabloları.
+  - `multimodal_visual_dataset.jsonl`: VLM (LLaVA/Qwen2-VL) fine-tuning için instruction-tuning QA çiftleri üretilir.
+- **VRAM Yönetimi**: Vizyon taraması bittiğinde VLM model belleği otomatik temizlenerek ana analiz modellerine VRAM açılır.
 
 ---
 
@@ -477,16 +543,16 @@ Boru hattını başlatmadan önce modelleri ve uç noktaları test etmek için 3
 
 ```bash
 # 1. Google Gemini 4 aşamalı tanı testi (Bağlantı, JSON Şeması, Çeviri, Multimodal OCR):
-PYTHONPATH=. uv run python tools/test_gemini_config.py --config templates/gemini.json
+PYTHONPATH=. python tools/test_gemini_config.py --config templates/gemini.json
 
 # 2. Ollama Cloud model tarama ve test:
-PYTHONPATH=. uv run python tools/test_ollama_cloud.py --probe-models
-PYTHONPATH=. uv run python tools/test_ollama_cloud.py --config templates/ollama_cloud.json
+PYTHONPATH=. python tools/test_ollama_cloud.py --probe-models
+PYTHONPATH=. python tools/test_ollama_cloud.py --config templates/ollama_cloud.json
 
 # 3. LangExtract Varlık Çıkarım & Heuristic Fallback Testi:
-PYTHONPATH=. uv run python tools/test_langextract.py --provider gemini
-PYTHONPATH=. uv run python tools/test_langextract.py --provider ollama
-PYTHONPATH=. uv run python tools/test_langextract.py --provider fallback
+PYTHONPATH=. python tools/test_langextract.py --provider gemini
+PYTHONPATH=. python tools/test_langextract.py --provider ollama
+PYTHONPATH=. python tools/test_langextract.py --provider fallback
 ```
 
 ### 3. Çift Dilli Veri Seti İzolasyonu
@@ -517,20 +583,20 @@ Faz 21 ile birlikte, heterojen kaynakları (PDF kitaplar, Git repoları, Kiwix Z
 
 ```bash
 # 1. GPU Havuzu ve Aktif Projelerin Sağlık Durumunu Listele:
-PYTHONPATH=. uv run python tools/orchestrator.py status
+PYTHONPATH=. python tools/orchestrator.py status
 
 # 2. PDF, Git Reposu veya ZIM Kaynaklı İzole Üretim Başlat:
-PYTHONPATH=. uv run python tools/orchestrator.py produce --input downloads/kitap.pdf --mode book --name kitap_projesi
-PYTHONPATH=. uv run python tools/orchestrator.py produce --input downloads/repos/micrograd --mode rendergit --name micrograd_code
-PYTHONPATH=. uv run python tools/orchestrator.py produce --input downloads/wiki.zim --mode kiwix --name wiki_zim
+PYTHONPATH=. python tools/orchestrator.py produce --input downloads/kitap.pdf --mode book --name kitap_projesi
+PYTHONPATH=. python tools/orchestrator.py produce --input downloads/repos/micrograd --mode rendergit --name micrograd_code
+PYTHONPATH=. python tools/orchestrator.py produce --input downloads/wiki.zim --mode kiwix --name wiki_zim
 
 # 3. 5-Boyutlu Davranış Hakemliğini (LLM-as-a-Judge) Çalıştır:
-PYTHONPATH=. uv run python tools/orchestrator.py judge --project kitap_projesi --mode strict --threshold 7.5
-PYTHONPATH=. uv run python tools/orchestrator.py judge --project kitap_projesi --mode hybrid_editor
-PYTHONPATH=. uv run python tools/orchestrator.py judge --project kitap_projesi --batch
+PYTHONPATH=. python tools/orchestrator.py judge --project kitap_projesi --mode strict --threshold 7.5
+PYTHONPATH=. python tools/orchestrator.py judge --project kitap_projesi --mode hybrid_editor
+PYTHONPATH=. python tools/orchestrator.py judge --project kitap_projesi --batch
 
 # 4. Altın SFT ve DPO Veri Setlerini Derle:
-PYTHONPATH=. uv run python tools/orchestrator.py compile-datasets --project kitap_projesi --min-diff 2.0
+PYTHONPATH=. python tools/orchestrator.py compile-datasets --project kitap_projesi --min-diff 2.0
 ```
 
 ### 4. DPO ve Altın SFT Kürasyon Kuralları

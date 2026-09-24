@@ -239,6 +239,7 @@ async def update_ollama_cache(ollama_url: str):
         return OLLAMA_CACHE
 
     config = get_config()
+    native_ollama_url = ollama_url.rstrip("/").removesuffix("/v1")
     # Resolve OpenAI base URL
     base_url = config.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL")
     if not base_url:
@@ -252,7 +253,7 @@ async def update_ollama_cache(ollama_url: str):
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp_tags = None
             try:
-                resp_tags = await client.get(f"{ollama_url}/api/tags")
+                resp_tags = await client.get(f"{native_ollama_url}/api/tags")
             except Exception:
                 pass
 
@@ -268,7 +269,7 @@ async def update_ollama_cache(ollama_url: str):
                 OLLAMA_CACHE["available_models"] = available_models
 
                 try:
-                    resp_ps = await client.get(f"{ollama_url}/api/ps")
+                    resp_ps = await client.get(f"{native_ollama_url}/api/ps")
                     if resp_ps.status_code == 200:
                         data_ps = resp_ps.json()
                         for m in data_ps.get("models", []):
@@ -320,6 +321,7 @@ async def health_check():
     return {
         "status": "ok",
         "port": 3456,
+        "ollama_online": cache.get("ollama_online", False),
         "ollama_status": cache["status"],
         "ollama_url": ollama_url,
         "available_models": cache["available_models"],
@@ -474,7 +476,7 @@ def trigger_pipeline(payload: Dict[str, Any] = Body(...)):
             raise HTTPException(status_code=400, detail="A pipeline task is already running.")
 
     cmd = payload.get("command", "pipeline")
-    valid_commands = ["pipeline", "extract", "enrich", "embed", "export", "langextract", "kiwix", "judge"]
+    valid_commands = ["pipeline", "extract", "enrich", "embed", "export", "langextract", "kiwix", "judge", "clean_boilerplate"]
     if cmd not in valid_commands:
         raise HTTPException(status_code=400, detail=f"Geçersiz komut: '{cmd}'. Geçerli komutlar: {valid_commands}")
 
@@ -831,6 +833,22 @@ def export_visual_dataset(payload: Dict[str, Any] = Body(default={})):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Visual dataset export error: {str(e)}")
+
+@app.post("/api/clean-boilerplate")
+def clean_boilerplate_endpoint(payload: Dict[str, Any] = Body(default={})):
+    """Prunes boilerplate, legal, colophon, and table-of-contents Q&A pairs from database and re-exports datasets."""
+    try:
+        from pipeline.dataset_builder import DatasetBuilder
+        builder = DatasetBuilder(config_path="config.json")
+        res = builder.clean_database_boilerplate()
+        builder.export_datasets()
+        return {
+            "status": "success",
+            "message": "Boilerplate ve künye verileri temizlendi, veri setleri arındırılmış Alpaca/Unsloth formatında yeniden derlendi.",
+            "details": res
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Boilerplate temizleme hatası: {str(e)}")
 
 # Section C: Analyzer Model Chat Uç Noktası
 @app.post("/api/chat")
@@ -1650,7 +1668,7 @@ def get_judge_stats(project_id: Optional[str] = Query(None)):
     if not db_file.exists():
         db_file = Path(cfg.get("db_path", f"database/{target_pid}.db"))
     if not db_file.exists():
-        return {"total": 0, "approved": 0, "borderline": 0, "rejected": 0, "average_score": 0.0}
+        return {"total": 0, "total_judged": 0, "approved": 0, "borderline": 0, "rejected": 0, "average_score": 0.0}
 
     conn = sqlite3.connect(str(db_file), timeout=30.0)
     cursor = conn.cursor()

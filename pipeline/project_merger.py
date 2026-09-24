@@ -493,7 +493,7 @@ class ProjectMerger:
             "chunk_size": 800,
             "chunk_overlap": 150,
             "ocr_threshold_chars": 100,
-            "tesseract_cmd": "/opt/homebrew/bin/tesseract",
+            "tesseract_cmd": "tesseract",
             "project_id": target_project_id,
             "pragmatic_ratio": 50
         }

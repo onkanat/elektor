@@ -5,6 +5,28 @@ All notable changes to the **Elektor Universal PDF & Rendergit Code Dataset Gene
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [21.0.0] - 2026-09-24
+
+### Added
+- **Unsloth GPU Fine-Tuning Clean Alpaca / DPO Export Mode (`clean_alpaca_input`)**:
+  - Automatically exports `"input": ""` for SFT records (`sft_dataset.jsonl`, `tr_sft_dataset.jsonl`), allowing Unsloth Desktop and Hugging Face TRL to cleanly format prompts without rendering the `### Input:` block. Eliminates shortcut learning and artificial context over-indexing (`Context: <dataset> (<year>)...`).
+  - Strict Hugging Face TRL & Unsloth DPO compliance: removes artificial `input` field from DPO preference records, generating pure `{"prompt": "...", "chosen": "...", "rejected": "..."}` schema.
+  - Added prefix filter in `pipeline/cloud_gpu_offloader.py` (`build_chat_text`) to strip legacy `Context:` and `Bağlam:` prefixes from prompt formatting.
+- **Boilerplate, Legal & Colophon Pruning Engine (`filter_boilerplate`, `clean_boilerplate`)**:
+  - Integrated `is_boilerplate_article()` and `is_boilerplate_text()` into `DatasetBuilder` to detect and filter out non-technical administrative noise (Colophon, Creative Commons licenses, Synopsys/DesignWare/Arm copyright notices, High Risk Activities/warranty disclaimers, Table of Contents).
+  - New CLI subcommand: `python run.py clean_boilerplate [--db <path>]` to scan SQLite database, mark boilerplate articles as `is_excluded = 1`, prune corrupted QA items, and re-export clean datasets.
+  - New FastAPI endpoint: `POST /api/clean-boilerplate` for one-click cleaning via web dashboard.
+  - Ingestion guardrails: `ArchiveExtractor` outline and detected heading parsers automatically skip Colophon/TOC sections.
+  - LLM prompt negative constraints: Added rule 6/7 in `ArchiveAnalyzer` English and Turkish prompt templates forbidding legal, copyright, and disclaimer question generation.
+- **Two-Stage Visual OCR & Technical Engineering Synthesizer (Faz 11)**:
+  - Upgraded multimodal pipeline in `pipeline/vision_ocr.py` using `deepseek-ocr:3b-bf16` + `ornith-1.5:9b` technical synthesizer (`temperature: 0.1`, `num_predict: 4096`).
+  - PyMuPDF ground-truth layout enrichment: directly extracts original PDF page text and pin tables from datasheets to enrich VLM context.
+  - Produces publication-grade Markdown technical catalogs (`multimodal_catalog.md`) and instruction-tuning QA pairs (`multimodal_visual_dataset.jsonl`) with zero repetition loops and clean GitHub-flavored tables.
+- **Ollama Status & Health Tracking**:
+  - Exposes `ollama_online` and model status in `/api/health` with real-time VRAM tracking in the web header.
+
+---
+
 ## [20.0.0] - 2026-09-04
 
 ### Added

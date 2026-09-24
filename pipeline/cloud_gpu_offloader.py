@@ -118,7 +118,7 @@ def build_chat_text(example: dict, tokenizer) -> dict:
     ).strip()
 
     user_content = instruction
-    if user_input:
+    if user_input and not user_input.startswith("Context:") and not user_input.startswith("Bağlam:"):
         user_content += f"\\n\\n{{user_input}}"
 
     if not user_content:
