@@ -10,7 +10,7 @@
   "openai_timeout": 120,
   "analyzer_max_chars": 12000,
   "analyzer_max_tokens": 8192,
-  "embeding_url ": "http://localhost:11434/v1",
+  "embedding_url": "http://localhost:11434/v1",
   "model_embedding": "nomic-embed-text:latest",
   "model_analyzer": "gemini-3.6-flash",
   "model_translator": "gemini-3.6-flash",
@@ -47,5 +47,9 @@
     "A",
     ""
   ],
-  "kiwix_min_chars": 300
+  "kiwix_min_chars": 300,
+  "kiwix_extract_mode": "auto",
+  "kiwix_min_chosen_score": 1,
+  "kiwix_min_vote_diff": 2,
+  "kiwix_batch_size": 500
 }

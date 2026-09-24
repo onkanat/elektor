@@ -18,7 +18,7 @@ class ArchiveVectorStore:
             self.db_path = str(Path("database") / self.db_path)
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self.qdrant_db_path = self.config["qdrant_db_path"]
-        self.ollama_url = self.config["ollama_url"]
+        self.ollama_url = self.config.get("ollama_url", "http://localhost:11434")
         self.model_embedding = self.config["model_embedding"]
         self.chunk_size = self.config.get("chunk_size", 800)
         self.chunk_overlap = self.config.get("chunk_overlap", 150)

@@ -27,8 +27,30 @@ class TestHFDeployer(unittest.TestCase):
 
         self.assertIn("Test Project Dataset", card)
         self.assertIn("multimodal_visual_dataset.jsonl", card)
-        self.assertIn("sft_dataset.jsonl", card)
-        self.assertIn("username/test_proj", card)
+    def test_audit_upload_generates_readme_and_modern_command(self):
+        proj_dir = Path(self.temp_dir.name) / "test_proj"
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        (proj_dir / "sft_dataset.jsonl").write_text('{"instruction":"hi","output":"hello"}\n', encoding="utf-8")
+
+        audit_res = self.deployer.audit_upload(
+            project_id="test_proj",
+            repo_id="onkanat/amateur-radio-qa-dataset"
+        )
+
+        self.assertEqual(audit_res["status"], "passed")
+        self.assertTrue(audit_res["can_proceed"])
+        # Check modern CLI command
+        self.assertTrue(audit_res["cli_command"].startswith("hf upload onkanat/amateur-radio-qa-dataset"))
+        self.assertNotIn("huggingface-cli", audit_res["cli_command"])
+        
+        # Check README.md file is created on disk
+        readme_file = proj_dir / "README.md"
+        self.assertTrue(readme_file.exists())
+        readme_text = readme_file.read_text(encoding="utf-8")
+        self.assertIn("Amateur Radio & Electronics QA Dataset", readme_text)
+        self.assertIn("license: cc-by-sa-4.0", readme_text)
+        self.assertIn("onkanat/amateur-radio-qa-dataset", readme_text)
 
 if __name__ == "__main__":
     unittest.main()
+

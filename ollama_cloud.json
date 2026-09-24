@@ -6,6 +6,7 @@
   "openai_base_url": "https://ollama.com/v1",
   "ollama_url": "https://ollama.com",
   "ollama_api_key": "${OLLAMA_API_KEY}",
+  "embedding_url": "http://localhost:11434/v1",
   "openai_timeout": 600,
   "analyzer_max_chars": 6000,
   "analyzer_max_tokens": 4096,
@@ -42,5 +43,9 @@
   "kiwix_zim_path": "",
   "kiwix_download_url": "",
   "kiwix_namespaces": ["A", ""],
-  "kiwix_min_chars": 300
+  "kiwix_min_chars": 300,
+  "kiwix_extract_mode": "auto",
+  "kiwix_min_chosen_score": 1,
+  "kiwix_min_vote_diff": 2,
+  "kiwix_batch_size": 500
 }
