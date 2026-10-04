@@ -284,8 +284,10 @@ Examples:
     
     # API subcommand
     api_parser = subparsers.add_parser("api", help="Launch the unified web dashboard (FastAPI + React)")
-    api_parser.add_argument("--port", type=int, default=3456, help="Port to run the API server on")
-    api_parser.add_argument("--host", type=str, default="127.0.0.1", help="Host to run the API server on")
+    api_parser.add_argument("--port", type=int, default=int(os.environ.get("ELEKTOR_PORT", "3456")), help="Port to run the API server on")
+    # 2026-10-04: varsayilan 127.0.0.1 -> 0.0.0.0 (LAN'daki ajanlar paneli gorebilsin).
+    # Guvenli tutmak istersen --host 127.0.0.1 ver ya da ELEKTOR_HOST=127.0.0.1 ayarla.
+    api_parser.add_argument("--host", type=str, default=os.environ.get("ELEKTOR_HOST", "0.0.0.0"), help="Host to run the API server on (varsayilan 0.0.0.0; yerel icin 127.0.0.1)")
     
     # Self-test subcommand
     self_test_parser = subparsers.add_parser("self_test", help="Run comprehensive system health self-test & diagnostics")
