@@ -24,7 +24,8 @@ class DatasetBuilder:
 
     BOILERPLATE_PATTERNS = [
         r'\blicen[sc]e\b', r'\bcopyright\b', r'\bcreative commons\b', r'\bcc by-nd\b',
-        r'\bcc-by\b', r'\bsynopsys\b', r'\bdesignware\b', r'\bcolophon\b',
+        r'\bcc-by\b', r'\bcopyright\s+synopsys\b', r'\bsynopsys\s+copyright\b',
+        r'\bportions\s+copyright\b', r'\bcolophon\b',
         r'\bbuild-date\b', r'\bbuild-version\b', r'\bdisclaimer\b', r'\bindemnif\w*\b',
         r'\bhigh risk activities\b', r'\ball rights reserved\b', r'\btable of contents\b',
         r'\biçindekiler\b', r'\bfihrist\b', r'\btelif hakkı\b', r'\blisans\b',
@@ -263,10 +264,9 @@ class DatasetBuilder:
                             if self.filter_boilerplate and (self.is_boilerplate_text(q) or self.is_boilerplate_text(a)):
                                 continue
                             if q and a:
-                                sft_input = "" if self.clean_alpaca_input else f"Context: {self.dataset_name} ({year}) article '{title}'"
                                 sft_records.append({
                                     "instruction": q,
-                                    "input": sft_input,
+                                    "input": "",
                                     "output": a
                                 })
                                 if not has_valid_en_chat:
@@ -295,14 +295,11 @@ class DatasetBuilder:
                             if self.filter_boilerplate and (self.is_boilerplate_text(q) or self.is_boilerplate_text(chosen) or self.is_boilerplate_text(rej)):
                                 continue
                             if q and chosen and rej:
-                                dpo_item = {
+                                dpo_records.append({
                                     "prompt": q,
                                     "chosen": chosen,
                                     "rejected": rej
-                                }
-                                if not self.clean_alpaca_input:
-                                    dpo_item["input"] = f"Context: {self.dataset_name} ({year}) article '{title}'"
-                                dpo_records.append(dpo_item)
+                                })
                 except Exception as e:
                     print(f"Error parsing English DPO pairs for article '{title}': {e}")
 
@@ -315,7 +312,7 @@ class DatasetBuilder:
                         "What is the article '{title}' published in {year} in {dataset} about? Please summarize briefly.",
                         "Please provide a technical summary of the {year} {dataset} article titled '{title}'.",
                         "Can you summarize the main technical concepts and mechanisms of '{title}' ({year}) from {dataset}?",
-                        "What key engineering topics are discussed in the {dataset} ({year}) publication '{title}'?",
+                        "What key engineering topics are discussed in the {dataset} ({year}) publication '{title}'? Please provide a summary.",
                         "Please summarize the purpose, methods, and results described in the article '{title}' ({year})."
                     ]
                     en_prompt = random.choice(en_templates).format(dataset=self.dataset_name, year=year, title=title)
@@ -354,10 +351,9 @@ class DatasetBuilder:
                             if self.filter_boilerplate and (self.is_boilerplate_text(q) or self.is_boilerplate_text(a)):
                                 continue
                             if q and a:
-                                tr_input = "" if self.clean_alpaca_input else f"Bağlam: {self.dataset_name_tr} ({year}) '{display_tr_title}' makalesi"
                                 tr_sft_records.append({
                                     "instruction": q,
-                                    "input": tr_input,
+                                    "input": "",
                                     "output": a
                                 })
                                 if not has_valid_tr_chat:
@@ -383,24 +379,14 @@ class DatasetBuilder:
                             q = safe_str(item.get("question", ""))
                             chosen = safe_str(item.get("chosen", ""))
                             rej = safe_str(item.get("rejected", ""))
-                            qual_status = item.get("quality_status", "validated")
                             if self.filter_boilerplate and (self.is_boilerplate_text(q) or self.is_boilerplate_text(chosen) or self.is_boilerplate_text(rej)):
                                 continue
                             if q and chosen and rej:
-                                tr_dpo_item = {
+                                tr_dpo_records.append({
                                     "prompt": q,
                                     "chosen": chosen,
-                                    "rejected": rej,
-                                    "metadata": {
-                                        "dataset_type": "dpo",
-                                        "language": "tr",
-                                        "source_title": display_tr_title,
-                                        "quality_status": qual_status
-                                    }
-                                }
-                                if not self.clean_alpaca_input:
-                                    tr_dpo_item["input"] = f"Bağlam: {self.dataset_name_tr} ({year}) '{display_tr_title}' makalesi"
-                                tr_dpo_records.append(tr_dpo_item)
+                                    "rejected": rej
+                                })
                 except Exception as e:
                     print(f"Error parsing Turkish DPO pairs for article '{display_tr_title}': {e}")
                     
@@ -460,16 +446,17 @@ class DatasetBuilder:
                             if q_body:
                                 inp_parts.append(q_body)
                             inp = "\n\n".join(inp_parts)
+                            k_instruction = f"{safe_str(k_title)}\n\n{inp}".strip() if inp else safe_str(k_title)
 
                             sft_records.append({
-                                "instruction": safe_str(k_title),
-                                "input": inp,
+                                "instruction": k_instruction,
+                                "input": "",
                                 "output": ans
                             })
                             chat_records.append({
                                 "messages": [
                                     {"role": "system", "content": f"You are an expert technical specialist in {tags_str or 'electronics and software engineering'}."},
-                                    {"role": "user", "content": f"{safe_str(k_title)}\n\n{inp}".strip()},
+                                    {"role": "user", "content": k_instruction},
                                     {"role": "assistant", "content": ans}
                                 ]
                             })
@@ -484,18 +471,11 @@ class DatasetBuilder:
                                 rejected = safe_str(dp.get("rejected"))
                                 if chosen and rejected:
                                     prompt_str = f"Question: {safe_str(k_title)}" + (f"\nTags: [{tags_str}]" if tags_str else "")
+                                    full_prompt = f"{prompt_str}\n\n{safe_str(q_body)}".strip() if q_body else prompt_str
                                     dpo_records.append({
-                                        "prompt": prompt_str,
-                                        "input": safe_str(q_body),
+                                        "prompt": full_prompt,
                                         "chosen": chosen,
-                                        "rejected": rejected,
-                                        "metadata": {
-                                            "source": k_fname or "kiwix_archive",
-                                            "chosen_score": dp.get("chosen_score"),
-                                            "rejected_score": dp.get("rejected_score"),
-                                            "chosen_is_accepted": dp.get("chosen_is_accepted", False),
-                                            "dataset_type": "kiwix_stackexchange_dpo"
-                                        }
+                                        "rejected": rejected
                                     })
 
         # Check and export synthetic_code_pairs table
@@ -520,24 +500,28 @@ class DatasetBuilder:
                         if tr_out:
                             tr_out = self.clean_persona_intros(tr_out)
 
+                    combined_inst = f"{inst}\n\n```python\n{inp}\n```" if (inp and str(inp).strip()) else inst
+                    tr_inst_base = tr_inst if tr_inst else inst
+                    combined_tr_inst = f"{tr_inst_base}\n\n```python\n{inp}\n```" if (inp and str(inp).strip()) else tr_inst_base
+
                     code_sft_records.append({
-                        "instruction": inst,
-                        "input": inp,
+                        "instruction": combined_inst,
+                        "input": "",
                         "output": out
                     })
                     tr_code_sft_records.append({
-                        "instruction": tr_inst if tr_inst else inst,
-                        "input": inp,
+                        "instruction": combined_tr_inst,
+                        "input": "",
                         "output": tr_out if tr_out else out
                     })
                     sft_records.append({
-                        "instruction": inst,
-                        "input": inp,
+                        "instruction": combined_inst,
+                        "input": "",
                         "output": out
                     })
                     tr_sft_records.append({
-                        "instruction": tr_inst if tr_inst else inst,
-                        "input": inp,
+                        "instruction": combined_tr_inst,
+                        "input": "",
                         "output": tr_out if tr_out else out
                     })
 

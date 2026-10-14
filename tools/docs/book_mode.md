@@ -20,12 +20,12 @@ flowchart TD
 ### 📅 Ne Zaman ve Hangi Aşamada İşleniyor?
 
 #### 1. Kitap Bölümleme ve OCR Çıkarma Evresi (`python run.py extract`)
-- `input_mode: "book"` modunda [`pipeline/extractor.py`](file:///Users/hakankilicaslan/Git/elektor/pipeline/extractor.py) altındaki `ArchiveExtractor` tekli veya çoklu PDF kitaplarını işler.
-- İçindekiler Tablosu (TOC) taranarak veya akıllı sayfa sınırları algılanarak kitap ana bölümlere (chapters) ayrıştırılır ve SQLite veritabanındaki [`articles`](file:///Users/hakankilicaslan/Git/elektor/pipeline/extractor.py) tablosuna her bölüm bağımsız bir kayıt olarak kaydedilir.
+- `input_mode: "book"` modunda [`pipeline/extractor.py`](../../pipeline/extractor.py) altındaki `ArchiveExtractor` tekli veya çoklu PDF kitaplarını işler.
+- İçindekiler Tablosu (TOC) taranarak veya akıllı sayfa sınırları algılanarak kitap ana bölümlere (chapters) ayrıştırılır ve SQLite veritabanındaki [`articles`](../../pipeline/extractor.py) tablosuna her bölüm bağımsız bir kayıt olarak kaydedilir.
 - Sayfalardaki şema, devre şeması ve blok diyagramlar PyMuPDF ile kırpılıp WebP/PNG biçiminde `downloads/extracted_images/` klasörüne aktarılır.
 
 #### 2. Derin Teknik Zenginleştirme Evresi (`python run.py enrich`)
-- [`pipeline/analyzer.py`](file:///Users/hakankilicaslan/Git/elektor/pipeline/analyzer.py) içindeki `ArchiveAnalyzer` veritabanındaki her bir kitap bölümünü işler.
+- [`pipeline/analyzer.py`](../../pipeline/analyzer.py) içindeki `ArchiveAnalyzer` veritabanındaki her bir kitap bölümünü işler.
 - Seçilen Persona (ör. `Professional Systems Engineer`) ve Konu (`Technical Documentation & Architecture`) çerçevesinde:
   - Bölüm Başına Derinlemesine SFT Soru-Cevap Çiftleri
   - DPO (Direct Preference Optimization) Doğrulama Verileri

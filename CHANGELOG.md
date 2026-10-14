@@ -63,9 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Full support for slice limits (`--limit 6:11`, `100:200`) across all subcommands (`extract`, `kiwix`, `enrich`, `embed`, `pipeline`).
   - Added SQLite offset querying (`LIMIT count OFFSET start`) in `ArchiveExtractor.run_langextract_all()`.
 - **Comprehensive Documentation Suite (`tools/docs/`)**:
-  - Created [`tools/docs/kiwix_zim_mode.md`](file:///Users/hakankilicaslan/Git/elektor/tools/docs/kiwix_zim_mode.md) detailing Kiwix ZIM architecture, auto DPO/SFT extraction, Web UI integration, and CLI workflows.
-  - Updated [`tools/docs/phase1_extraction.md`](file:///Users/hakankilicaslan/Git/elektor/tools/docs/phase1_extraction.md) with Kiwix extraction engine, updated mermaid diagram, and new SQLite columns (`source_type`, `tags`, `vote_score`, `is_accepted`, `is_vetoed`, `metadata_json`).
-  - Updated [`tools/README.md`](file:///Users/hakankilicaslan/Git/elektor/tools/README.md) with central documentation index.
+  - Created [`tools/docs/kiwix_zim_mode.md`](tools/docs/kiwix_zim_mode.md) detailing Kiwix ZIM architecture, auto DPO/SFT extraction, Web UI integration, and CLI workflows.
+  - Updated [`tools/docs/phase1_extraction.md`](tools/docs/phase1_extraction.md) with Kiwix extraction engine, updated mermaid diagram, and new SQLite columns (`source_type`, `tags`, `vote_score`, `is_accepted`, `is_vetoed`, `metadata_json`).
+  - Updated [`tools/README.md`](tools/README.md) with central documentation index.
 
 ---
 

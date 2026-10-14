@@ -95,17 +95,24 @@ def get_openai_client(config: dict) -> OpenAI:
     return _clients_pool[current_hash]
 
 def get_async_openai_client(config: dict) -> AsyncOpenAI:
-    """Returns an AsyncOpenAI client instance configured with target endpoint and key."""
-    base_url, api_key, timeout = _resolve_endpoint_and_key(config)
+    """Returns a connection-pooled AsyncOpenAI client instance cached by config hash."""
+    global _async_clients_pool
+    current_hash = _get_config_hash(config)
     
-    limits = httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=60.0)
-    http_client = httpx.AsyncClient(limits=limits, timeout=timeout, follow_redirects=True)
-    
-    return AsyncOpenAI(
-        base_url=base_url,
-        api_key=api_key,
-        http_client=http_client
-    )
+    if current_hash not in _async_clients_pool:
+        base_url, api_key, timeout = _resolve_endpoint_and_key(config)
+        
+        limits = httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=60.0)
+        http_client = httpx.AsyncClient(limits=limits, timeout=timeout, follow_redirects=True)
+        
+        _async_clients_pool[current_hash] = AsyncOpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            http_client=http_client
+        )
+        
+    return _async_clients_pool[current_hash]
+
 
 def get_embedding_client(config: dict) -> OpenAI:
     """Returns an OpenAI client instance specifically configured for vector embeddings.

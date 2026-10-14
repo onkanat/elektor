@@ -158,6 +158,134 @@ class ArchiveAnalyzer:
         except Exception:
             return ""
 
+    @staticmethod
+    def parse_json_robust(raw_str: str):
+        r"""
+        Resilient JSON parser for local LLM (Ollama) generation:
+        1. Strips think tags and markdown code fences (```json ... ```).
+        2. Preserves LaTeX math delimiters \(, \), \[, \].
+        3. Protects b, f, n, r, t prefixed LaTeX commands (\beta, \frac, \nabla, \rho, \tau, \theta, \times, etc.) from collapsing into ASCII control characters.
+        4. Escapes invalid JSON backslash sequences (protecting all other LaTeX math commands like \alpha, \omega, \sqrt, \partial, etc.).
+        5. Heals unescaped quotes inside JSON strings and repaired malformed JSON structures via json_repair.
+        6. Removes trailing commas in arrays and objects.
+        """
+        import re
+        if not raw_str or not raw_str.strip():
+            return None
+
+        cleaned = raw_str.strip()
+        if "<think>" in cleaned and "</think>" in cleaned:
+            cleaned = cleaned.split("</think>", 1)[1].strip()
+        if "```json" in cleaned:
+            cleaned = cleaned.split("```json", 1)[1]
+        if "```" in cleaned:
+            cleaned = cleaned.split("```", 1)[0]
+        cleaned = cleaned.strip()
+
+        start_brace = cleaned.find("{")
+        target = cleaned[start_brace:] if start_brace != -1 else cleaned
+
+        # Comprehensive LaTeX commands that could collide with JSON control escapes (\b, \f, \n, \r, \t)
+        latex_bfnrt = (
+            "beta", "bar", "begin", "bmod", "binom", "bullet", "bold", "bmatrix", "bbox", "boldsymbol",
+            "frac", "tfrac", "dfrac", "forall", "font", "fbox", "flat", "footnote",
+            "nabla", "neq", "not", "nu", "neg", "natural", "null", "newline", "ne", "ni",
+            "rho", "varrho", "right", "rangle", "rightarrow", "Rightarrow", "real", "ref", "root",
+            "tau", "times", "theta", "vartheta", "text", "textbf", "textit", "textrm", "textsf", "texttt",
+            "tan", "tanh", "top", "to", "triangle", "tilde", "tag", "tfrac"
+        )
+
+        # 1. Protect inline and display LaTeX delimiters \(, \), \[, \]
+        target_sanitized = re.sub(r"(?<!\\)\\([()\[\]])", r"\\\\\1", target)
+
+        # 2. Protect b, f, n, r, t prefixed LaTeX commands
+        for cmd in latex_bfnrt:
+            target_sanitized = re.sub(r"(?<!\\)\\" + cmd + r"(?![a-zA-Z])", r"\\\\" + cmd, target_sanitized)
+
+        # 3. Sanitize backslashes: correctly escape invalid sequences without corrupting existing valid escapes (\", \\, \/)
+        def escape_invalid_sequences(match):
+            slashes = match.group(1)
+            next_char = match.group(2)
+            if len(slashes) % 2 == 0:
+                return match.group(0)
+            if next_char in ["\"", "\\", "/"]:
+                return match.group(0)
+            if next_char in ["b", "f", "n", "r", "t"]:
+                return match.group(0)
+            if next_char == "u":
+                rest = match.string[match.end():match.end()+4]
+                if len(rest) == 4 and all(c in "0123456789abcdefABCDEF" for c in rest):
+                    return match.group(0)
+            return slashes + "\\" + next_char
+
+        target_sanitized = re.sub(r"(\\+)(.)", escape_invalid_sequences, target_sanitized, flags=re.DOTALL)
+
+        # 4. Standard raw_decode
+        try:
+            obj, _ = json.JSONDecoder(strict=False).raw_decode(target_sanitized)
+            if isinstance(obj, dict) and obj:
+                return obj
+        except Exception:
+            pass
+
+        # 5. json_repair on sanitized target (recovers unescaped quotes while keeping LaTeX intact)
+        try:
+            import json_repair
+            repaired = json_repair.repair_json(target_sanitized, return_objects=True)
+            if isinstance(repaired, dict) and repaired:
+                return repaired
+        except Exception:
+            pass
+
+        # 6. Remove trailing commas in objects or arrays
+        target_fixed = re.sub(r',\s*([\}\]])', r'\1', target_sanitized)
+        try:
+            obj, _ = json.JSONDecoder(strict=False).raw_decode(target_fixed)
+            if isinstance(obj, dict) and obj:
+                return obj
+        except Exception:
+            try:
+                obj = json.loads(target_fixed, strict=False)
+                if isinstance(obj, dict) and obj:
+                    return obj
+            except Exception:
+                pass
+
+        try:
+            import json_repair
+            repaired = json_repair.repair_json(target_fixed, return_objects=True)
+            if isinstance(repaired, dict) and repaired:
+                return repaired
+        except Exception:
+            pass
+
+        # 7. Regex outer match fallback
+        match = re.search(r'(\{[\s\S]*\})', target_fixed)
+        if match:
+            try:
+                obj = json.loads(match.group(1), strict=False)
+                if isinstance(obj, dict) and obj:
+                    return obj
+            except Exception:
+                try:
+                    import json_repair
+                    repaired = json_repair.repair_json(match.group(1), return_objects=True)
+                    if isinstance(repaired, dict) and repaired:
+                        return repaired
+                except Exception:
+                    pass
+
+        # 8. Fallback on original target
+        try:
+            import json_repair
+            repaired = json_repair.repair_json(target, return_objects=True)
+            if isinstance(repaired, dict) and repaired:
+                return repaired
+        except Exception:
+            pass
+
+        return None
+
     def call_ollama_json(self, system_prompt, user_prompt, model=None, keep_alive=None, num_predict=8192):
         """Helper to call LLM model and expect a JSON output, optimized with token limit and temp"""
         if model is None:
@@ -191,104 +319,7 @@ class ArchiveAnalyzer:
                 clean_content = clean_content[:-3]
             clean_content = clean_content.strip()
 
-            def _parse_json_robust(raw_str: str):
-                import re
-                if not raw_str or not raw_str.strip():
-                    return None
-                
-                cleaned = raw_str.strip()
-                if "```json" in cleaned:
-                    cleaned = cleaned.split("```json", 1)[1]
-                if "```" in cleaned:
-                    cleaned = cleaned.split("```", 1)[0]
-                cleaned = cleaned.strip()
-
-                start_brace = cleaned.find("{")
-                target = cleaned[start_brace:] if start_brace != -1 else cleaned
-
-                # 1. Standard raw_decode
-                try:
-                    obj, _ = json.JSONDecoder(strict=False).raw_decode(target)
-                    return obj
-                except Exception:
-                    pass
-
-                # 2. json_repair library (heals unescaped quotes, missing ':' delimiters, truncated JSON)
-                try:
-                    import json_repair
-                    repaired = json_repair.repair_json(target, return_objects=True)
-                    if isinstance(repaired, dict) and repaired:
-                        return repaired
-                except Exception:
-                    pass
-
-                # 3. Protect common LaTeX commands starting with b, f, n, r, t from becoming control chars
-                latex_cmds = (
-                    "frac", "font", "forall", "fbox", "flat",
-                    "beta", "bar", "begin", "binom", "bullet", "bold", "bmatrix", "bmod",
-                    "text", "times", "theta", "tau", "tan", "tanh", "to", "top", "triangle", "tilde", "tag", "tfrac",
-                    "nabla", "neq", "not", "nu", "neg", "natural", "null",
-                    "rho", "right", "rangle", "sqrt", "quad", "qquad", "infty", "sum", "int", "partial"
-                )
-                for cmd in latex_cmds:
-                    target = re.sub(r"(?<!\\)\\" + cmd + r"(?![a-zA-Z])", r"\\\\" + cmd, target)
-
-                # 4. Sanitize backslashes: correctly escape invalid sequences without corrupting existing \\
-                def replace_slash(match):
-                    slashes = match.group(1)
-                    next_char = match.group(2)
-                    if len(slashes) % 2 == 0:
-                        return match.group(0)
-                    if next_char in ["\"", "\\", "/", "b", "f", "n", "r", "t"]:
-                        return match.group(0)
-                    if next_char == "u":
-                        rest = match.string[match.end():match.end()+4]
-                        if len(rest) == 4 and all(c in "0123456789abcdefABCDEF" for c in rest):
-                            return match.group(0)
-                    return slashes + "\\" + next_char
-
-                target_fixed = re.sub(r"(\\+)(.)", replace_slash, target, flags=re.DOTALL)
-
-                try:
-                    obj, _ = json.JSONDecoder(strict=False).raw_decode(target_fixed)
-                    return obj
-                except Exception:
-                    try:
-                        return json.loads(target_fixed, strict=False)
-                    except Exception:
-                        pass
-
-                # 5. Try json_repair on sanitized target
-                try:
-                    import json_repair
-                    repaired = json_repair.repair_json(target_fixed, return_objects=True)
-                    if isinstance(repaired, dict) and repaired:
-                        return repaired
-                except Exception:
-                    pass
-
-                # 6. Remove trailing commas in objects or arrays
-                target_fixed2 = re.sub(r',\s*([\}\]])', r'\1', target_fixed)
-                try:
-                    obj, _ = json.JSONDecoder(strict=False).raw_decode(target_fixed2)
-                    return obj
-                except Exception:
-                    try:
-                        return json.loads(target_fixed2, strict=False)
-                    except Exception:
-                        pass
-
-                # 7. Regex outer match fallback
-                match = re.search(r'(\{[\s\S]*\})', target_fixed2)
-                if match:
-                    try:
-                        return json.loads(match.group(1), strict=False)
-                    except Exception:
-                        pass
-
-                return None
-
-            res = _parse_json_robust(clean_content)
+            res = ArchiveAnalyzer.parse_json_robust(clean_content)
             if res is not None:
                 return res
             return json.loads(clean_content)
@@ -403,6 +434,12 @@ class ArchiveAnalyzer:
         system_prompt = (
             f"Sen uzman bir gömülü sistemler mimarı, teknik yazar ve Türkçe yapay zeka eğitmenisin. ({self.llm_persona})\n"
             "Verilen döküman metnini derinlemesine incele ve doğrudan yüksek kaliteli Türkçe teknik içerik üreterek JSON objesi döndür.\n\n"
+            "KRİTİK TEKNİK TERİM VE FORMÜL KORUMA KURALLARI:\n"
+            "1. MİKRODENETLEYİCİ VE DONANIM YAZMAÇLARI: Yazmaç isimleri (örneğin GPIO_OE, SIO_BASE, CTRL, REG, FIFO, bitfield adları) ASLA Türkçeleştirilmemeli, tam teknik orijinal yazımıyla korunmalıdır.\n"
+            "2. VERİ YOLU VE HABERLEŞME PROTOKOLLERİ: I2C, SPI, UART, CAN, USB, SWD, JTAG, PIO, DMA gibi protokol ve donanım birimi adları aynen korunmalıdır.\n"
+            "3. ELEKTRONİK BİLEŞENLER VE BİRİMLER: MOSFET, Op-Amp, BJT, pull-up, pull-down, decoupling capacitor, SMD gibi teknik terimler ile birimler (MHz, kHz, mA, uA, V, mV, ohm, kOhm, pF, nF, uF) standart mühendislik formatında korunmalıdır.\n"
+            "4. LATEX MATEMATİKSEL GÖSTERİM: Tüm matematiksel formüller, denklemler ve türetmeler standart LaTeX sözdizimi ile yazılmalıdır (örneğin \\(f_c = \\frac{1}{2\\pi R C}\\) veya \\(V_{out} = V_{in} \\cdot \\frac{R_2}{R_1 + R_2}\\)).\n"
+            "5. AKICI TÜRKÇE SÖZDİZİMİ: Açıklamalar Türkçe teknik anlatım dilinde, devrik olmayan, dilbilgisi kusursuz ve doğal cümlelerle kurulmalıdır.\n\n"
             "KRİTİK JSON SÖZDİZİMİ VE TIRNAK KURALLARI:\n"
             "1. Çıktı SADECE tek ve geçerli bir JSON nesnesi olmalıdır.\n"
             "2. JSON string değerleri (soru, cevap, özet vb.) içerisinde ASLA kaçırılmamış çift tırnak (\") kullanma. Metin içindeki terimler, kodlar veya vurgular için TEK TIRNAK (') veya ters tırnak (`) kullan. Çift tırnak kullanılması zorunluysa mutlaka \\\" olarak kaçır.\n"
@@ -435,9 +472,9 @@ class ArchiveAnalyzer:
             "}\n\n"
             "Kurallar:\n"
             f"1. 'tr_sft_qa' dizisinde tam olarak {self.qa_count} adet soru-cevap öğesi üretin.\n"
-            f"2. Yanıtlar {self.llm_subject} alanına uygun, Türkçe teknik terimlerin korunduğu derinlikte olmalıdır.\n"
-            "3. DPO çiftinde reddedilen (rejected) cevap, mantıklı görünen ancak gerçek bir mühendislik hatası (gerilim uyumsuzluğu, pin hatası, vb.) içermelidir.\n"
-            "4. Matematiksel formülleri LaTeX notation ile yazın: \\(E = m c^2\\).\n"
+            f"2. TEKNİK TERİM KORUMASI: {self.llm_subject} alanına ait tüm donanım yazmaçları (GPIO_OE, SIO vb.), haberleşme protokolleri (I2C, SPI, UART, CAN, USB) ve elektriksel bileşenler (MOSFET, Op-Amp vb.) orijinal teknik adlarıyla korunmalıdır; asla Türkçeleştirilmemelidir.\n"
+            "3. DPO çiftinde reddedilen (rejected) cevap, mantıklı görünen ancak gerçek bir mühendislik hatası (gerilim uyumsuzluğu, pin hatası, ters polarite, yanlış baud hızı vb.) içermelidir.\n"
+            "4. LATEX FORMÜL KURALI: Matematiksel formülleri ve fiziksel büyüklükleri standart LaTeX notation ile yazın: \\(f_c = \\frac{1}{2\\pi R C}\\), \\(E = m c^2\\).\n"
             "5. TIRNAK KURALI: Cevap ve soru metinleri içinde çift tırnak (\") yerine tek tırnak (') kullanın.\n"
             "6. KESİN NEGATİF KURAL: Doküman lisansları (Creative Commons vb.), telif hakkı (copyright), ticari markalar, yasal uyarılar/feragatnameler, garanti durumu, künye veya içindekiler tablosu hakkında ASLA soru veya cevap üretmeyin. %100 oranında donanım mimarisi, teknik özellikler, elektriksel değerler, yazmaç haritaları (registers), pin konfigürasyonları ve yazılım API'lerine odaklanın.\n"
             "7. SADECE geçerli JSON formatı döndürün."
@@ -485,8 +522,29 @@ class ArchiveAnalyzer:
         import re
         print(f"Translating to Turkish with TranslateGemma: '{title}'...")
         
-        sft_qa_list = json.loads(sft_qa_raw) if isinstance(sft_qa_raw, str) and sft_qa_raw else sft_qa_raw or []
-        dpo_pairs_list = json.loads(dpo_pairs_raw) if isinstance(dpo_pairs_raw, str) and dpo_pairs_raw else dpo_pairs_raw or []
+        def _safe_load_list(raw_data):
+            if not raw_data:
+                return []
+            if isinstance(raw_data, list):
+                return raw_data
+            if isinstance(raw_data, str):
+                try:
+                    res = json.loads(raw_data)
+                    if isinstance(res, list):
+                        return res
+                except Exception:
+                    pass
+                try:
+                    import json_repair
+                    res = json_repair.repair_json(raw_data, return_objects=True)
+                    if isinstance(res, list):
+                        return res
+                except Exception:
+                    pass
+            return []
+
+        sft_qa_list = _safe_load_list(sft_qa_raw)
+        dpo_pairs_list = _safe_load_list(dpo_pairs_raw)
         
         # Prepare plain text block
         text_block = []
@@ -518,12 +576,15 @@ class ArchiveAnalyzer:
         full_text = "\n\n".join(text_block)
         
         system_prompt = (
-            f"You are a professional translator specializing in {self.llm_subject}.\n"
-            "Translate the text block provided by the user into natural, high-quality Turkish.\n\n"
-            "CRITICAL TERMINOLOGY RULES:\n"
-            "1. PRESERVE ALL PROPER NAMES, DATES, DOMAIN TERMINOLOGY, AND ACRONYMS IN THEIR STANDARD ACCURATE FORM.\n"
-            "2. Keep all math/LaTeX formulas intact.\n"
-            "3. Preserve the exact markers (e.g. Title:, Summary:, Q1:, A1:, DPO_Q:, DPO_Chosen:, DPO_Rejected:) to demarcate segments."
+            f"You are a professional technical translator specializing in {self.llm_subject}.\n"
+            "Translate the text block provided by the user into natural, high-quality, professional Turkish.\n\n"
+            "CRITICAL TERMINOLOGY & FORMULA PRESERVATION RULES:\n"
+            "1. HARDWARE REGISTERS & BITFIELDS: Strictly preserve all microcontroller register names, memory-mapped offsets, and bitfields (e.g. GPIO_OE, SIO_BASE, CTRL, REG, FIFO, DREQ) in their exact technical casing. Do NOT translate or Turkishize them.\n"
+            "2. BUS PROTOCOLS & INTERFACES: Strictly preserve bus protocols and communication standards (e.g. I2C, SPI, UART, CAN, USB, SWD, JTAG, PWM, ADC, DAC, DMA, PIO) verbatim.\n"
+            "3. ELECTRICAL COMPONENTS & UNITS: Strictly preserve component designations (e.g. MOSFET, Op-Amp, BJT, pull-up, pull-down, decoupling capacitor, SMD) and standard engineering units (e.g. MHz, kHz, mA, uA, V, mV, ohm, kOhm, pF, nF, uF).\n"
+            "4. LATEX MATHEMATICAL NOTATION: Strictly preserve all mathematical equations and LaTeX notation intact (e.g. \\frac{...}{...}, \\theta, \\Omega, \\pi, \\sqrt{...}, \\( ... \\), \\[ ... \\]). Do NOT strip, corrupt, or omit backslashes.\n"
+            "5. NATURAL TURKISH SYNTAX: Use natural, fluent, grammatically correct Turkish engineering prose around the preserved technical terms.\n"
+            "6. MARKER PRESERVATION: Preserve the exact markers (e.g. Title:, Summary:, Q1:, A1:, DPO_Q:, DPO_Chosen:, DPO_Rejected:) to demarcate segments."
         )
         
         user_prompt = (

@@ -7,7 +7,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Body
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Body, Request
 from starlette.background import BackgroundTask
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import pydantic
 from pipeline.llm_client import get_openai_client
+from pipeline.db import get_db_connection, get_db_cursor
 import psutil
 import httpx
 from pipeline.mcp_tools import search_vector_rag, query_sqlite_knowledge, inject_sft_dpo_context, evaluate_knowledge_gap
@@ -305,30 +306,52 @@ async def update_ollama_cache(ollama_url: str):
     except Exception as e:
         OLLAMA_CACHE["status"] = f"offline ({str(e)})"
         OLLAMA_CACHE["ollama_online"] = False
+        OLLAMA_CACHE["available_models"] = []
+        OLLAMA_CACHE["vram_models"] = []
 
     OLLAMA_CACHE["last_check"] = now
     return OLLAMA_CACHE
 
 @app.get("/api/health")
-async def health_check():
+async def health_check(request: Request = None):
     config = get_config()
     ollama_url = config.get("ollama_url", "http://localhost:11434")
     cache = await update_ollama_cache(ollama_url)
+    if not cache.get("ollama_online", False):
+        cache["available_models"] = []
+        cache["vram_models"] = []
         
-    db_file = Path(config.get("db_path", "database/sdr_engineers.db"))
-    qdrant_path = Path(config.get("qdrant_db_path", "qdrant_sdr"))
+    port = 3456
+    if "ELEKTOR_PORT" in os.environ:
+        try:
+            port = int(os.environ["ELEKTOR_PORT"])
+        except (ValueError, TypeError):
+            pass
+    elif request and request.url and request.url.port:
+        port = request.url.port
+    elif "PORT" in os.environ:
+        try:
+            port = int(os.environ["PORT"])
+        except (ValueError, TypeError):
+            pass
+
+    registry = get_projects_registry()
+    active_pid = config.get("project_id") or registry.get("active_project_id", "rp01")
+    db_file = Path(config.get("db_path") or f"database/{active_pid}.db")
+    qdrant_path = Path(config.get("qdrant_db_path") or f"qdrant_{active_pid}")
 
     return {
         "status": "ok",
-        "port": 3456,
+        "port": port,
         "ollama_online": cache.get("ollama_online", False),
         "ollama_status": cache["status"],
         "ollama_url": ollama_url,
-        "available_models": cache["available_models"],
+        "available_models": cache.get("available_models", []),
         "sqlite_exists": db_file.exists(),
         "qdrant_exists": qdrant_path.exists(),
         "config": config
     }
+
 
 @app.get("/api/system/metrics")
 async def get_system_metrics():
@@ -471,12 +494,9 @@ def run_pipeline_process(cmd, limit, reset, shards=1, shard_ports=None, enrich_p
 @app.post("/api/pipeline/run")
 def trigger_pipeline(payload: Dict[str, Any] = Body(...)):
     global pipeline_state
-    with pipeline_lock:
-        if pipeline_state["status"] == "running":
-            raise HTTPException(status_code=400, detail="A pipeline task is already running.")
 
     cmd = payload.get("command", "pipeline")
-    valid_commands = ["pipeline", "extract", "enrich", "embed", "export", "langextract", "kiwix", "judge", "clean_boilerplate"]
+    valid_commands = ["pipeline", "extract", "enrich", "embed", "export", "export_visual", "langextract", "kiwix", "judge", "clean_boilerplate"]
     if cmd not in valid_commands:
         raise HTTPException(status_code=400, detail=f"Geçersiz komut: '{cmd}'. Geçerli komutlar: {valid_commands}")
 
@@ -485,7 +505,6 @@ def trigger_pipeline(payload: Dict[str, Any] = Body(...)):
     confirm_reset = payload.get("confirm_reset", False)
     shards = payload.get("shards", 1)
     shard_ports = payload.get("shard_ports")
-
     enrich_pass = payload.get("enrich_pass", "all")
 
     if reset and not confirm_reset:
@@ -494,11 +513,22 @@ def trigger_pipeline(payload: Dict[str, Any] = Body(...)):
             detail="GÜVENLİK UYARISI: Veritabanı ve veri setlerinin sıfırlanması için confirm_reset=True onayı zorunludur."
         )
 
+    with pipeline_lock:
+        if pipeline_state["status"] == "running":
+            raise HTTPException(status_code=400, detail="A pipeline task is already running.")
+        pipeline_state["status"] = "running"
+        pipeline_state["command"] = cmd
+        pipeline_state["start_time"] = time.time()
+        pipeline_state["end_time"] = None
+        pipeline_state["exit_code"] = None
+        pipeline_state["logs"] = [f"=== Starting pipeline subcommand: '{cmd}' (Limit: {limit}, Reset: {reset}, Shards: {shards}, Ports: {shard_ports}) ==="]
+
     thread = threading.Thread(target=run_pipeline_process, args=(cmd, limit, reset, shards, shard_ports, enrich_pass))
     thread.daemon = True
     thread.start()
 
     return {"status": "started", "command": cmd, "limit": limit, "reset": reset, "shards": shards, "shard_ports": shard_ports, "enrich_pass": enrich_pass}
+
 
 @app.get("/api/pipeline/status")
 def get_pipeline_status():
@@ -600,19 +630,17 @@ def get_sqlite_tables():
         return {"tables": [], "db_path": db_path, "exists": False}
 
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = [row[0] for row in cursor.fetchall() if not row[0].startswith("sqlite_")]
-        
-        info = []
-        for t in tables:
-            cursor.execute(f"SELECT COUNT(*) FROM `{t}`")
-            count = cursor.fetchone()[0]
-            info.append({"name": t, "count": count})
+        with get_db_cursor(db_path) as cursor:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            tables = [row[0] for row in cursor.fetchall() if not row[0].startswith("sqlite_")]
             
-        conn.close()
-        return {"tables": info, "db_path": db_path, "exists": True}
+            info = []
+            for t in tables:
+                cursor.execute(f"SELECT COUNT(*) FROM `{t}`")
+                count = cursor.fetchone()[0]
+                info.append({"name": t, "count": count})
+                
+            return {"tables": info, "db_path": db_path, "exists": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SQLite error: {str(e)}")
 
@@ -631,43 +659,41 @@ def query_sqlite_table(
 
     offset = (page - 1) * limit
     try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        with get_db_connection(db_path, row_factory=sqlite3.Row) as conn:
+            cursor = conn.cursor()
 
-        # Get column info dynamically
-        cursor.execute(f"PRAGMA table_info(`{table}`);")
-        cols_info = cursor.fetchall()
-        text_cols = [c[1] for c in cols_info if c[2].upper() in ['TEXT', 'VARCHAR', 'CHAR', 'CLOB'] or c[1] in ['title', 'filename', 'extracted_text', 'summary', 'turkish_title', 'turkish_summary', 'sft_qa', 'dpo_pairs', 'tr_sft_qa', 'tr_dpo_pairs']]
+            # Get column info dynamically
+            cursor.execute(f"PRAGMA table_info(`{table}`);")
+            cols_info = cursor.fetchall()
+            text_cols = [c[1] for c in cols_info if c[2].upper() in ['TEXT', 'VARCHAR', 'CHAR', 'CLOB'] or c[1] in ['title', 'filename', 'extracted_text', 'summary', 'turkish_title', 'turkish_summary', 'sft_qa', 'dpo_pairs', 'tr_sft_qa', 'tr_dpo_pairs']]
 
-        where_clause = ""
-        params = []
-        if search and text_cols:
-            clauses = [f"`{col}` LIKE ?" for col in text_cols]
-            where_clause = "WHERE (" + " OR ".join(clauses) + ")"
-            params = [f"%{search}%"] * len(text_cols)
+            where_clause = ""
+            params = []
+            if search and text_cols:
+                clauses = [f"`{col}` LIKE ?" for col in text_cols]
+                where_clause = "WHERE (" + " OR ".join(clauses) + ")"
+                params = [f"%{search}%"] * len(text_cols)
 
-        count_sql = f"SELECT COUNT(*) FROM `{table}` {where_clause}"
-        cursor.execute(count_sql, params)
-        total_records = cursor.fetchone()[0]
+            count_sql = f"SELECT COUNT(*) FROM `{table}` {where_clause}"
+            cursor.execute(count_sql, params)
+            total_records = cursor.fetchone()[0]
 
-        query_sql = f"SELECT * FROM `{table}` {where_clause} LIMIT ? OFFSET ?"
-        cursor.execute(query_sql, params + [limit, offset])
-        rows = [dict(row) for row in cursor.fetchall()]
-        
-        for r in rows:
-            for k, val in list(r.items()):
-                if isinstance(val, str) and len(val) > 400:
-                    r[f"{k}_preview"] = val[:400] + "..."
+            query_sql = f"SELECT * FROM `{table}` {where_clause} LIMIT ? OFFSET ?"
+            cursor.execute(query_sql, params + [limit, offset])
+            rows = [dict(row) for row in cursor.fetchall()]
+            
+            for r in rows:
+                for k, val in list(r.items()):
+                    if isinstance(val, str) and len(val) > 400:
+                        r[f"{k}_preview"] = val[:400] + "..."
 
-        conn.close()
-        return {
-            "table": table,
-            "page": page,
-            "limit": limit,
-            "total_records": total_records,
-            "records": rows
-        }
+            return {
+                "table": table,
+                "page": page,
+                "limit": limit,
+                "total_records": total_records,
+                "records": rows
+            }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SQLite query error: {str(e)}")
 
@@ -689,27 +715,19 @@ def rate_dataset_record(req: RateDatasetRequest):
         raise HTTPException(status_code=404, detail="Database file not found")
         
     try:
-        conn = sqlite3.connect(db_path, timeout=30.0)
-        cursor = conn.cursor()
-        try:
-            cursor.execute("PRAGMA journal_mode=WAL;")
-        except Exception:
-            pass
-            
-        cursor.execute("PRAGMA table_info(enrichments);")
-        cols = [c[1] for c in cursor.fetchall()]
-        if "human_rating" not in cols:
-            cursor.execute("ALTER TABLE enrichments ADD COLUMN human_rating INTEGER DEFAULT 0;")
-        if "human_feedback" not in cols:
-            cursor.execute("ALTER TABLE enrichments ADD COLUMN human_feedback TEXT;")
-            
-        cursor.execute("""
-            UPDATE enrichments 
-            SET human_rating = ?, human_feedback = ?
-            WHERE article_id = ? OR id = ?
-        """, (req.rating, req.feedback or "", req.article_id, req.article_id))
-        conn.commit()
-        conn.close()
+        with get_db_cursor(db_path, timeout=30.0) as cursor:
+            cursor.execute("PRAGMA table_info(enrichments);")
+            cols = [c[1] for c in cursor.fetchall()]
+            if "human_rating" not in cols:
+                cursor.execute("ALTER TABLE enrichments ADD COLUMN human_rating INTEGER DEFAULT 0;")
+            if "human_feedback" not in cols:
+                cursor.execute("ALTER TABLE enrichments ADD COLUMN human_feedback TEXT;")
+                
+            cursor.execute("""
+                UPDATE enrichments 
+                SET human_rating = ?, human_feedback = ?
+                WHERE article_id = ? OR id = ?
+            """, (req.rating, req.feedback or "", req.article_id, req.article_id))
         return {"status": "success", "article_id": req.article_id, "rating": req.rating}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update rating: {str(e)}")
@@ -723,28 +741,21 @@ def exclude_dataset_record(req: ExcludeDatasetRequest):
         raise HTTPException(status_code=404, detail="Database file not found")
         
     try:
-        conn = sqlite3.connect(db_path, timeout=30.0)
-        cursor = conn.cursor()
-        try:
-            cursor.execute("PRAGMA journal_mode=WAL;")
-        except Exception:
-            pass
-            
-        cursor.execute("PRAGMA table_info(enrichments);")
-        cols = [c[1] for c in cursor.fetchall()]
-        if "is_excluded" not in cols:
-            cursor.execute("ALTER TABLE enrichments ADD COLUMN is_excluded INTEGER DEFAULT 0;")
-            
-        cursor.execute("""
-            UPDATE enrichments 
-            SET is_excluded = ?
-            WHERE article_id = ? OR id = ?
-        """, (1 if req.exclude else 0, req.article_id, req.article_id))
-        conn.commit()
-        conn.close()
+        with get_db_cursor(db_path, timeout=30.0) as cursor:
+            cursor.execute("PRAGMA table_info(enrichments);")
+            cols = [c[1] for c in cursor.fetchall()]
+            if "is_excluded" not in cols:
+                cursor.execute("ALTER TABLE enrichments ADD COLUMN is_excluded INTEGER DEFAULT 0;")
+                
+            cursor.execute("""
+                UPDATE enrichments 
+                SET is_excluded = ?
+                WHERE article_id = ? OR id = ?
+            """, (1 if req.exclude else 0, req.article_id, req.article_id))
         return {"status": "success", "article_id": req.article_id, "is_excluded": req.exclude}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update exclude status: {str(e)}")
+
 
 @app.get("/api/system/self_test")
 def system_self_test():
@@ -1123,43 +1134,43 @@ def get_code_units(
     if not db_path.exists():
         return {"project_id": project_id, "total": 0, "units": []}
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    try:
+        with get_db_connection(db_path, row_factory=sqlite3.Row) as conn:
+            cursor = conn.cursor()
 
-    # Check table existence
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='code_units'")
-    if not cursor.fetchone():
-        conn.close()
-        return {"project_id": project_id, "total": 0, "units": []}
+            # Check table existence
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='code_units'")
+            if not cursor.fetchone():
+                return {"project_id": project_id, "total": 0, "units": []}
 
-    query = "SELECT * FROM code_units WHERE project_id = ?"
-    params = [project_id]
+            query = "SELECT * FROM code_units WHERE project_id = ?"
+            params = [project_id]
 
-    if unit_type:
-        query += " AND unit_type = ?"
-        params.append(unit_type)
+            if unit_type:
+                query += " AND unit_type = ?"
+                params.append(unit_type)
 
-    # Count total
-    count_query = query.replace("SELECT *", "SELECT COUNT(*)")
-    cursor.execute(count_query, params)
-    total_count = cursor.fetchone()[0]
+            # Count total
+            count_query = query.replace("SELECT *", "SELECT COUNT(*)")
+            cursor.execute(count_query, params)
+            total_count = cursor.fetchone()[0]
 
-    query += " ORDER BY id ASC LIMIT ? OFFSET ?"
-    params.extend([limit, offset])
+            query += " ORDER BY id ASC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
 
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
-    conn.close()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            units = [dict(row) for row in rows]
+            return {
+                "project_id": project_id,
+                "total": total_count,
+                "limit": limit,
+                "offset": offset,
+                "units": units
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-    units = [dict(row) for row in rows]
-    return {
-        "project_id": project_id,
-        "total": total_count,
-        "limit": limit,
-        "offset": offset,
-        "units": units
-    }
 
 
 @app.post("/api/code/generate-dataset")
@@ -1182,15 +1193,17 @@ def generate_code_dataset(payload: Dict[str, Any] = Body(...)):
     if not db_path.exists():
         raise HTTPException(status_code=404, detail=f"Database file not found: {db_path}")
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    try:
+        with get_db_connection(db_path, row_factory=sqlite3.Row) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM code_units WHERE project_id = ? LIMIT ?", (project_id, limit))
+            rows = cursor.fetchall()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-    cursor.execute("SELECT * FROM code_units WHERE project_id = ? LIMIT ?", (project_id, limit))
-    rows = cursor.fetchall()
     if not rows:
-        conn.close()
         raise HTTPException(status_code=404, detail=f"No code units found for project_id: {project_id}")
+
 
     openai_client = get_openai_client(config)
     synthetic_pairs = []
@@ -1469,66 +1482,66 @@ def run_langextract_task(payload: Dict[str, Any] = Body(...)):
     if not Path(db_path).exists():
         raise HTTPException(status_code=404, detail=f"Veritabanı bulunamadı: {db_path}")
 
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS langextract_extractions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            article_id INTEGER,
-            preset TEXT,
-            text_span TEXT,
-            start_char INTEGER,
-            end_char INTEGER,
-            attributes TEXT,
-            provider TEXT,
-            extracted_at TEXT,
-            FOREIGN KEY(article_id) REFERENCES articles(id)
-        )
-    """)
-    conn.commit()
-
-    cursor.execute("SELECT id, title, extracted_text FROM articles WHERE extracted_text IS NOT NULL AND extracted_text != '' LIMIT ?", (limit_val,))
-    articles = cursor.fetchall()
-
-    engine = LangExtractEngine(cfg)
-    vis_dir = Path("exports") / project_id / "langextract_visualizations"
-    if visualize:
-        vis_dir.mkdir(parents=True, exist_ok=True)
-
-    extracted_count = 0
-    from datetime import datetime
-
-    for aid, title, text in articles:
-        res = engine.extract_grounded_entities(text=text, schema_preset=preset, provider_override=provider)
-        entities = res.get("entities", [])
-        extracted_count += len(entities)
-        now_iso = datetime.now().isoformat()
-
-        for ent in entities:
-            stext = ent.get("text_span", "")
-            start = ent.get("start_char", 0)
-            end = ent.get("end_char", len(stext))
-            attr = json.dumps(ent.get("attributes", {}), ensure_ascii=False)
-
+    try:
+        with get_db_cursor(db_path) as cursor:
             cursor.execute("""
-                INSERT INTO langextract_extractions (article_id, preset, text_span, start_char, end_char, attributes, provider, extracted_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (aid, preset, stext, start, end, attr, res.get("provider", provider), now_iso))
-        conn.commit()
+                CREATE TABLE IF NOT EXISTS langextract_extractions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    article_id INTEGER,
+                    preset TEXT,
+                    text_span TEXT,
+                    start_char INTEGER,
+                    end_char INTEGER,
+                    attributes TEXT,
+                    provider TEXT,
+                    extracted_at TEXT,
+                    FOREIGN KEY(article_id) REFERENCES articles(id)
+                )
+            """)
 
-        if visualize and text:
-            out_html = vis_dir / f"article_{aid}_grounded.html"
-            engine.generate_visualization_html(text, res, str(out_html))
+            cursor.execute("SELECT id, title, extracted_text FROM articles WHERE extracted_text IS NOT NULL AND extracted_text != '' LIMIT ?", (limit_val,))
+            articles = cursor.fetchall()
 
-    conn.close()
-    return {
-        "status": "success",
-        "project_id": project_id,
-        "processed_articles": len(articles),
-        "total_entities_extracted": extracted_count,
-        "provider": provider,
-        "preset": preset
-    }
+            engine = LangExtractEngine(cfg)
+            vis_dir = Path("exports") / project_id / "langextract_visualizations"
+            if visualize:
+                vis_dir.mkdir(parents=True, exist_ok=True)
+
+            extracted_count = 0
+            from datetime import datetime
+
+            for aid, title, text in articles:
+                res = engine.extract_grounded_entities(text=text, schema_preset=preset, provider_override=provider)
+                entities = res.get("entities", [])
+                extracted_count += len(entities)
+                now_iso = datetime.now().isoformat()
+
+                for ent in entities:
+                    stext = ent.get("text_span", "")
+                    start = ent.get("start_char", 0)
+                    end = ent.get("end_char", len(stext))
+                    attr = json.dumps(ent.get("attributes", {}), ensure_ascii=False)
+
+                    cursor.execute("""
+                        INSERT INTO langextract_extractions (article_id, preset, text_span, start_char, end_char, attributes, provider, extracted_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (aid, preset, stext, start, end, attr, res.get("provider", provider), now_iso))
+
+                if visualize and text:
+                    out_html = vis_dir / f"article_{aid}_grounded.html"
+                    engine.generate_visualization_html(text, res, str(out_html))
+
+            return {
+                "status": "success",
+                "project_id": project_id,
+                "processed_articles": len(articles),
+                "total_entities_extracted": extracted_count,
+                "provider": provider,
+                "preset": preset
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database or extraction error: {str(e)}")
+
 
 @app.get("/api/langextract/results")
 def get_langextract_results(project_id: Optional[str] = Query(None)):
@@ -1541,22 +1554,23 @@ def get_langextract_results(project_id: Optional[str] = Query(None)):
     if not Path(db_path).exists():
         return {"project_id": pid, "count": 0, "results": []}
 
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='langextract_extractions'")
-    if not cursor.fetchone():
-        conn.close()
-        return {"project_id": pid, "count": 0, "results": []}
+    try:
+        with get_db_cursor(db_path) as cursor:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='langextract_extractions'")
+            if not cursor.fetchone():
+                return {"project_id": pid, "count": 0, "results": []}
 
-    cursor.execute("""
-        SELECT l.id, l.article_id, l.preset, l.text_span, l.start_char, l.end_char, l.attributes, l.provider, l.extracted_at, a.title
-        FROM langextract_extractions l
-        LEFT JOIN articles a ON a.id = l.article_id
-        ORDER BY l.id DESC
-        LIMIT 200
-    """)
-    rows = cursor.fetchall()
-    conn.close()
+            cursor.execute("""
+                SELECT l.id, l.article_id, l.preset, l.text_span, l.start_char, l.end_char, l.attributes, l.provider, l.extracted_at, a.title
+                FROM langextract_extractions l
+                LEFT JOIN articles a ON a.id = l.article_id
+                ORDER BY l.id DESC
+                LIMIT 200
+            """)
+            rows = cursor.fetchall()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"SQLite error: {str(e)}")
+
 
     results = []
     for r in rows:
@@ -1670,55 +1684,50 @@ def get_judge_stats(project_id: Optional[str] = Query(None)):
     if not db_file.exists():
         return {"total": 0, "total_judged": 0, "approved": 0, "borderline": 0, "rejected": 0, "average_score": 0.0}
 
-    conn = sqlite3.connect(str(db_file), timeout=30.0)
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='enrichments'")
-    if not cursor.fetchone():
-        conn.close()
-        return {"total": 0, "total_judged": 0, "approved": 0, "borderline": 0, "rejected": 0, "average_score": 0.0}
-
-    # Ensure judge columns exist without throwing OperationalError
-    cursor.execute("PRAGMA table_info(enrichments)")
-    cols = [col[1] for col in cursor.fetchall()]
-    if "judge_status" not in cols or "judge_score" not in cols:
-        try:
-            if "judge_score" not in cols:
-                cursor.execute("ALTER TABLE enrichments ADD COLUMN judge_score REAL")
-            if "judge_status" not in cols:
-                cursor.execute("ALTER TABLE enrichments ADD COLUMN judge_status TEXT")
-            if "judge_feedback" not in cols:
-                cursor.execute("ALTER TABLE enrichments ADD COLUMN judge_feedback TEXT")
-            if "judged_at" not in cols:
-                cursor.execute("ALTER TABLE enrichments ADD COLUMN judged_at TEXT")
-            conn.commit()
-        except Exception:
-            conn.close()
-            return {"total": 0, "total_judged": 0, "approved": 0, "borderline": 0, "rejected": 0, "average_score": 0.0}
-
     try:
-        cursor.execute("""
-            SELECT judge_status, COUNT(*), AVG(judge_score)
-            FROM enrichments
-            WHERE judge_status IS NOT NULL AND judge_status != ''
-            GROUP BY judge_status
-        """)
-        rows = cursor.fetchall()
-        
-        cursor.execute("SELECT AVG(judge_score), COUNT(*) FROM enrichments WHERE judge_score IS NOT NULL")
-        overall_avg, total_judged = cursor.fetchone()
-        conn.close()
+        with get_db_cursor(str(db_file), timeout=30.0) as cursor:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='enrichments'")
+            if not cursor.fetchone():
+                return {"total": 0, "total_judged": 0, "approved": 0, "borderline": 0, "rejected": 0, "average_score": 0.0}
 
-        breakdown = {status: count for status, count, _ in rows}
-        return {
-            "total_judged": total_judged or 0,
-            "average_score": round(overall_avg or 0.0, 2),
-            "approved": breakdown.get("approved", 0),
-            "borderline": breakdown.get("borderline", 0),
-            "rejected": breakdown.get("rejected", 0)
-        }
+            # Ensure judge columns exist without throwing OperationalError
+            cursor.execute("PRAGMA table_info(enrichments)")
+            cols = [col[1] for col in cursor.fetchall()]
+            if "judge_status" not in cols or "judge_score" not in cols:
+                try:
+                    if "judge_score" not in cols:
+                        cursor.execute("ALTER TABLE enrichments ADD COLUMN judge_score REAL")
+                    if "judge_status" not in cols:
+                        cursor.execute("ALTER TABLE enrichments ADD COLUMN judge_status TEXT")
+                    if "judge_feedback" not in cols:
+                        cursor.execute("ALTER TABLE enrichments ADD COLUMN judge_feedback TEXT")
+                    if "judged_at" not in cols:
+                        cursor.execute("ALTER TABLE enrichments ADD COLUMN judged_at TEXT")
+                except Exception:
+                    return {"total": 0, "total_judged": 0, "approved": 0, "borderline": 0, "rejected": 0, "average_score": 0.0}
+
+            cursor.execute("""
+                SELECT judge_status, COUNT(*), AVG(judge_score)
+                FROM enrichments
+                WHERE judge_status IS NOT NULL AND judge_status != ''
+                GROUP BY judge_status
+            """)
+            rows = cursor.fetchall()
+            
+            cursor.execute("SELECT AVG(judge_score), COUNT(*) FROM enrichments WHERE judge_score IS NOT NULL")
+            overall_avg, total_judged = cursor.fetchone()
+
+            breakdown = {status: count for status, count, _ in rows}
+            return {
+                "total_judged": total_judged or 0,
+                "average_score": round(overall_avg or 0.0, 2),
+                "approved": breakdown.get("approved", 0),
+                "borderline": breakdown.get("borderline", 0),
+                "rejected": breakdown.get("rejected", 0)
+            }
     except Exception as e:
-        conn.close()
         return {"total": 0, "total_judged": 0, "approved": 0, "borderline": 0, "rejected": 0, "average_score": 0.0, "error": str(e)}
+
 
 
 # TRIGGERS & HOOKS API ENDPOINTS

@@ -44,3 +44,8 @@ hf_upload_temp*/
 frontend/node_modules/
 frontend/dist/
 frontend/.tmp/
+
+# Agent execution & temporary prompt artifacts
+.agents/
+ORIGINAL_REQUEST.md
+

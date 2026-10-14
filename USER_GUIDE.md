@@ -116,7 +116,7 @@ Sunucu başladığında tarayıcınızda `http://localhost:3456` adresini açara
 
 Bölüm A, veri alma modlarının seçildiği, AI model parametrelerinin yapılandırıldığı ve boru hattının (pipeline) çalıştırıldığı ana kontrol merkezidir.
 
-![Ekran 1: Bölüm A - Girdi & Sentetik Veri Parametreleri & Canlı Terminal](/guide_images/section_a.png)
+![Ekran 1: Bölüm A - Girdi & Sentetik Veri Parametreleri & Canlı Terminal](frontend/public/guide_images/section_a.png)
 
 ### 2.1 1. Döküman & Sentetik Veri Parametreleri (Sol Panel)
 - **İşleme Modu (Input Mode)**:
@@ -151,7 +151,7 @@ Bölüm A, veri alma modlarının seçildiği, AI model parametrelerinin yapıla
 
 Bölüm B, üretilen veri setlerinin, SQLite veritabanı tablolarının ve Qdrant vektör indekslerinin incelendiği alandır.
 
-![Ekran 2: Bölüm B - Dataset & Veritabanı Görüntüleyici](/guide_images/section_b.png)
+![Ekran 2: Bölüm B - Dataset & Veritabanı Görüntüleyici](frontend/public/guide_images/section_b.png)
 
 ### 3.1 JSONL Veri Setleri Sekmesi
 - **Yan Yana DPO Görselleştirme**:
@@ -171,7 +171,7 @@ Bölüm B, üretilen veri setlerinin, SQLite veritabanı tablolarının ve Qdran
 
 Öğretmen ve Analizci LLM modelinin (`ornith:35b-q4_K_M`) canlı olarak test edildiği alandır.
 
-![Ekran 3: Bölüm C - Analyzer Chat & Model Sandbox](/guide_images/section_c.png)
+![Ekran 3: Bölüm C - Analyzer Chat & Model Sandbox](frontend/public/guide_images/section_c.png)
 
 - **Standart Model Sohbet**: Modele doğrudan teknik sorular yöneltme veya istem kalıplarını test etme.
 - **Model & Prompt Sandbox Ayarları**: Uzmanlık personasını (`Senior Principal Software Architect & Code Auditor`) ve konu odağını değiştirerek model üzerindeki etkisini canlı gözlemleme.
@@ -183,7 +183,7 @@ Bölüm B, üretilen veri setlerinin, SQLite veritabanı tablolarının ve Qdran
 
 Üst bardaki **Proje** butonuna tıklandığında açılan yönetim pencereleridir.
 
-![Ekran 4: Proje Gezgini & Çoklu Veri Setleri Modal](/guide_images/project_explorer.png)
+![Ekran 4: Proje Gezgini & Çoklu Veri Setleri Modal](frontend/public/guide_images/project_explorer.png)
 
 ### 5.1 Proje Gezgini
 - **Kayıtlı Proje Listesi**: Disk üzerindeki tüm `projects_*.json` dosyaları otomatik keşfedilir. `Geçiş Yap ▶` butonu ile anında aktif proje değiştirilir.
@@ -204,7 +204,7 @@ Yüzlerce saatlik GPU emeğini korumak için 2 aşamalı güvenlik akışı suna
 
 Üst bardaki **🤗 HF & Bulut GPU** butonuna tıklandığında açılan dağıtım modalıdır.
 
-![Ekran 5: Hugging Face Hub & Bulut GPU Dağıtım Kiti Modal](/guide_images/hf_modal.png)
+![Ekran 5: Hugging Face Hub & Bulut GPU Dağıtım Kiti Modal](frontend/public/guide_images/hf_modal.png)
 
 ### 6.1 🤗 Hugging Face Dataset Hub Sekmesi
 - **Repository ID Auto-Preset & Dropdown**:
@@ -534,9 +534,9 @@ Web arayüzü (`http://localhost:3456`) üzerinden tüm sistem canlı olarak den
 Faz 20 ile birlikte hem yerel hem de bulut tabanlı inferans için üretime hazır şablonlar (`templates/`) ve uçtan uca tanı testleri (`tools/`) sunulmaktadır.
 
 ### 1. Hazır Yapılandırma Şablonları (`templates/`)
-- **[`templates/ollama_cloud.json`](file:///Users/hakankilicaslan/Git/elektor/templates/ollama_cloud.json)**: `https://ollama.com/v1` bulut uç noktası, `minimax-m3`, `gpt-oss:120b`, `gpt-oss:20b` modelleri ve `${OLLAMA_API_KEY}` dinamik ortam değişkeni entegrasyonu.
-- **[`templates/gemini.json`](file:///Users/hakankilicaslan/Git/elektor/templates/gemini.json)**: `gemini-3.6-flash`, 1M bağlam, multimodal devre şeması OCR ve `${GEMINI_API_KEY}` entegrasyonu.
-- **[`templates/USER_GUIDE.md`](file:///Users/hakankilicaslan/Git/elektor/templates/USER_GUIDE.md)**: Şablonlara özel kılavuz.
+- **[`templates/ollama_cloud.json`](templates/ollama_cloud.json)**: `https://ollama.com/v1` bulut uç noktası, `minimax-m3`, `gpt-oss:120b`, `gpt-oss:20b` modelleri ve `${OLLAMA_API_KEY}` dinamik ortam değişkeni entegrasyonu.
+- **[`templates/gemini.json`](templates/gemini.json)**: `gemini-3.6-flash`, 1M bağlam, multimodal devre şeması OCR ve `${GEMINI_API_KEY}` entegrasyonu.
+- **[`templates/USER_GUIDE.md`](templates/USER_GUIDE.md)**: Şablonlara özel kılavuz.
 
 ### 2. Doğrulama ve Tanı Testleri (`tools/`)
 Boru hattını başlatmadan önce modelleri ve uç noktaları test etmek için 3 yeni araç eklenmiştir:
@@ -564,7 +564,7 @@ PYTHONPATH=. python tools/test_langextract.py --provider fallback
 
 ## 19. 🚀 Universal Dataset Orchestrator & Davranış Distilasyonu Motoru (Faz 21)
 
-Faz 21 ile birlikte, heterojen kaynakları (PDF kitaplar, Git repoları, Kiwix ZIM ansiklopedileri) tek elden orkestre eden global **`universal-dataset-orchestrator`** Antigravity Agent yeteneği ve **[`tools/orchestrator.py`](file:///Users/hakankilicaslan/Git/elektor/tools/orchestrator.py)** CLI motoru devreye alınmıştır.
+Faz 21 ile birlikte, heterojen kaynakları (PDF kitaplar, Git repoları, Kiwix ZIM ansiklopedileri) tek elden orkestre eden global **`universal-dataset-orchestrator`** Antigravity Agent yeteneği ve **[`tools/orchestrator.py`](tools/orchestrator.py)** CLI motoru devreye alınmıştır.
 
 ### 1. 5 Boyutlu Davranış Distilasyonu Rubriği
 Üretilen model yanıtları aşağıdaki 5 eksende 0-5 puan ile değerlendirilir:

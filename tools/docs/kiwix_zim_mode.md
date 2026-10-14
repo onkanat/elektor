@@ -21,7 +21,7 @@ flowchart TD
 ### 📅 Ne Zaman ve Hangi Aşamada İşleniyor?
 
 #### 1. ZIM İndirme ve Doğrudan Çıkarma Evresi (`python run.py extract` / `python run.py kiwix`)
-- `input_mode: "kiwix"` seçildiğinde [`pipeline/kiwix_extractor.py`](file:///Users/hakankilicaslan/Git/elektor/pipeline/kiwix_extractor.py) devreye girer.
+- `input_mode: "kiwix"` seçildiğinde [`pipeline/kiwix_extractor.py`](../../pipeline/kiwix_extractor.py) devreye girer.
 - `input_path` olarak verilen yerel dosya yolu veya Kiwix HTTP indirme bağlantısı taranır (dosya yerelde yoksa otomatik indirilir).
 - `libzim.Archive` üzerinden doğrudan bellekten ZIM blokları taranır (arşivin diske açılmasına gerek kalmaz).
 

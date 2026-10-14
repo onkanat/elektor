@@ -187,22 +187,10 @@ Open `http://localhost:3456` in your browser.
 ### 3. Pipeline Execution with Templates
 ```bash
 # Run with Google Gemini:
-PYTHONPATH=. python run.py --config templates/gemini.json
+python run.py --config templates/gemini.json pipeline
 
 # Run with Ollama Cloud:
-PYTHONPATH=. python run.py --config templates/ollama_cloud.json
-```
-
----
-
-## 🔬 Unit Tests & Verification
-Install the test dependencies first (they are **not** in `requirements.txt`):
-```bash
-pip install -r requirements-dev.txt
-```
-Then run the unit test suite:
-```bash
-PYTHONPATH=. pytest tests/
+python run.py --config templates/ollama_cloud.json pipeline
 ```
 
 ### 4. Kiwix OpenZIM & StackExchange Extractor (`kiwix`)
@@ -305,8 +293,8 @@ Install the test dependencies (**not** included in `requirements.txt`):
 ```bash
 pip install -r requirements-dev.txt
 ```
-Run the complete unit test suite across all modules (61 passing, 4 skipped):
+Run the complete test suite across all modules (292 passing, 3 skipped):
 ```bash
-PYTHONPATH=. pytest tests/
+pytest tests/
 ```
 

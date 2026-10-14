@@ -8,7 +8,7 @@ Bu rehber, **Elektor Arşiv ve Veri Damıtma Boru Hattı** için oluşturulmuş 
 
 Boru hattı için iki adet üretime hazır ve doğrulanmış ön tanımlı şablon sunulmaktadır:
 
-### A. Ollama Cloud Şablonu ([`templates/ollama_cloud.json`](file:///Users/hakankilicaslan/Git/elektor/templates/ollama_cloud.json))
+### A. Ollama Cloud Şablonu ([`templates/ollama_cloud.json`](ollama_cloud.json))
 Ollama'nın OpenAI uyumlu bulut inferans uç noktası (`https://ollama.com/v1`) için optimize edilmiştir.
 
 - **Uç Nokta**: `https://ollama.com/v1`
@@ -44,7 +44,7 @@ Ollama'nın OpenAI uyumlu bulut inferans uç noktası (`https://ollama.com/v1`) 
 
 ---
 
-### B. Google Gemini Şablonu ([`templates/gemini.json`](file:///Users/hakankilicaslan/Git/elektor/templates/gemini.json))
+### B. Google Gemini Şablonu ([`templates/gemini.json`](gemini.json))
 Google Gemini API için optimize edilmiştir (Geniş bağlam, yüksek hızlı şema çıkarımı ve gelişmiş OCR).
 
 - **Uç Nokta**: `https://generativelanguage.googleapis.com/v1beta`

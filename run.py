@@ -374,19 +374,26 @@ Examples:
     elif args.command == "embed":
         print("=== Step 3: Embed & Load to Qdrant Vector DB ===")
         store = ArchiveVectorStore(config_path=args.config)
-        store.load_to_vector_db(limit=args.limit)
+        try:
+            store.load_to_vector_db(limit=args.limit)
+        finally:
+            store.close()
         
     elif args.command == "query":
         print(f"=== Querying Vector DB for: '{args.query_text}' ===")
         store = ArchiveVectorStore(config_path=args.config)
-        results = store.search(args.query_text, top_k=args.top_k)
-        if not results:
-            print("No matching documents found.")
-        for i, match in enumerate(results):
-            print(f"\n[{i+1}] Score: {match['score']:.4f} | {match['title']} ({match['year']}) | File: {match['filename']}")
-            print("-" * 50)
-            print(match['text'])
-            print("-" * 50)
+        try:
+            results = store.search(args.query_text, top_k=args.top_k)
+            if not results:
+                print("No matching documents found.")
+            for i, match in enumerate(results):
+                print(f"\n[{i+1}] Score: {match['score']:.4f} | {match['title']} ({match['year']}) | File: {match['filename']}")
+                print("-" * 50)
+                print(match['text'])
+                print("-" * 50)
+        finally:
+            store.close()
+
             
     elif args.command == "export":
         print("=== Step 4: Compiling and Exporting Datasets ===")
@@ -545,7 +552,11 @@ Examples:
         # 3. Embed
         print("\n--- Step 3: Generating embeddings and loading to Qdrant ---")
         store = ArchiveVectorStore(config_path=args.config)
-        store.load_to_vector_db(limit=limit)
+        try:
+            store.load_to_vector_db(limit=limit)
+        finally:
+            store.close()
+
         
         # 4. Export
         print("\n--- Step 4: Exporting datasets ---")

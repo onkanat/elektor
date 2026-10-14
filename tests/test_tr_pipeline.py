@@ -4,8 +4,10 @@ import json
 import unittest
 import tempfile
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 from pipeline.analyzer import ArchiveAnalyzer
 from pipeline.dataset_builder import DatasetBuilder
+from pipeline.cloud_gpu_offloader import CloudGPUOffloader
 
 class TestTRPipeline(unittest.TestCase):
     def setUp(self):
@@ -239,6 +241,125 @@ class TestTRPipeline(unittest.TestCase):
 
         self.assertIn("What is SDR?", en_sft_data)
         self.assertIn("SDR nedir?", tr_sft_data)
+
+    def test_parse_json_robust_clean_and_malformed(self):
+        """Tests that parse_json_robust recovers unescaped quotes, LaTeX commands, think tags, and trailing commas without corruption."""
+        raw_llm_latex = """<think>
+Internal chain of thought reasoning here...
+</think>
+```json
+{
+  "title": "ESP32 "ADC" Calibration & Filter",
+  "cutoff_formula": "\\(f_c = \\frac{1}{2\\pi R C}\\)",
+  "gain": "\\beta = 100",
+  "phase": "\\theta = 45^\\circ",
+  "time_constant": "\\tau = R \\cdot C",
+  "resistance": "R = 10\\ \\text{k}\\Omega",
+  "flux": "\\nabla \\times \\mathbf{B} = \\mu_0 \\mathbf{J}",
+  "resistivity": "\\rho = 1.68 \\times 10^{-8}",
+  "registers": ["GPIO_OE", "SIO_BASE", "FIFO",],
+}
+```"""
+        parsed = ArchiveAnalyzer.parse_json_robust(raw_llm_latex)
+        self.assertIsNotNone(parsed)
+        self.assertIsInstance(parsed, dict)
+        self.assertEqual(parsed["title"], 'ESP32 "ADC" Calibration & Filter')
+        self.assertIn(r"\frac", parsed["cutoff_formula"])
+        self.assertIn(r"\pi", parsed["cutoff_formula"])
+        self.assertIn(r"\beta", parsed["gain"])
+        self.assertNotIn("\x08", parsed["gain"], "LaTeX \\beta must not be corrupted to ASCII backspace")
+        self.assertNotIn("\x0c", parsed["cutoff_formula"], "LaTeX \\frac must not be corrupted to ASCII formfeed")
+        self.assertIn(r"\theta", parsed["phase"])
+        self.assertIn(r"\tau", parsed["time_constant"])
+        self.assertIn(r"\Omega", parsed["resistance"])
+        self.assertIn(r"\nabla", parsed["flux"])
+        self.assertIn(r"\times", parsed["flux"])
+        self.assertIn(r"\rho", parsed["resistivity"])
+        self.assertEqual(parsed["registers"], ["GPIO_OE", "SIO_BASE", "FIFO"])
+
+    def test_direct_turkish_prompt_preservation_rules(self):
+        """Verifies direct Turkish generation prompt explicitly instructs preservation of registers, protocols, and LaTeX."""
+        analyzer = ArchiveAnalyzer(config_path=str(self.config_file))
+        
+        captured_calls = []
+        def mock_call(system_prompt, user_prompt, model=None, keep_alive=None, num_predict=8192):
+            captured_calls.append({"system": system_prompt, "user": user_prompt})
+            return {
+                "turkish_title": "RP2040 GPIO Mimarisi",
+                "turkish_summary": "RP2040 GPIO yazmaçları ve SIO yapısı.",
+                "topics": ["GPIO", "SIO", "RP2040"],
+                "tr_sft_qa": [{"question": "GPIO_OE yazmacı nedir?", "answer": "GPIO_OE çıkış etkinleştirme yazmacıdır."}],
+                "tr_dpo_pair": {"question": "I2C pull-up seçimi?", "chosen": "Doğru direnç değeri seçilmelidir.", "rejected": "Pull-up gerekmez."},
+                "multi_turn_chat": []
+            }
+            
+        analyzer.call_ollama_json = mock_call
+        res = analyzer.analyze_article_direct_turkish(1, "RP2040 Hardware", "SIO_BASE and GPIO_OE registers in RP2040")
+        
+        self.assertEqual(len(captured_calls), 1)
+        sys_p = captured_calls[0]["system"]
+        usr_p = captured_calls[0]["user"]
+        
+        # Verify hardware registers, protocols, and LaTeX math notation are strictly instructed to be preserved
+        self.assertIn("GPIO_OE", sys_p)
+        self.assertIn("SIO_BASE", sys_p)
+        self.assertIn("I2C", sys_p)
+        self.assertIn("SPI", sys_p)
+        self.assertIn("MOSFET", sys_p)
+        self.assertIn("Op-Amp", sys_p)
+        self.assertIn(r"LaTeX", sys_p)
+        self.assertIn(r"LaTeX", usr_p)
+        self.assertIn("KESİN NEGATİF KURAL", usr_p)
+        analyzer.close()
+
+    def test_translate_enrichments_to_turkish_preservation_rules(self):
+        """Verifies translate_enrichments_to_turkish system prompt enforces strict register, protocol, and LaTeX preservation."""
+        analyzer = ArchiveAnalyzer(config_path=str(self.config_file))
+        
+        captured_messages = []
+        def mock_chat(model, messages, options=None, keep_alive=None):
+            captured_messages.extend(messages)
+            return {
+                "message": {
+                    "content": "Title: SPI Veri Yolu\nSummary: SPI mimarisi.\nQ1: SPI frekansı nedir?\nA1: 10 MHz.\nDPO_Q: I2C seçimi?\nDPO_Chosen: Doğru pull-up.\nDPO_Rejected: Yanlış."
+                }
+            }
+            
+        analyzer.call_ollama_chat_with_retry = mock_chat
+        analyzer.translate_enrichments_to_turkish(
+            title="SPI Bus Architecture",
+            summary="SPI details and registers",
+            sft_qa_raw='[{"question": "What is SPI frequency?", "answer": "10 MHz."}]',
+            dpo_pairs_raw='[{"question": "I2C selection?", "chosen": "Proper pull-up.", "rejected": "Wrong."}]'
+        )
+        
+        self.assertTrue(len(captured_messages) >= 2)
+        sys_msg = [m["content"] for m in captured_messages if m["role"] == "system"][0]
+        
+        self.assertIn("HARDWARE REGISTERS & BITFIELDS", sys_msg)
+        self.assertIn("GPIO_OE", sys_msg)
+        self.assertIn("BUS PROTOCOLS & INTERFACES", sys_msg)
+        self.assertIn("I2C, SPI, UART", sys_msg)
+        self.assertIn("ELECTRICAL COMPONENTS & UNITS", sys_msg)
+        self.assertIn("MOSFET, Op-Amp", sys_msg)
+        self.assertIn("LATEX MATHEMATICAL NOTATION", sys_msg)
+        analyzer.close()
+
+    def test_colab_ide_notebook_context_prefix_exclusion(self):
+        """Verifies Colab IDE notebook generation strips Context: and Bağlam: prefixes in SFT and properly formats DPO."""
+        offloader = CloudGPUOffloader(exports_dir=str(self.tmpdir.name))
+        
+        # Test SFT notebook
+        sft_nb = offloader.generate_colab_ide_notebook(project_id="test_m3", base_model="unsloth/Qwen3.5-2B", dataset_type="sft")
+        cell5_sft = "".join(sft_nb["cells"][5]["source"])
+        self.assertIn("not user_input.startswith('Context:')", cell5_sft)
+        self.assertIn("not user_input.startswith('Bağlam:')", cell5_sft)
+        
+        # Test DPO notebook
+        dpo_nb = offloader.generate_colab_ide_notebook(project_id="test_m3", base_model="unsloth/Qwen3.5-2B", dataset_type="dpo")
+        cell5_dpo = "".join(dpo_nb["cells"][5]["source"])
+        self.assertIn("remove_columns=dataset.column_names", cell5_dpo)
+        self.assertIn("not user_input.startswith('Context:')", cell5_dpo)
 
 if __name__ == "__main__":
     unittest.main()

@@ -20,12 +20,12 @@ flowchart TD
 ### 📅 Ne Zaman ve Hangi Aşamada İşleniyor?
 
 #### 1. Özyinelemeli Çıkarma Evresi (`python run.py extract`)
-- `input_mode: "folder"` modunda [`pipeline/extractor.py`](file:///Users/hakankilicaslan/Git/elektor/pipeline/extractor.py) altındaki `ArchiveExtractor` belirlenen hedef klasörü özyinelemeli (recursive) olarak tarar.
-- Desteklenen tüm dökümanlar (PDF, TXT, MD, EPUB vb.) okunarak metin parçaları ayrıştırılır ve SQLite veritabanındaki [`articles`](file:///Users/hakankilicaslan/Git/elektor/pipeline/extractor.py) tablosuna aktarılır.
+- `input_mode: "folder"` modunda [`pipeline/extractor.py`](../../pipeline/extractor.py) altındaki `ArchiveExtractor` belirlenen hedef klasörü özyinelemeli (recursive) olarak tarar.
+- Desteklenen tüm dökümanlar (PDF, TXT, MD, EPUB vb.) okunarak metin parçaları ayrıştırılır ve SQLite veritabanındaki [`articles`](../../pipeline/extractor.py) tablosuna aktarılır.
 - Dökümanlar içindeki şema, grafik ve çizimler PyMuPDF ile kırpılarak `downloads/extracted_images/` dizinine kaydedilir.
 
 #### 2. Metin & Görsel Zenginleştirme Evresi (`python run.py enrich`)
-- [`pipeline/analyzer.py`](file:///Users/hakankilicaslan/Git/elektor/pipeline/analyzer.py) içindeki `ArchiveAnalyzer` veritabanındaki her bir makaleyi/metni işler.
+- [`pipeline/analyzer.py`](../../pipeline/analyzer.py) içindeki `ArchiveAnalyzer` veritabanındaki her bir makaleyi/metni işler.
 - LLM (`model_analyzer` / `model_translator`) ve DeepSeek-OCR vizyon modelleri aracılığıyla:
   - Çift Dilli (Bilingual) Metin Zenginleştirme
   - Pragmatik SFT (Supervised Fine-Tuning) Soru-Cevap Çiftleri

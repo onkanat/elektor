@@ -93,6 +93,23 @@ class TestJudgeEngine(unittest.TestCase):
         engine = JudgeEngine(self.config)
         stats = engine.judge_all(limit=10, mode="hybrid_editor")
 
+        self.assertEqual(stats["total"], 1)
+        self.assertEqual(stats["rewritten"], 1)
+        self.assertEqual(stats["borderline"], 1)
+
+        # Check SQLite record was atomically updated with rewritten chosen answer
+        conn = sqlite3.connect(self.temp_db.name)
+        cur = conn.cursor()
+        cur.execute("SELECT judge_score, judge_status, dpo_pairs, judge_feedback, judged_at FROM enrichments WHERE id = 1")
+        row = cur.fetchone()
+        conn.close()
+
+        self.assertEqual(row[0], 5.5)
+        self.assertEqual(row[1], "borderline")
+        updated_pairs = json.loads(row[2])
+        self.assertEqual(updated_pairs[0]["chosen"], "fc = 1 / (2*pi*R*C) where R is in Ohms and C is in Farads.")
+        self.assertIsNotNone(row[4])
+
     @patch("pipeline.gemini_client.GeminiClient.create_batch_job")
     def test_judge_batch_submit(self, mock_create_batch):
         mock_create_batch.return_value = {
@@ -208,6 +225,165 @@ class TestJudgeEngine(unittest.TestCase):
         jobs = engine.list_batch_jobs()
         job_ids = [j["job_id"] for j in jobs]
         self.assertNotIn("local_batch_to_delete", job_ids)
+
+    def test_evaluate_pair_offline_fallback(self):
+        """Verifies deterministic heuristic offline fallback when Gemini API key is missing or calls fail."""
+        engine = JudgeEngine(self.config)
+        with patch.object(engine.gemini_client, "generate_content", return_value={"success": False, "error": "No API key"}):
+            # 1. Sufficiently long candidate text (>= 15 chars) should be approved
+            eval_good = engine.evaluate_pair(
+                prompt_text="What is SPI?",
+                chosen_text="Serial Peripheral Interface is a synchronous serial communication interface.",
+                rejected_text="Wrong answer.",
+                mode="strict"
+            )
+            self.assertEqual(eval_good.status, "approved")
+            self.assertEqual(eval_good.overall_score, 7.5)
+            self.assertIn("Fallback heuristic evaluation", eval_good.feedback)
+
+            # 2. Too short candidate text (< 15 chars) should be rejected
+            eval_short = engine.evaluate_pair(
+                prompt_text="What is SPI?",
+                chosen_text="Short",
+                rejected_text="Another wrong",
+                mode="strict"
+            )
+            self.assertEqual(eval_short.status, "rejected")
+            self.assertEqual(eval_short.overall_score, 3.0)
+
+            # 3. Identical chosen and rejected should be rejected
+            eval_ident = engine.evaluate_pair(
+                prompt_text="What is SPI?",
+                chosen_text="Identical text description.",
+                rejected_text="Identical text description.",
+                mode="strict"
+            )
+            self.assertEqual(eval_ident.status, "rejected")
+
+            # 4. In hybrid_editor mode on rejected candidate, rewritten_chosen is generated
+            eval_edit = engine.evaluate_pair(
+                prompt_text="What is SPI?",
+                chosen_text="Too short",
+                rejected_text="Too short",
+                mode="hybrid_editor"
+            )
+            self.assertEqual(eval_edit.status, "rejected")
+            self.assertIsNotNone(eval_edit.rewritten_chosen)
+
+    @patch("pipeline.gemini_client.GeminiClient.generate_content")
+    def test_judge_all_hybrid_editor_rewrites_tr_dpo(self, mock_generate):
+        """Verifies hybrid_editor mode surgically rewrites tr_dpo_pairs in SQLite."""
+        conn = sqlite3.connect(self.temp_db.name)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO enrichments (id, article_id, sft_qa, dpo_pairs, tr_sft_qa, tr_dpo_pairs)
+            VALUES (2, 1, NULL, NULL, NULL, '[{"prompt": "Kesim frekansı nedir?", "chosen": "fc = 1/(2*pi*R*C)", "rejected": "fc = R*C"}]')
+        """)
+        conn.commit()
+        conn.close()
+
+        mock_generate.return_value = {
+            "success": True,
+            "json_data": {
+                "technical_accuracy": 6,
+                "logical_consistency": 6,
+                "turkish_fluency": 6,
+                "overall_score": 6.0,
+                "status": "borderline",
+                "feedback": "Birim eksik, cerrahi düzeltme yapıldı.",
+                "rewritten_chosen": "fc = 1 / (2*pi*R*C) [Birim: Hz]"
+            }
+        }
+
+        engine = JudgeEngine(self.config)
+        stats = engine.judge_all(limit=10, mode="hybrid_editor")
+
+        self.assertGreaterEqual(stats["rewritten"], 1)
+
+        conn = sqlite3.connect(self.temp_db.name)
+        cur = conn.cursor()
+        cur.execute("SELECT judge_score, judge_status, tr_dpo_pairs FROM enrichments WHERE id = 2")
+        row = cur.fetchone()
+        conn.close()
+
+        self.assertEqual(row[0], 6.0)
+        self.assertEqual(row[1], "borderline")
+        updated_tr_dpo = json.loads(row[2])
+        self.assertEqual(updated_tr_dpo[0]["chosen"], "fc = 1 / (2*pi*R*C) [Birim: Hz]")
+
+    @patch("pipeline.gemini_client.GeminiClient.generate_content")
+    def test_judge_all_hybrid_editor_sft_fallback(self, mock_generate):
+        """Verifies hybrid_editor mode updates tr_sft_qa and creates tr_dpo_pairs when no DPO was present."""
+        conn = sqlite3.connect(self.temp_db.name)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO enrichments (id, article_id, sft_qa, dpo_pairs, tr_sft_qa, tr_dpo_pairs)
+            VALUES (3, 1, NULL, NULL, '[{"question": "I2C saat hızı?", "answer": "100 kHz veya 400 kHz."}]', NULL)
+        """)
+        conn.commit()
+        conn.close()
+
+        mock_generate.return_value = {
+            "success": True,
+            "json_data": {
+                "technical_accuracy": 6,
+                "logical_consistency": 6,
+                "turkish_fluency": 6,
+                "overall_score": 6.0,
+                "status": "borderline",
+                "feedback": "Fast mode eklendi.",
+                "rewritten_chosen": "Standart modda 100 kHz, Hızlı modda (Fast-mode) 400 kHz ve Fast-mode Plus'ta 1 MHz."
+            }
+        }
+
+        engine = JudgeEngine(self.config)
+        stats = engine.judge_all(limit=10, mode="hybrid_editor")
+
+        self.assertGreaterEqual(stats["rewritten"], 1)
+
+        conn = sqlite3.connect(self.temp_db.name)
+        cur = conn.cursor()
+        cur.execute("SELECT judge_score, judge_status, tr_sft_qa, tr_dpo_pairs FROM enrichments WHERE id = 3")
+        row = cur.fetchone()
+        conn.close()
+
+        self.assertEqual(row[0], 6.0)
+        self.assertEqual(row[1], "borderline")
+        updated_sft = json.loads(row[2])
+        self.assertIn("Fast-mode Plus", updated_sft[0]["answer"])
+        updated_tr_dpo = json.loads(row[3])
+        self.assertIn("Fast-mode Plus", updated_tr_dpo[0]["chosen"])
+
+    @patch("httpx.Client.post")
+    def test_gemini_client_model_fallback_and_retry_on_503(self, mock_post):
+        """Verifies GeminiClient cascades to fallback models and retries on 503 high demand spikes."""
+        from pipeline.gemini_client import GeminiClient
+        client = GeminiClient(api_key="mock_key", config={"gemini_rate_limit_delay": 0.01, "gemini_max_retries": 2})
+
+        resp_503 = MagicMock()
+        resp_503.status_code = 503
+        resp_503.text = "High demand spike"
+
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        resp_200.json.return_value = {
+            "candidates": [{
+                "content": {"parts": [{"text": '{"technical_accuracy": 9, "logical_consistency": 9, "turkish_fluency": 9, "overall_score": 9.0, "status": "approved", "feedback": "Fallback model succeeded", "rewritten_chosen": null}'}]}
+            }],
+            "usageMetadata": {"promptTokenCount": 50, "candidatesTokenCount": 20}
+        }
+
+        # First model fails twice with 503, fallback model succeeds with 200
+        mock_post.side_effect = [resp_503, resp_503, resp_200]
+
+        res = client.generate_content(
+            prompt="Test prompt",
+            model="gemini-3.6-flash",
+            purpose="test_fallback"
+        )
+
+        self.assertTrue(res["success"])
+        self.assertEqual(res["model"], "gemini-2.5-flash")
 
 if __name__ == "__main__":
     unittest.main()

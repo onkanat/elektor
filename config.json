@@ -31,7 +31,7 @@
   "chunk_size": 1000,
   "chunk_overlap": 150,
   "ocr_threshold_chars": 100,
-  "tesseract_cmd": "/usr/bin/tesseract",
+  "tesseract_cmd": "tesseract",
   "project_id": "rp01",
   "pragmatic_ratio": 50,
   "enable_vision_ocr": true,

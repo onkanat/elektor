@@ -55,7 +55,7 @@ flowchart TD
 
 #### 1. Çıkarma ve Düzleştirme Evresi (`python run.py extract`)
 
-- `input_mode: "rendergit"` komutu verildiğinde, Andrej Karpathy'nin `rendergit` metodolojisi ile tüm Python kaynak kodları tek bir birleşik Markdown dokümanında ([`exports/rendergit_01_rendergit.md`](file:///Users/hakankilicaslan/Git/elektor/exports/rendergit_01_rendergit.md)) düzleştirilir.
+- `input_mode: "rendergit"` komutu verildiğinde, Andrej Karpathy'nin `rendergit` metodolojisi ile tüm Python kaynak kodları tek bir birleşik Markdown dokümanında ([`exports/rendergit_01_rendergit.md`](../../exports/rendergit_01_rendergit.md)) düzleştirilir.
 - Aynı anda Python AST (Soyut Sentaks Ağacı) analizi yapılarak tüm fonksiyonlar, sınıflar ve metotlar ayrıştırılıp SQLite veritabanındaki `code_units` tablosuna yazılır.
 
 #### 2. Zenginleştirme ve Sentetik Veri Üretimi (`python run.py enrich`)
@@ -80,9 +80,9 @@ Veritabanları ve ihraç klasörleri incelendiğinde bu 3 dosyanın işlenme dur
 
 | Proje | Düzleştirilmiş Markdown Dosyası | SQLite `code_units` Sayısı | Durum |
 | :--- | :--- | :--- | :--- |
-| **`rendergit_01`** | [`rendergit_01_rendergit.md`](file:///Users/hakankilicaslan/Git/elektor/exports/rendergit_01_rendergit.md) (22.9 KB) | **28 Kod Birimi** | İşlendi & İhraç Edildi ✅ |
-| **`rendergit_02`** | [`rendergit_02_rendergit.md`](file:///Users/hakankilicaslan/Git/elektor/exports/rendergit_02_rendergit.md) (1.03 MB) | **431 Kod Birimi** | İşlendi & İhraç Edildi ✅ |
-| **`rendergit_03`** | [`rendergit_03_rendergit.md`](file:///Users/hakankilicaslan/Git/elektor/exports/rendergit_03_rendergit.md) (73.1 KB) | **40 Kod Birimi** | İşlendi & İhraç Edildi ✅ |
-| **`rendergit_merged_all`** | [`rendergit_merged_all_rendergit.md`](file:///Users/hakankilicaslan/Git/elektor/exports/rendergit_merged_all_rendergit.md) | **499 Kod Birimi** (Konsolide) | Birleştirilmiş Master Veri Seti ✅ |
+| **`rendergit_01`** | [`rendergit_01_rendergit.md`](../../exports/rendergit_01_rendergit.md) (22.9 KB) | **28 Kod Birimi** | İşlendi & İhraç Edildi ✅ |
+| **`rendergit_02`** | [`rendergit_02_rendergit.md`](../../exports/rendergit_02_rendergit.md) (1.03 MB) | **431 Kod Birimi** | İşlendi & İhraç Edildi ✅ |
+| **`rendergit_03`** | [`rendergit_03_rendergit.md`](../../exports/rendergit_03_rendergit.md) (73.1 KB) | **40 Kod Birimi** | İşlendi & İhraç Edildi ✅ |
+| **`rendergit_merged_all`** | [`rendergit_merged_all_rendergit.md`](../../exports/rendergit_merged_all_rendergit.md) | **499 Kod Birimi** (Konsolide) | Birleştirilmiş Master Veri Seti ✅ |
 
 **Özetle:** Bu 3 dosya projenizde başarıyla işlenmiş, AST analizleri yapılmış ve `rendergit_merged_all` master projesinde **499 kod birimi** olarak birleştirilip hazır hale getirilmiştir.

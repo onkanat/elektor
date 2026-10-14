@@ -46,6 +46,10 @@ class TestRealDataPipelines(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+        export_dir = Path("exports") / "test_real_data"
+        if export_dir.exists():
+            import shutil
+            shutil.rmtree(export_dir, ignore_errors=True)
 
     def test_01_real_pdf_extraction(self):
         """Test text and metadata extraction from real PDF files in downloads/."""
@@ -107,7 +111,31 @@ class TestRealDataPipelines(unittest.TestCase):
         )
 
         builder = VisualDatasetBuilder(config_path=str(self.config_path))
-        result = builder.export_visual_dataset()
+
+        # Limit processing to a representative small subset (3 images) rather than processing all 2,559 production images
+        def limited_process_raw_images(raw_images_dir, target_images_dir):
+            raw_files = sorted([f for f in Path(raw_images_dir).glob("*") if f.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".webp")])[:3]
+            processed_images = []
+            for raw_file in raw_files:
+                webp_path = builder.optimizer.optimize_image(raw_file, target_images_dir)
+                if webp_path:
+                    original_size = raw_file.stat().st_size
+                    optimized_size = webp_path.stat().st_size
+                    saved_ratio = round((1 - (optimized_size / max(1, original_size))) * 100, 1)
+                    processed_images.append({
+                        "raw_filename": raw_file.name,
+                        "raw_path": str(raw_file),
+                        "webp_filename": webp_path.name,
+                        "webp_path": str(webp_path),
+                        "relative_image_path": f"images/{webp_path.name}",
+                        "original_bytes": original_size,
+                        "optimized_bytes": optimized_size,
+                        "saved_ratio_percent": saved_ratio
+                    })
+            return processed_images
+
+        with patch.object(builder.optimizer, "process_raw_images", side_effect=limited_process_raw_images):
+            result = builder.export_visual_dataset()
 
         self.assertEqual(result["status"], "success")
         catalog_path = Path("exports") / "test_real_data" / "multimodal_catalog.md"
