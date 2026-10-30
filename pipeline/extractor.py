@@ -7,11 +7,419 @@ import tempfile
 from pathlib import Path
 import pypdf
 import pypdfium2 as pdfium
+import fitz
+import re
+from dataclasses import dataclass, field
 from datetime import datetime
+from PIL import Image, ImageEnhance
+from pipeline.project_logger import safe_print, safe_close_db, BrokenPipeShield
+
+
+def preprocess_image_for_ocr(pil_img: Image.Image) -> Image.Image:
+    """Converts image to grayscale, enhances contrast, and applies Otsu-style threshold binarization."""
+    if not isinstance(pil_img, Image.Image):
+        return pil_img
+    gray = pil_img.convert("L")
+    try:
+        enhancer = ImageEnhance.Contrast(gray)
+        enhanced = enhancer.enhance(1.5)
+    except Exception:
+        enhanced = gray
+    try:
+        bw = enhanced.point(lambda x: 0 if x < 128 else 255, "1")
+        return bw
+    except Exception:
+        return enhanced
+
+
+
+@dataclass
+class PageLayoutResult:
+    text: str                                  # Clean Markdown text with reading order preserved
+    tables: list[dict] = field(default_factory=list)  # Extracted tables: [{"bbox": (x0, y0, x1, y1), "markdown": str, "caption": str}]
+    table_masks: list[tuple[float, float, float, float]] = field(default_factory=list)  # Negative exclusion bboxes for visual cropper
+    code_blocks: list[dict] = field(default_factory=list)  # Fenced code blocks detected via monospace font spans
+
+
+def is_mono_font(font: str, flags: int) -> bool:
+    """Detects whether a font span is monospace based on flags or font family name."""
+    f = (font or "").lower()
+    return bool((flags & 8) or any(k in f for k in ["mono", "courier", "consolas", "mplus", "code", "fira", "dejavusansmono"]))
+
+
+def is_running_header(bbox: tuple[float, float, float, float], text: str, page_height: float) -> bool:
+    """Spatially identifies and filters out running headers using coordinates and title patterns."""
+    if bbox[3] <= 50.0 or bbox[1] < 45.0:
+        return True
+    if bbox[1] <= 75.0:
+        t = text.strip()
+        if re.search(r"RP[0-9]{4}\s+Datasheet", t, re.I):
+            return True
+        if re.search(r"Raspberry\s+Pi", t, re.I) and len(t) < 40:
+            return True
+    return False
+
+
+def is_running_footer(bbox: tuple[float, float, float, float], text: str, page_height: float) -> bool:
+    """Spatially identifies and filters out running footers using coordinates and pagination patterns."""
+    if bbox[1] >= page_height - 50.0:
+        return True
+    if bbox[1] >= page_height - 75.0:
+        t = text.strip()
+        if re.match(r"^\d+$", t) or re.match(r"^[0-9\.]+\s+[\w\s]+\s+\d+$", t):
+            return True
+    return False
+
+
+def detect_code_language(code_str: str) -> str:
+    """Detects programming language for fenced code blocks."""
+    c_indicators = ["#include", "void ", "int ", "uint32_t", "uint16_t", "uint8_t", "struct ", "//", "/*", "dma_", "stdio.h"]
+    if any(ind in code_str for ind in c_indicators):
+        return "c"
+    if any(ind in code_str for ind in ["def ", "import ", "class ", "elif ", "self."]):
+        return "python"
+    return "c"
+
+
+def stitch_page_texts(pages: list[str]) -> str:
+    """Stitches page texts together, preserving sentence continuity across page splits without injecting header/footer noise."""
+    if not pages:
+        return ""
+    cleaned = [p.strip() for p in pages if p and p.strip()]
+    if not cleaned:
+        return ""
+    result = cleaned[0]
+    for nxt in cleaned[1:]:
+        res_lines = result.split("\n")
+        last_line = res_lines[-1].strip() if res_lines else ""
+        nxt_lines = nxt.split("\n")
+        first_line = nxt_lines[0].strip() if nxt_lines else ""
+        
+        is_table = last_line.startswith("|") or first_line.startswith("|")
+        is_code = last_line.startswith("```") or first_line.startswith("```")
+        is_heading = first_line.startswith("#")
+        
+        if not (is_table or is_code or is_heading):
+            if last_line.endswith("-") and len(last_line) > 1 and last_line[-2].isalpha() and first_line and first_line[0].isalpha():
+                result = result[:-1] + nxt
+                continue
+            elif last_line and last_line[-1] not in (".", "!", "?", ":", ";") and first_line and (first_line[0].islower() or any(first_line.startswith(prefix) for prefix in ["and ", "or ", "the ", "of ", "in ", "to ", "with ", "for ", "by ", "on "])):
+                result = result + " " + nxt
+                continue
+        result = result + "\n\n" + nxt
+    return result
+
+
+def extract_page_layout(page: fitz.Page) -> PageLayoutResult:
+    """Extracts text, tables, and exclusion masks from a PDF page using PyMuPDF layout analysis."""
+    if not hasattr(page, "find_tables"):
+        txt = page.get_text() if hasattr(page, "get_text") else (page.extract_text() if hasattr(page, "extract_text") else "")
+        return PageLayoutResult(text=txt or "", tables=[], table_masks=[], code_blocks=[])
+
+    rect = page.rect
+    width = float(rect.width)
+    height = float(rect.height)
+
+    # 1. Native PyMuPDF table extraction & left-margin / top caption binding
+    tabs = page.find_tables().tables
+    table_masks: list[tuple[float, float, float, float]] = []
+    extracted_tables: list[dict] = []
+    consumed_line_bboxes: list[tuple[float, float, float, float]] = []
+
+    blocks = [b for b in page.get_text("blocks") if b[4].strip() and b[1] > 50 and b[3] < height - 50]
+    consumed_block_indices: set[int] = set()
+
+    for tab in tabs:
+        tx0, ty0, tx1, ty1 = tab.bbox
+        t_mask = (float(tx0), float(ty0), float(tx1), float(ty1))
+        table_masks.append(t_mask)
+
+        caption_text = ""
+        start_idx = None
+        min_dist = 999.0
+        for i, b in enumerate(blocks):
+            if i in consumed_block_indices:
+                continue
+            txt = b[4].strip()
+            if re.search(r"(?:Table|Tablo|Figure|Şekil)\s+\d+", txt, re.I):
+                is_left = (b[2] <= tx0 + 25 and abs(b[1] - ty0) <= 45)
+                is_above = (b[3] <= ty0 + 10 and b[1] >= ty0 - 50 and b[2] >= tx0 and b[0] <= tx1)
+                if is_left or is_above:
+                    dist = abs(b[1] - ty0)
+                    if dist < min_dist:
+                        min_dist = dist
+                        start_idx = i
+
+        if start_idx is not None:
+            caption_parts = []
+            curr_y = blocks[start_idx][1]
+            for j in range(start_idx, len(blocks)):
+                if j in consumed_block_indices:
+                    break
+                b = blocks[j]
+                if caption_parts and re.search(r"(?:Table|Tablo|Figure|Şekil)\s+\d+", b[4], re.I):
+                    break
+                if b[2] > tx0 + 25 and b[1] > ty0:
+                    break
+                if b[1] > ty1 + 15:
+                    break
+                if b[1] - curr_y > 25:
+                    break
+                consumed_block_indices.add(j)
+                caption_parts.append(b[4].strip())
+                consumed_line_bboxes.append((float(b[0]), float(b[1]), float(b[2]), float(b[3])))
+                curr_y = b[3]
+            caption_text = " ".join(" ".join(caption_parts).split())
+
+        md = tab.to_markdown().strip()
+        formatted_md = f"### {caption_text}\n\n{md}" if caption_text else md
+        extracted_tables.append({
+            "bbox": t_mask,
+            "markdown": formatted_md,
+            "caption": caption_text,
+            "y0": ty0 if not caption_text else min(ty0, blocks[start_idx][1])
+        })
+
+    # 2. Extract spans via dict, filter header/footer and table regions
+    d = page.get_text("dict")
+    raw_lines: list[dict] = []
+
+    for b in d["blocks"]:
+        if b.get("type") != 0:
+            continue
+        for l in b["lines"]:
+            l_bbox = (float(l["bbox"][0]), float(l["bbox"][1]), float(l["bbox"][2]), float(l["bbox"][3]))
+            txt_preview = "".join(s["text"] for s in l["spans"]).strip()
+
+            # Filter running headers & footers
+            if is_running_header(l_bbox, txt_preview, height) or is_running_footer(l_bbox, txt_preview, height):
+                continue
+
+            # Check table intersection (exclude table cell lines)
+            lx_mid = (l_bbox[0] + l_bbox[2]) / 2
+            ly_mid = (l_bbox[1] + l_bbox[3]) / 2
+            in_table = any(tx0 <= lx_mid <= tx1 and ty0 <= ly_mid <= ty1 for (tx0, ty0, tx1, ty1) in table_masks)
+            if in_table:
+                continue
+
+            # Check consumed caption intersection
+            in_caption = any(cx0 - 2 <= lx_mid <= cx1 + 2 and cy0 - 2 <= ly_mid <= cy1 + 2 for (cx0, cy0, cx1, cy1) in consumed_line_bboxes)
+            if in_caption:
+                continue
+
+            total_chars = sum(len(s["text"].strip()) for s in l["spans"])
+            mono_chars = sum(len(s["text"].strip()) for s in l["spans"] if is_mono_font(s["font"], s["flags"]))
+            is_mono = (total_chars > 0 and (mono_chars / total_chars >= 0.65))
+
+            # Reconstruct inline code spans if line is mixed
+            if not is_mono:
+                reconstructed_parts = []
+                for s in l["spans"]:
+                    st = s["text"]
+                    if not st:
+                        continue
+                    if is_mono_font(s["font"], s["flags"]) and len(st.strip()) > 0 and not st.startswith("`") and not st.endswith("`"):
+                        clean_tok = st.strip()
+                        l_ws = st[:len(st) - len(st.lstrip())]
+                        r_ws = st[len(st.rstrip()):]
+                        reconstructed_parts.append(f"{l_ws}`{clean_tok}`{r_ws}")
+                    else:
+                        reconstructed_parts.append(st)
+                line_content = "".join(reconstructed_parts).strip()
+            else:
+                line_content = txt_preview
+
+            raw_lines.append({
+                "bbox": l_bbox,
+                "text": line_content,
+                "is_mono": is_mono,
+                "size": max((s.get("size", 10.0) for s in l["spans"]), default=10.0),
+                "y0": l_bbox[1],
+                "y1": l_bbox[3]
+            })
+
+    # 3. Detect & preserve monospace code blocks
+    code_blocks: list[list[dict]] = []
+    filtered_lines: list[dict] = []
+    curr_code_group: list[dict] = []
+
+    for l in raw_lines:
+        if l["is_mono"]:
+            curr_code_group.append(l)
+        else:
+            if len(curr_code_group) >= 2 or (len(curr_code_group) == 1 and any(tok in curr_code_group[0]["text"] for tok in ["#include", "dma_", "{", "}", ";"])):
+                code_blocks.append(curr_code_group)
+            else:
+                filtered_lines.extend(curr_code_group)
+            curr_code_group = []
+            filtered_lines.append(l)
+    if len(curr_code_group) >= 2 or (len(curr_code_group) == 1 and any(tok in curr_code_group[0]["text"] for tok in ["#include", "dma_", "{", "}", ";"])):
+        code_blocks.append(curr_code_group)
+    else:
+        filtered_lines.extend(curr_code_group)
+
+    extracted_code_blocks: list[dict] = []
+    for grp in code_blocks:
+        gx0 = min(l["bbox"][0] for l in grp)
+        gy0 = min(l["bbox"][1] for l in grp)
+        gx1 = max(l["bbox"][2] for l in grp)
+        gy1 = max(l["bbox"][3] for l in grp)
+
+        has_line_nums = sum(1 for l in grp if re.match(r"^[\s\xa0]*\d+[\s\xa0]", l["text"])) >= 0.5 * len(grp)
+        cleaned_lines = []
+        for l in grp:
+            t = l["text"].replace("\xa0", " ")
+            if has_line_nums:
+                t = re.sub(r"^\s*\d+\s{1,5}", "", t)
+            cleaned_lines.append(t)
+        code_str = "\n".join(cleaned_lines)
+        language = detect_code_language(code_str)
+        fenced_md = f"```{language}\n{code_str}\n```"
+        extracted_code_blocks.append({
+            "bbox": (float(gx0), float(gy0), float(gx1), float(gy1)),
+            "code": code_str,
+            "language": language,
+            "markdown": fenced_md,
+            "y0": gy0
+        })
+
+    # 4. Column gutter detection via horizontal projection
+    bins = [0] * max(1, int(width))
+    for l in filtered_lines:
+        bb = l["bbox"]
+        if (bb[2] - bb[0]) <= 0.60 * width and l.get("size", 10.0) <= 13.0:
+            for x in range(max(0, int(bb[0])), min(int(width), int(bb[2]))):
+                bins[x] += 1
+
+    gutters: list[tuple[int, int]] = []
+    in_gap = False
+    start = 0
+    for x in range(int(0.15 * width), int(0.85 * width)):
+        if bins[x] == 0:
+            if not in_gap:
+                in_gap = True
+                start = x
+        else:
+            if in_gap:
+                in_gap = False
+                if x - start >= 12:
+                    left_count = sum(1 for l in filtered_lines if l["bbox"][2] <= start + 3.0)
+                    right_count = sum(1 for l in filtered_lines if l["bbox"][0] >= x - 3.0)
+                    if left_count >= 2 and right_count >= 2:
+                        gutters.append((start, x))
+    if in_gap and int(0.85 * width) - start >= 12:
+        end_x = int(0.85 * width)
+        left_count = sum(1 for l in filtered_lines if l["bbox"][2] <= start + 3.0)
+        right_count = sum(1 for l in filtered_lines if l["bbox"][0] >= end_x - 3.0)
+        if left_count >= 2 and right_count >= 2:
+            gutters.append((start, end_x))
+
+    # 5. Build unified layout items and order them
+    all_items: list[dict] = []
+    for tab_item in extracted_tables:
+        all_items.append({"type": "table", "bbox": tab_item["bbox"], "y0": tab_item["y0"], "content": tab_item["markdown"]})
+    for cb_item in extracted_code_blocks:
+        all_items.append({"type": "code", "bbox": cb_item["bbox"], "y0": cb_item["y0"], "content": cb_item["markdown"]})
+    for l_item in filtered_lines:
+        all_items.append({"type": "line", "bbox": l_item["bbox"], "y0": l_item["y0"], "content": l_item["text"], "size": l_item.get("size", 10.0)})
+
+    if not gutters:
+        sorted_items = sorted(all_items, key=lambda item: item["y0"])
+    else:
+        g_mids = [(g[0] + g[1]) / 2 for g in gutters]
+        primary_gmid = g_mids[0]
+
+        def is_spanning_item(item):
+            bb = item["bbox"]
+            w = bb[2] - bb[0]
+            # Page-spanning banner must either span across more than half the page width
+            # or cross directly over a column gutter divider
+            if w > 0.50 * width:
+                return True
+            for gm in g_mids:
+                if bb[0] < gm < bb[2]:
+                    return True
+            return False
+
+        spanning = [item for item in all_items if is_spanning_item(item)]
+        non_spanning = [item for item in all_items if not is_spanning_item(item)]
+
+        def get_col_idx(bbox):
+            cx = (bbox[0] + bbox[2]) / 2
+            for idx, gm in enumerate(g_mids):
+                if cx <= gm:
+                    return idx
+            return len(g_mids)
+
+        bands = []
+        assigned_ids = set()
+        for span_it in sorted(spanning, key=lambda it: it["y0"]):
+            band_items = [it for it in non_spanning if id(it) not in assigned_ids and it["y0"] < span_it["y0"]]
+            if band_items:
+                for it in band_items:
+                    assigned_ids.add(id(it))
+                bands.append(("cols", band_items))
+            bands.append(("span", [span_it]))
+
+        # All remaining unassigned items in non_spanning are retained without dead-zone dropping
+        remaining = [it for it in non_spanning if id(it) not in assigned_ids]
+        if remaining:
+            bands.append(("cols", remaining))
+
+        sorted_items = []
+        for b_type, b_items in bands:
+            if b_type == "span":
+                sorted_items.extend(b_items)
+            else:
+                num_cols = len(g_mids) + 1
+                for c_idx in range(num_cols):
+                    col_items = sorted([it for it in b_items if get_col_idx(it["bbox"]) == c_idx], key=lambda it: it["y0"])
+                    sorted_items.extend(col_items)
+
+    # 6. Assemble Markdown
+    md_chunks: list[str] = []
+    current_para: list[str] = []
+    for it in sorted_items:
+        if it["type"] in ("table", "code"):
+            if current_para:
+                md_chunks.append(" ".join(current_para))
+                current_para = []
+            md_chunks.append(it["content"])
+        else:
+            txt = it["content"].strip()
+            if not txt:
+                if current_para:
+                    md_chunks.append(" ".join(current_para))
+                    current_para = []
+                continue
+            if re.match(r"^#{1,6}\s+", txt) or it.get("size", 10.0) >= 13.0:
+                if current_para:
+                    md_chunks.append(" ".join(current_para))
+                    current_para = []
+                md_chunks.append(txt)
+            else:
+                if current_para and current_para[-1].endswith("-") and len(current_para[-1]) > 1 and current_para[-1][-2].isalpha() and txt[0].isalpha():
+                    current_para[-1] = current_para[-1][:-1] + txt
+                else:
+                    current_para.append(txt)
+    if current_para:
+        md_chunks.append(" ".join(current_para))
+
+    full_text = "\n\n".join(md_chunks).strip()
+    return PageLayoutResult(
+        text=full_text,
+        tables=[{"bbox": t["bbox"], "markdown": t["markdown"], "caption": t["caption"]} for t in extracted_tables],
+        table_masks=table_masks,
+        code_blocks=[{"bbox": cb["bbox"], "code": cb["code"], "language": cb["language"]} for cb in extracted_code_blocks]
+    )
+
 
 class ArchiveExtractor:
-    def __init__(self, config_path="config.json"):
-        if isinstance(config_path, dict):
+    def __init__(self, config_path="config.json", config_dict=None):
+        if config_dict is not None:
+            self.config = config_dict
+            self.config_path = str(config_path) if isinstance(config_path, (str, Path)) else "config.json"
+        elif isinstance(config_path, dict):
             self.config = config_path
             self.config_path = "config.json"
         else:
@@ -38,11 +446,12 @@ class ArchiveExtractor:
         else:
             self.csv_path = Path("lib/zoom_pageinfo.csv")
             
-        self.db_path = self.config["db_path"]
-        db_path_obj = Path(self.db_path)
-        if len(db_path_obj.parts) == 1:
-            self.db_path = str(Path("database") / self.db_path)
-        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        self.db_path = self.config.get("db_path", ":memory:")
+        if self.db_path != ":memory:":
+            db_path_obj = Path(self.db_path)
+            if len(db_path_obj.parts) == 1:
+                self.db_path = str(Path("database") / self.db_path)
+            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self.ocr_threshold = self.config.get("ocr_threshold_chars", 100)
         self.tesseract_cmd = self.config.get("tesseract_cmd", "tesseract")
         
@@ -128,9 +537,9 @@ class ArchiveExtractor:
                 """, (article_id, preset, stext, start, end, attr, provider, processed_at))
             self.conn.commit()
             if entities:
-                print(f"  [LangExtract] Grounded {len(entities)} entity spans for Article #{article_id} (Preset: '{preset}', Provider: '{provider}').")
+                safe_print(f"  [LangExtract] Grounded {len(entities)} entity spans for Article #{article_id} (Preset: '{preset}', Provider: '{provider}').")
         except Exception as e:
-            print(f"  [LangExtract Note] Ingestion extraction skipped for Article #{article_id}: {e}")
+            safe_print(f"  [LangExtract Note] Ingestion extraction skipped for Article #{article_id}: {e}")
 
     def run_langextract_all(self, limit=None):
         """Runs LangExtract on all articles in the database if enable_langextract is True."""
@@ -157,7 +566,7 @@ class ArchiveExtractor:
             
         preset = self.config.get("langextract_schema_preset", "technical_components")
         provider = self.config.get("langextract_provider", "ollama")
-        print(f"\n🔍 Google LangExtract Entegrasyonu (Grounded Extraction | Provider: '{provider}', Preset: '{preset}')...")
+        safe_print(f"\n🔍 Google LangExtract Entegrasyonu (Grounded Extraction | Provider: '{provider}', Preset: '{preset}')...")
         
         extracted_count = 0
         for art_id, title, text in articles:
@@ -168,16 +577,16 @@ class ArchiveExtractor:
             extracted_count += 1
             
         if extracted_count > 0:
-            print(f"✅ LangExtract completed for {extracted_count} articles.")
+            safe_print(f"✅ LangExtract completed for {extracted_count} articles.")
 
     def load_zoom_metadata(self):
         """Reads zoom_pageinfo.csv and builds a mapping of filename -> zoom snippet & title"""
         metadata = {}
         if not self.csv_path.exists():
-            print(f"Warning: CSV metadata not found at {self.csv_path}")
+            safe_print(f"Warning: CSV metadata not found at {self.csv_path}")
             return metadata
             
-        print(f"Loading zoom metadata from {self.csv_path}...")
+        safe_print(f"Loading zoom metadata from {self.csv_path}...")
         with open(self.csv_path, mode='r', encoding='utf-8', errors='ignore') as f:
             reader = csv.reader(f)
             for row in reader:
@@ -189,12 +598,13 @@ class ArchiveExtractor:
                 filename = row[1]
                 snippet = row[2]
                 metadata[filename] = snippet
-        print(f"Loaded metadata for {len(metadata)} files.")
+        safe_print(f"Loaded metadata for {len(metadata)} files.")
         return metadata
 
     def ocr_pdf(self, pdf_path):
         """Renders PDF pages to images and runs Tesseract OCR on them"""
-        print(f"Running OCR on {pdf_path.name}...")
+        pdf_path = Path(pdf_path)
+        safe_print(f"Running OCR on {pdf_path.name}...")
         ocr_text_parts = []
         try:
             doc = pdfium.PdfDocument(pdf_path)
@@ -202,19 +612,21 @@ class ArchiveExtractor:
                 # Render page at 300 DPI for high quality OCR
                 bitmap = page.render(scale=300/72)
                 pil_img = bitmap.to_pil()
+                preprocessed_img = preprocess_image_for_ocr(pil_img)
                 
                 with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
                     tmp_img_path = tmp_img.name
-                    pil_img.save(tmp_img_path)
+                    preprocessed_img.save(tmp_img_path)
                     
                 with tempfile.NamedTemporaryFile(suffix="", delete=False) as tmp_out:
                     tmp_out_path = tmp_out.name
                     
                 try:
-                    cmd = [self.tesseract_cmd, tmp_img_path, tmp_out_path]
+                    ocr_lang = getattr(self, "ocr_language", None) or self.config.get("ocr_language", "eng")
+                    cmd = [self.tesseract_cmd, tmp_img_path, tmp_out_path, "--dpi", "300", "-l", ocr_lang, "--psm", "6"]
                     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                     if result.returncode != 0:
-                        print(f"  Page {i+1} OCR failed: {result.stderr}")
+                        safe_print(f"  Page {i+1} OCR failed: {result.stderr}")
                         continue
                         
                     txt_path = Path(f"{tmp_out_path}.txt")
@@ -230,7 +642,7 @@ class ArchiveExtractor:
             
             return "\n\n".join(ocr_text_parts), True
         except Exception as e:
-            print(f"  Error rendering/OCRing {pdf_path}: {e}")
+            safe_print(f"  Error rendering/OCRing {pdf_path}: {e}")
             return "", False
 
     def clean_ocr_text(self, text):
@@ -244,11 +656,40 @@ class ArchiveExtractor:
         text = re.sub(r'(\w+)-\s*\n\s*(\w+)', r'\1\2', text)
         
         # 2. General Turkish Suffix Re-joining (e.g. "medeni yeti" -> "medeniyeti", "ge nişliği" -> "genişliği")
+        # Unambiguous suffixes that are distinctly Turkish
+        unambiguous_suffixes = (
+            r'lar|ler|lık|lik|luk|lük|mda|mde|nda|nde|nin|nın|nün|nun|'
+            r'yu|yü|cı|ci|cu|cü|lüğü|luğu|liğe|liğine|sının|sinin|ları|leri|yeti|yati|liği|lığı'
+        )
         turkish_suffix_pattern = re.compile(
-            r'(\b[a-zA-ZçğıöşüÇĞİÖŞÜ]{3,})\s+(lar|ler|lık|lik|luk|lük|mda|mde|nda|nde|nin|nın|nün|nun|ten|tan|den|dan|ya|ye|yu|yü|cı|ci|cu|cü|lüğü|luğu|liğe|liğine|sının|sinin|ları|leri|yeti|yati|liği|lığı)\b',
+            rf'(\b[a-zA-ZçğıöşüÇĞİÖŞÜ]{{3,}})\s+({unambiguous_suffixes})\b',
             re.IGNORECASE
         )
         text = turkish_suffix_pattern.sub(r'\1\2', text)
+
+        # Ambiguous suffixes: ten, tan, den, dan, ya, ye
+        # Guard against merging English words (e.g. "pin ten", "for ten", "all ten", "greater tan")
+        english_words = {
+            "pin", "for", "all", "greater", "less", "hold", "step", "top", "at", "to", "in", "on",
+            "and", "is", "was", "with", "by", "see", "wait", "each", "every", "about", "than",
+            "line", "channel", "bank", "byte", "bit", "core", "clock", "port", "buffer", "item", "page"
+        }
+        def _safe_ambiguous_join(match):
+            prefix = match.group(1)
+            suffix = match.group(2)
+            if prefix.lower() in english_words or re.match(r'^\d+$', prefix):
+                return match.group(0)
+            if any(c in "çğıöşüÇĞİÖŞÜ" for c in prefix):
+                return f"{prefix}{suffix}"
+            if re.search(r'[çğıöşüÇĞİÖŞÜ]', text):
+                return f"{prefix}{suffix}"
+            return match.group(0)
+
+        ambiguous_pattern = re.compile(
+            r'(\b[a-zA-ZçğıöşüÇĞİÖŞÜ]{3,})\s+(ten|tan|den|dan|ya|ye)\b',
+            re.IGNORECASE
+        )
+        text = ambiguous_pattern.sub(_safe_ambiguous_join, text)
 
         # 3. Repair common historical OCR typography mistakes (e.g., İkesuslar -> İksoslar, Teb devri, vb.)
         tr_ocr_corrections = {
@@ -342,7 +783,7 @@ class ArchiveExtractor:
         # 1. First attempt parsing printed Table of Contents page (FİHRİST / İÇİNDEKİLER)
         toc_headings = self.parse_printed_toc(reader, total_pages)
         if toc_headings:
-            print(f"Parsed {len(toc_headings)} chapter entries from printed Table of Contents (FİHRİST).")
+            safe_print(f"Parsed {len(toc_headings)} chapter entries from printed Table of Contents (FİHRİST).")
             return toc_headings
 
         heading_nodes = []
@@ -368,37 +809,45 @@ class ArchiveExtractor:
         return heading_nodes
 
     def extract_text_from_pdf(self, pdf_path):
-        """Attempts to extract digital text. If too short, falls back to OCR."""
+        """Attempts to extract digital text using PyMuPDF layout analysis. If too short, falls back to OCR."""
         text_parts = []
         is_ocr = False
+        num_pages = 0
         try:
-            reader = pypdf.PdfReader(pdf_path)
-            for i, page in enumerate(reader.pages):
-                page_text = page.extract_text()
-                if page_text:
-                    text_parts.append(page_text.strip())
-            
-            extracted_text = "\n\n".join(text_parts).strip()
-            
-            # If text is too short or empty, perform OCR
-            if len(extracted_text) < self.ocr_threshold:
-                ocr_text, ocr_success = self.ocr_pdf(pdf_path)
-                if ocr_success:
-                    extracted_text = ocr_text
-                    is_ocr = True
-                    
-            if self.enable_vision_ocr:
+            doc = fitz.open(pdf_path)
+            num_pages = len(doc)
+            for page in doc:
+                res = extract_page_layout(page)
+                if res.text:
+                    text_parts.append(res.text.strip())
+            doc.close()
+            extracted_text = stitch_page_texts(text_parts).strip()
+        except Exception as fitz_err:
+            try:
+                reader = pypdf.PdfReader(pdf_path)
                 num_pages = len(reader.pages)
-                vision_text = self._process_vision_ocr_for_pages(pdf_path, 0, num_pages - 1)
-                if vision_text:
-                    extracted_text += vision_text
-                    
-            return extracted_text, is_ocr
-        except Exception as e:
-            print(f"Error extracting text from {pdf_path}: {e}")
-            # Try OCR directly on failure
+                for i, page in enumerate(reader.pages):
+                    page_text = page.extract_text()
+                    if page_text:
+                        text_parts.append(page_text.strip())
+                extracted_text = "\n\n".join(text_parts).strip()
+            except Exception as e:
+                safe_print(f"Error extracting text from {pdf_path}: {e}")
+                extracted_text = ""
+
+        # If text is too short or empty, perform OCR
+        if len(extracted_text) < self.ocr_threshold:
             ocr_text, ocr_success = self.ocr_pdf(pdf_path)
-            return ocr_text, ocr_success
+            if ocr_success:
+                extracted_text = ocr_text
+                is_ocr = True
+
+        if self.enable_vision_ocr and num_pages > 0:
+            vision_text = self._process_vision_ocr_for_pages(pdf_path, 0, num_pages - 1)
+            if vision_text:
+                extracted_text += vision_text
+
+        return extracted_text, is_ocr
 
     def parse_outline_nodes(self, reader, outline, parent_title=""):
         """Recursively parses outline nodes into a list of (title, page_num) dicts"""
@@ -423,55 +872,74 @@ class ArchiveExtractor:
         return nodes
 
     def extract_pages_range(self, pdf_path, start_page, end_page):
-        """Extracts text from a specific page range (0-indexed, inclusive). Falls back to OCR if needed."""
+        """Extracts text from a specific page range (0-indexed, inclusive) using PyMuPDF layout analysis. Falls back to OCR if needed."""
         text_parts = []
         is_ocr = False
+        total_pages = 0
         try:
-            reader = pypdf.PdfReader(pdf_path)
-            for page_idx in range(start_page, min(end_page + 1, len(reader.pages))):
-                page_text = reader.pages[page_idx].extract_text()
-                if page_text:
-                    text_parts.append(page_text.strip())
-                    
-            extracted_text = "\n\n".join(text_parts).strip()
-            
-            # If text is too short, run OCR on these pages
-            if len(extracted_text) < self.ocr_threshold:
-                if self.enable_vision_ocr and hasattr(self, 'vision_ocr') and self.vision_ocr:
-                    # DeepSeek-OCR Hybrid Mode: Convert scanned page image to Markdown
-                    print(f"  [DeepSeek-OCR Hybrid] Page text length below threshold ({len(extracted_text)} < {self.ocr_threshold}). Converting document page image to Markdown...")
-                    page_img_path = self.render_single_page_image(pdf_path, start_page)
+            doc = fitz.open(pdf_path)
+            total_pages = len(doc)
+            for page_idx in range(start_page, min(end_page + 1, total_pages)):
+                res = extract_page_layout(doc[page_idx])
+                if res.text:
+                    text_parts.append(res.text.strip())
+            doc.close()
+            extracted_text = stitch_page_texts(text_parts).strip()
+        except Exception as fitz_err:
+            try:
+                reader = pypdf.PdfReader(pdf_path)
+                total_pages = len(reader.pages)
+                for page_idx in range(start_page, min(end_page + 1, total_pages)):
+                    page_text = reader.pages[page_idx].extract_text()
+                    if page_text:
+                        text_parts.append(page_text.strip())
+                extracted_text = "\n\n".join(text_parts).strip()
+            except Exception as e:
+                safe_print(f"Error extracting range {start_page}-{end_page} from {pdf_path}: {e}")
+                extracted_text = ""
+
+        # If text is too short, run OCR on these pages
+        if len(extracted_text) < self.ocr_threshold:
+            if self.enable_vision_ocr and hasattr(self, 'vision_ocr') and self.vision_ocr:
+                # DeepSeek-OCR Hybrid Mode: Convert scanned page images to Markdown for all pages in range (Feature 5)
+                safe_print(f"  [DeepSeek-OCR Hybrid] Page text length below threshold ({len(extracted_text)} < {self.ocr_threshold}). Converting document page images to Markdown...")
+                rendered_md_parts = []
+                max_p = total_pages if total_pages > 0 else (end_page + 1)
+                for p_idx in range(start_page, min(end_page + 1, max_p)):
+                    page_img_path = self.render_single_page_image(pdf_path, p_idx)
                     if page_img_path and os.path.exists(page_img_path):
-                        ds_md = self.vision_ocr.convert_document_to_markdown(page_img_path)
-                        if ds_md:
-                            extracted_text = ds_md
-                            is_ocr = True
                         try:
-                            os.unlink(page_img_path)
-                        except Exception:
-                            pass
-                
-                if not is_ocr or not extracted_text:
-                    ocr_text, ocr_success = self.ocr_pdf_pages(pdf_path, start_page, end_page)
-                    if ocr_success:
-                        extracted_text = ocr_text
-                        is_ocr = True
-                    
-            if self.enable_vision_ocr:
-                vision_text = self._process_vision_ocr_for_pages(pdf_path, start_page, end_page)
-                if vision_text:
-                    extracted_text += vision_text
-                    
-            return extracted_text, is_ocr
-        except Exception as e:
-            print(f"Error extracting range {start_page}-{end_page} from {pdf_path}: {e}")
-            return "", False
+                            ds_md = self.vision_ocr.convert_document_to_markdown(page_img_path)
+                            if ds_md:
+                                rendered_md_parts.append(ds_md.strip())
+                        finally:
+                            if os.path.exists(page_img_path):
+                                try:
+                                    os.unlink(page_img_path)
+                                except Exception:
+                                    pass
+                if rendered_md_parts:
+                    extracted_text = stitch_page_texts(rendered_md_parts)
+                    is_ocr = True
+
+            if not is_ocr or not extracted_text:
+                ocr_text, ocr_success = self.ocr_pdf_pages(pdf_path, start_page, end_page)
+                if ocr_success:
+                    extracted_text = ocr_text
+                    is_ocr = True
+
+        if self.enable_vision_ocr:
+            vision_text = self._process_vision_ocr_for_pages(pdf_path, start_page, end_page)
+            if vision_text:
+                extracted_text += vision_text
+
+        return extracted_text, is_ocr
 
     def _process_vision_ocr_for_pages(self, pdf_path, start_page, end_page):
         if not self.enable_vision_ocr:
             return ""
             
-        print(f"  [Vision OCR: {self.vision_ocr.model_vision}] Analyzing visual layout on pages {start_page+1}-{end_page+1} of {Path(pdf_path).name}...")
+        safe_print(f"  [Vision OCR: {self.vision_ocr.model_vision}] Analyzing visual layout on pages {start_page+1}-{end_page+1} of {Path(pdf_path).name}...")
         vision_descriptions = []
         
         for page_idx in range(start_page, end_page + 1):
@@ -480,7 +948,7 @@ class ArchiveExtractor:
                 img_path = el.get("image_path")
                 if img_path and os.path.exists(img_path):
                     context = el.get("context", "")
-                    print(f"    [VLM / DeepSeek-OCR] Describing visual zone {el['id']} (caption context: '{context[:45].strip()}...')...")
+                    safe_print(f"    [VLM / DeepSeek-OCR] Describing visual zone {el['id']} (caption context: '{context[:45].strip()}...')...")
                     desc = self.vision_ocr.describe_image(img_path, caption_context=context)
                     
                     block_md = (
@@ -506,12 +974,13 @@ class ArchiveExtractor:
                     pil_img.save(tmp_img_path)
                     return tmp_img_path
         except Exception as e:
-            print(f"Warning: Failed to render page {page_idx+1} image from {pdf_path}: {e}")
+            safe_print(f"Warning: Failed to render page {page_idx+1} image from {pdf_path}: {e}")
         return None
 
     def ocr_pdf_pages(self, pdf_path, start_page, end_page):
         """Renders specific pages of a PDF and runs OCR on them"""
-        print(f"Running OCR on range {start_page}-{end_page} of {pdf_path.name}...")
+        pdf_path = Path(pdf_path)
+        safe_print(f"Running OCR on range {start_page}-{end_page} of {pdf_path.name}...")
         ocr_text_parts = []
         try:
             doc = pdfium.PdfDocument(pdf_path)
@@ -519,19 +988,21 @@ class ArchiveExtractor:
                 page = doc[page_idx]
                 bitmap = page.render(scale=300/72)
                 pil_img = bitmap.to_pil()
+                preprocessed_img = preprocess_image_for_ocr(pil_img)
                 
                 with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
                     tmp_img_path = tmp_img.name
-                    pil_img.save(tmp_img_path)
+                    preprocessed_img.save(tmp_img_path)
                     
                 with tempfile.NamedTemporaryFile(suffix="", delete=False) as tmp_out:
                     tmp_out_path = tmp_out.name
                     
                 try:
-                    cmd = [self.tesseract_cmd, tmp_img_path, tmp_out_path]
+                    ocr_lang = getattr(self, "ocr_language", None) or self.config.get("ocr_language", "eng")
+                    cmd = [self.tesseract_cmd, tmp_img_path, tmp_out_path, "--dpi", "300", "-l", ocr_lang, "--psm", "6"]
                     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                     if result.returncode != 0:
-                        print(f"  Page {page_idx+1} OCR failed: {result.stderr}")
+                        safe_print(f"  Page {page_idx+1} OCR failed: {result.stderr}")
                         continue
                         
                     txt_path = Path(f"{tmp_out_path}.txt")
@@ -546,7 +1017,7 @@ class ArchiveExtractor:
                         os.unlink(tmp_out_path)
             return "\n\n".join(ocr_text_parts), True
         except Exception as e:
-            print(f"Error OCRing pages {start_page}-{end_page} for {pdf_path}: {e}")
+            safe_print(f"Error OCRing pages {start_page}-{end_page} for {pdf_path}: {e}")
             return "", False
 
     def detect_scanned_headings(self, reader, total_pages):
@@ -577,7 +1048,7 @@ class ArchiveExtractor:
     def process_all_articles(self, limit=None):
         """Walks the article directory or splits a single PDF book, extracts text, and updates SQLite DB"""
         if not self.articles_dir.exists():
-            print(f"Error: Articles directory or book path not found at {self.articles_dir}")
+            safe_print(f"Error: Articles directory or book path not found at {self.articles_dir}")
             return
             
         # Parse range limit if range format
@@ -610,7 +1081,7 @@ class ArchiveExtractor:
         
         segments = []
         if unique_nodes:
-            print(f"Found {len(unique_nodes)} bookmarks/chapters in digital outline for {pdf_path.name}.")
+            safe_print(f"Found {len(unique_nodes)} bookmarks/chapters in digital outline for {pdf_path.name}.")
             unique_nodes.append({"title": "Appendix / Index", "page": total_pages})
             for i in range(len(unique_nodes) - 1):
                 ch_title = unique_nodes[i]["title"]
@@ -618,14 +1089,14 @@ class ArchiveExtractor:
                 end_p = unique_nodes[i+1]["page"] - 1
                 if start_p <= end_p:
                     if self.is_boilerplate_segment(ch_title):
-                        print(f"  [Skip Boilerplate] Skipping outline section: '{ch_title}'")
+                        safe_print(f"  [Skip Boilerplate] Skipping outline section: '{ch_title}'")
                         continue
                     segments.append((ch_title, start_p, end_p))
         else:
-            print(f"No digital bookmarks found in {pdf_path.name}. Attempting OCR & printed TOC heading detection...")
+            safe_print(f"No digital bookmarks found in {pdf_path.name}. Attempting OCR & printed TOC heading detection...")
             detected_headings = self.detect_scanned_headings(reader, total_pages)
             if detected_headings:
-                print(f"Detected {len(detected_headings)} heading/chapter markers in {pdf_path.name}.")
+                safe_print(f"Detected {len(detected_headings)} heading/chapter markers in {pdf_path.name}.")
                 detected_headings = sorted(detected_headings, key=lambda x: x["page"])
                 detected_headings.append({"title": "Appendix / End", "page": total_pages})
                 for i in range(len(detected_headings) - 1):
@@ -634,11 +1105,11 @@ class ArchiveExtractor:
                     end_p = detected_headings[i+1]["page"] - 1
                     if start_p <= end_p:
                         if self.is_boilerplate_segment(ch_title):
-                            print(f"  [Skip Boilerplate] Skipping detected heading: '{ch_title}'")
+                            safe_print(f"  [Skip Boilerplate] Skipping detected heading: '{ch_title}'")
                             continue
                         segments.append((ch_title, start_p, end_p))
             else:
-                print(f"Splitting {pdf_path.name} into default 15-page segments.")
+                safe_print(f"Splitting {pdf_path.name} into default 15-page segments.")
                 segment_size = 15
                 for start_p in range(0, total_pages, segment_size):
                     end_p = min(start_p + segment_size - 1, total_pages - 1)
@@ -658,7 +1129,7 @@ class ArchiveExtractor:
         cursor = self.conn.cursor()
 
         if self.input_mode in ("kiwix", "zim") or str(self.input_path).lower().endswith(".zim"):
-            print(f"=== Extraction Mode: KIWIX ZIM (Target ZIM: {self.input_path}) ===")
+            safe_print(f"=== Extraction Mode: KIWIX ZIM (Target ZIM: {self.input_path}) ===")
             from pipeline.kiwix_extractor import KiwixZimExtractor
             zim_extractor = KiwixZimExtractor(config_path=self.config_path if hasattr(self, "config_path") else "config.json")
             zim_extractor.extract_from_zim(zim_path=str(self.input_path) if str(self.input_path).endswith(".zim") else None, limit=limit)
@@ -666,7 +1137,7 @@ class ArchiveExtractor:
             return
 
         if self.input_mode in ("rendergit", "github", "git_repo"):
-            print(f"=== Extraction Mode: RENDERGIT (Target Repo: {self.input_path}) ===")
+            safe_print(f"=== Extraction Mode: RENDERGIT (Target Repo: {self.input_path}) ===")
             repo_input = str(self.input_path).strip()
             project_id = self.config.get("project_id", "git_project")
 
@@ -699,7 +1170,7 @@ class ArchiveExtractor:
             """, (rel_path, repo_dir.name, f"Git Repository: {repo_dir.name}", datetime.now().year, f"Flattened repository text ({len(parsed_files)} source files)", flattened_text, 0, processed_at))
             self.conn.commit()
 
-            print(f"Rendergit Extraction completed. Parsed {len(parsed_files)} source files, extracted {len(extracted_units)} AST code units.")
+            safe_print(f"Rendergit Extraction completed. Parsed {len(parsed_files)} source files, extracted {len(extracted_units)} AST code units.")
             return
 
         # Gather target PDF files
@@ -729,10 +1200,10 @@ class ArchiveExtractor:
                             
         pdf_paths = sorted(list(set(pdf_paths)))
         if not pdf_paths:
-            print(f"Error: No valid PDF files found for extraction at {self.input_path}")
+            safe_print(f"Error: No valid PDF files found for extraction at {self.input_path}")
             return
 
-        print(f"=== Extraction Mode: {self.input_mode.upper()} ({len(pdf_paths)} target PDF file(s)) ===")
+        safe_print(f"=== Extraction Mode: {self.input_mode.upper()} ({len(pdf_paths)} target PDF file(s)) ===")
         
         count = 0
         zoom_metadata = self.load_zoom_metadata()
@@ -742,12 +1213,12 @@ class ArchiveExtractor:
                 reader = pypdf.PdfReader(pdf_path)
                 num_pages = len(reader.pages)
             except Exception as e:
-                print(f"Warning: Could not read PDF {pdf_path.name}: {e}")
+                safe_print(f"Warning: Could not read PDF {pdf_path.name}: {e}")
                 continue
 
             # If in Book Mode OR if PDF volume in Folder Mode has > 15 pages: Split into chapters!
             if self.input_mode == "book" or num_pages > 15:
-                print(f"Processing Multi-Page Volume ({num_pages} pages): {pdf_path.name}...")
+                safe_print(f"Processing Multi-Page Volume ({num_pages} pages): {pdf_path.name}...")
                 segments, pdf_reader = self.extract_book_segments(pdf_path)
                 
                 sliced_segments = segments[start:end] if end is not None else segments[start:]
@@ -760,7 +1231,7 @@ class ArchiveExtractor:
                     if row and row[1]:
                         continue
                         
-                    print(f"  [{count+1}] Extracting Segment: '{pdf_path.stem} - {ch_title}' (Pages {start_p+1}-{end_p+1})...")
+                    safe_print(f"  [{count+1}] Extracting Segment: '{pdf_path.stem} - {ch_title}' (Pages {start_p+1}-{end_p+1})...")
                     extracted_text, is_ocr = self.extract_pages_range(pdf_path, start_p, end_p)
                     extracted_text = self.clean_ocr_text(extracted_text)
                     ch_title = self.clean_ocr_text(ch_title)
@@ -787,7 +1258,7 @@ class ArchiveExtractor:
                 if row and row[1]:
                     continue
                     
-                print(f"  [{count+1}] Processing Article PDF: {filename}...")
+                safe_print(f"  [{count+1}] Processing Article PDF: {filename}...")
                 extracted_text, is_ocr = self.extract_text_from_pdf(pdf_path)
                 extracted_text = self.clean_ocr_text(extracted_text)
                 title = self.clean_ocr_text(filename)
@@ -804,15 +1275,36 @@ class ArchiveExtractor:
                 self.conn.commit()
                 count += 1
 
-        print(f"Extraction step completed. Processed {count} new chapters/documents.")
+        safe_print(f"Extraction step completed. Processed {count} new chapters/documents.")
         self.run_langextract_all(limit=limit)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def close(self):
-        if self.enable_vision_ocr and hasattr(self, "vision_ocr") and self.vision_ocr:
-            print(f"Unloading vision model ('{self.vision_ocr.model_vision}') from VRAM...")
-            from pipeline.llm_client import unload_ollama_model
-            unload_ollama_model(self.config, self.vision_ocr.model_vision)
-        self.conn.close()
+        try:
+            if self.enable_vision_ocr and hasattr(self, "vision_ocr") and self.vision_ocr:
+                safe_print(f"Unloading vision model ('{self.vision_ocr.model_vision}') from VRAM...")
+                try:
+                    from pipeline.llm_client import unload_ollama_model
+                    unload_ollama_model(self.config, self.vision_ocr.model_vision)
+                except Exception as e:
+                    safe_print(f"Warning: Failed to unload vision model: {e}")
+        except Exception:
+            pass
+        finally:
+            if hasattr(self, "conn") and self.conn:
+                safe_close_db(self.conn)
+                self.conn = None
 
 if __name__ == "__main__":
     extractor = ArchiveExtractor()

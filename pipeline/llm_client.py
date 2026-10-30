@@ -173,3 +173,92 @@ def call_llm(config: dict, system_instruction: str, user_prompt: str, temperatur
         temperature=temperature
     )
     return response.choices[0].message.content or ""
+
+
+class ResilientOllamaClient:
+    """Resilient Ollama HTTP client with dynamic endpoint failover (LAN -> localhost)."""
+    def __init__(
+        self,
+        primary_url: str = "http://192.168.1.26:11434",
+        fallback_url: str = "http://127.0.0.1:11434",
+        timeout: float = 30.0
+    ):
+        self.primary_url = primary_url
+        self.fallback_url = fallback_url
+        self.timeout = timeout
+        self.active_url = primary_url
+        self.failover_occurred = False
+
+    def generate(self, model: str, prompt: str, images: list = None) -> str:
+        import urllib.request
+        import urllib.error
+        import json
+
+        payload_dict = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False
+        }
+        if images:
+            payload_dict["images"] = images
+
+        payload = json.dumps(payload_dict).encode("utf-8")
+
+        def _call_endpoint(base_url: str) -> str:
+            clean_base = base_url.rstrip("/").removesuffix("/v1")
+            req = urllib.request.Request(
+                f"{clean_base}/api/generate",
+                data=payload,
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                raw_data = resp.read().decode("utf-8")
+                data = json.loads(raw_data)
+                return data.get("response", "")
+
+        target_url = self.active_url
+        try:
+            return _call_endpoint(target_url)
+        except Exception:
+            if target_url == self.primary_url:
+                self.failover_occurred = True
+                self.active_url = self.fallback_url
+                return _call_endpoint(self.fallback_url)
+            else:
+                self.active_url = self.primary_url
+                return _call_endpoint(self.primary_url)
+
+
+def get_resilient_ollama_client(
+    primary_url: str = "http://192.168.1.26:11434",
+    fallback_url: str = "http://127.0.0.1:11434",
+    timeout: float = 30.0
+) -> ResilientOllamaClient:
+    return ResilientOllamaClient(primary_url=primary_url, fallback_url=fallback_url, timeout=timeout)
+
+
+def resolve_active_ollama_endpoint(
+    primary_url: str = "http://192.168.1.26:11434",
+    fallback_url: str = "http://127.0.0.1:11434",
+    timeout: float = 1.5
+) -> str:
+    """Fast TCP socket probe check (1.5s). Returns primary_url if healthy, else fallback_url if healthy, else primary_url."""
+    import urllib.parse
+    import socket
+
+    def _is_reachable(url: str) -> bool:
+        try:
+            parsed = urllib.parse.urlparse(url)
+            host = parsed.hostname or "127.0.0.1"
+            port = parsed.port or 11434
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except Exception:
+            return False
+
+    if _is_reachable(primary_url):
+        return primary_url
+    if _is_reachable(fallback_url):
+        return fallback_url
+    return primary_url
+

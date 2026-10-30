@@ -1,146 +1,136 @@
-# Project: Elektor Hardening & Dataset Optimization
+# Project: Elektor Layout, Cropping & OCR/VLM Hardening
 
 ## Architecture
-The Elektor platform is an end-to-end data processing, RAG, and fine-tuning dataset generation system for embedded systems and technical engineering domains. It supports dual deployment across local Ollama clusters and hybrid Gemini cloud architectures.
+The Elektor PDF extraction, multimodal dataset synthesis, and visual document processing pipeline is upgraded to provide reading-order fidelity, clean Markdown tables, unfragmented figure cropping, high-fidelity OCR/VLM extraction, and closed-pipe resilience.
 
-### Component Boundaries & Data Flow
+### Upgraded Pipeline Architecture & Data Flow
 ```
-[Unstructured Raw Docs] (PDF, Kiwix ZIM, Git repos)
+[Complex Technical PDF / Datasheet]
        │
        ▼
-[ArchiveExtractor] (pipeline/extractor.py)
-  ├── PDF layout / printed TOC parsing / OCR fallback (Tesseract / DeepSeek-OCR)
-  └── Clean text & chapter normalization
+[LayoutAwarePdfExtractor] (pipeline/extractor.py)
+   ├── Margin Filtering: Strip running headers (y <= 50) & footers (y >= height - 50)
+   ├── PyMuPDF Table Detection: `page.find_tables()` -> clean GitHub-flavored Markdown
+   ├── Column Gutter Partitioning: Deterministic left-to-right reading order
+   ├── Monospace Span Grouping: Monospace fonts (`flags & 8`) -> fenced code blocks
+   └── Multi-page range OCR rendering
        │
-       ├───► [Database Session Manager] (pipeline/db.py) ──► SQLite (database/rp01.db)
-       │
-       ├───► [SmartTextChunker] (pipeline/chunking.py)
-       │       └── Word-boundary, Markdown structure & sentence preservation
-       │       └── [ArchiveVectorStore] (pipeline/vector_store.py) ──► Qdrant (local/server)
-       │
-       ▼
-[ArchiveAnalyzer] (pipeline/analyzer.py)
-  ├── Direct Turkish generation (ornith-1.5:9b)
-  ├── English enrichment + TranslateGemma translation
-  └── Resilient JSON repair
-       │
-       ▼
-[JudgeEngine] (pipeline/judge_engine.py)
-  └── Gemini Flash arbitration (strict scoring, hybrid surgical rewrite, batch API)
-       │
-       ▼
-[DatasetBuilder] (pipeline/dataset_builder.py)
-  ├── Targeted boilerplate & colophon filtering
-  ├── Strict Alpaca schema enforcement ("input": "")
-  ├── Strict DPO triplet schema enforcement ({"prompt", "chosen", "rejected"})
-  └── JSONL & Parquet serialization (exports/<project>/)
+       ├───► [Table Bounding Boxes (Negative Masks)]
+       │            │
+       │            ▼
+       ├───► [VisualDiagramExtractor] (pipeline/layout_analyzer.py)
+       │        ├── Table Mask Filtering: Reject table cells / grid strokes
+       │        ├── Drawing Path Clustering: Internal drawing count >= 20 (reject shaded code boxes)
+       │        ├── Boundary Expansion: Include outer arrowheads, pin names, and text labels
+       │        ├── Aspect Ratio & Dimension Filters: Eliminate border strips / micro-crops
+       │        └── Non-Overlapping Deduplication: Merge nested/overlapping figure boxes
+       │            │
+       │            ▼ [Clean, Complete PNG Crops]
        │
        ▼
-[CloudGPUOffloader] (pipeline/cloud_gpu_offloader.py)
-  └── Unsloth Desktop & TRL formatting (SFT / DPO / Chat)
-
-[API Server & CLI] (api_server.py & run.py)
-  └── Unified entry points, health check, sharded parallel execution, graceful teardown
+[VisionOcrEngine & VisualDatasetBuilder] (pipeline/vision_ocr.py & visual_dataset_builder.py)
+   ├── Table-Aware Anti-Loop Filter: Preserve repeated Markdown headers & valid syntax
+   ├── Control-Token & Thought Stripper: Clean `<|grounding|>`, unclosed `<think>`, DeepSeek/Llama tags
+   ├── Tesseract Fallback Optimization: Grayscale/binarization, --dpi 300, -l eng, --psm 6
+   ├── Resilient Ollama Client: Automatic failover (LAN 192.168.1.26 -> localhost 127.0.0.1)
+   └── BrokenPipeError Shield: Guarded stdout/stderr printing & reliable DB teardown
+       │
+       ▼
+[Verified Outputs & Multimodal Catalog]
+   ├── `multimodal_catalog.md` (clean Markdown tables, valid figure links)
+   └── `multimodal_visual_dataset.jsonl` (schema-compliant SFT records)
 ```
 
 ---
 
 ## Feature Inventory
+Every feature from the Survey phase appears here with its assigned milestone:
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | Dedicated Word-Boundary Chunker | Recursive delimiter splitting (`\n\n`, `\n`, sentence endings), code block and table preservation, no character-severing or whitespace flattening | M1 | Survey R1 |
-| 2 | Modernized Qdrant Vector Storage | Support for remote `qdrant_url` / `qdrant_api_key` alongside local `qdrant_db_path`, elimination of silent `:memory:` fallback, batch embedding upserts | M1 | Survey R1 |
-| 3 | Deterministic Semantic Retrieval | Score-based filtering (`score_threshold`), return complete payload (`article_id`, `chunk_index`, `point_id`, `score`), payload indexing | M1 | Survey R1 |
-| 4 | Vector-to-Document Linking | Payload indexing on `article_id` and indexed join to SQLite `articles` and `enrichments` | M1 | Survey R1 |
-| 5 | Strict Alpaca SFT Schema Enforcement | Ensure 100% of SFT records have `"input": ""` across standard, Kiwix, and synthetic code exports with zero `Context:`/`Bağlam:` leakage | M2 | Survey R2 |
-| 6 | Strict DPO Triplet Normalization | Clean `{"prompt", "chosen", "rejected"}` schema with zero extraneous `"metadata"` or `"input"` keys across English, Turkish, and Kiwix DPO | M2 | Survey R2 |
-| 7 | Targeted Boilerplate Filtering | Refine `BOILERPLATE_PATTERNS` to target legal/copyright notices without pruning legitimate hardware IP (Synopsys DesignWare) | M2 | Survey R2 |
-| 8 | Turkish Terminology & LaTeX Preservation | Maintain technical engineering terms and LaTeX notation in direct Turkish prompts and translation pipelines | M3 | Survey R3 |
-| 9 | Hybrid LLM Arbitration & Resilience | Gemini Flash arbitration with model cascading fallbacks, offline heuristic fallback, rate limit pacing, and batch API | M3 | Survey R3 |
-| 10 | Unsloth & TRL Fine-Tuning Compatibility | Standardize dataset mapping, tokenizer padding/eos safety, and notebook/script generation for base LLMs and LoRA | M3 | Survey R3 |
-| 11 | Centralized Database Session & Teardown | `pipeline/db.py` context manager with WAL mode, `busy_timeout=60000`, `try...finally` teardown, batch commits, and rollback | M4 | Survey R4 |
-| 12 | Multi-GPU VRAM & Directory Lock Teardown | Explicit `unload_ollama_model` in `VisualDatasetBuilder`, `store.close()` in `run.py`, and pooled async HTTP clients in `llm_client.py` | M4 | Survey R4 |
-| 13 | API Server Lifecycle & Concurrency Fix | Fix `/api/pipeline/run` race condition, add `"export_visual"` to valid commands, dynamic port and paths in `/api/health` | M4 | Survey R4 |
-| 14 | Documentation Purge & Link Remediation | Replace 40+ `file:///Users/hakankilicaslan/...` links with relative paths across all markdown docs; fix guide image paths | M5 | Survey R5 |
-| 15 | CLI Command & Config Schema Synchronization | Fix `README.md` command examples; synchronize `config.json`, `gemini.json`, `ollama_cloud.json` and templates | M5 | Survey R5 |
-| 16 | Root Pytest Configuration & Test Optimization | Add root `pytest.ini` (`pythonpath = .`), optimize real image fixtures in integration test, add export validation test | M5 | Survey R5 |
-| 17 | Full E2E Test Suite & Adversarial Hardening | 100% pass of 4-tier E2E test suite + Tier 5 adversarial stress testing + Victory Audit | M-FINAL | Acceptance Criteria |
+| 1 | Layout-Aware Reading Order & Gutter Detection | Partition multi-column pages via horizontal projection and column gutter detection in `pipeline/extractor.py` to prevent text interleaving | M1 | Survey R1 |
+| 2 | Running Header & Footer Margin Filtering | Detect and strip repeating running headers and footers using spatial thresholds ($y \le 50$ pt, $y \ge \text{height} - 50$ pt) and title pattern matching | M1 | Survey R1 |
+| 3 | Native PyMuPDF Table Extraction & Markdown Conversion | Replace naive text extraction for tables with PyMuPDF `find_tables()` and `to_markdown()`, preserving register bitfield alignment and binding left captions | M1 | Survey R1 |
+| 4 | Monospace Span Grouping & Fenced Code Blocks | Detect monospaced font spans (`flags & 8`, `RobotoMono`) and preserve them as indented, fenced code blocks (````c ... ````) | M1 | Survey R1 |
+| 5 | Multi-Page Range OCR Image Rendering Fix | Fix `extract_pages_range` in `pipeline/extractor.py` to render all pages `start_page` through `end_page` instead of dropping pages after `start_page` | M1 | Survey R3 |
+| 6 | Table Negative Masking in Layout Analyzer | Pass table bounding boxes from `find_tables()` as exclusion masks to `pipeline/layout_analyzer.py` to eliminate false-positive table-cell crops (`p119_draw_119_4.png`) | M2 | Survey R2 |
+| 7 | Drawing Path Clustering & Code Box Rejection | Enforce internal drawing count check (`internal_drawings >= 20` for diagrams vs 0 for shaded code backgrounds) and prevent gap-induced column slicing | M2 | Survey R2 |
+| 8 | Boundary Expansion for Arrowheads & Labels | Expand figure bounding boxes adaptively to encompass outer connector lines, arrowheads, and adjacent pin/signal text labels without clipping | M2 | Survey R2 |
+| 9 | Aspect Ratio, Dimension & Density Filters | Reject thin border strips and micro-crops while preserving legitimate wide architecture blocks and timing diagrams (remove hardcoded `h < 80`) | M2 | Survey R2 |
+| 10 | Non-Overlapping Figure Deduplication | Implement non-maximum suppression / IoU-based deduplication to prevent duplicate, nested, or fragmented sub-diagram crops | M2 | Survey R2 |
+| 11 | BrokenPipeError Immunity & Safe Teardown | Guard all stdout/stderr printing and logging in `pipeline/extractor.py:613,812` and `project_logger.py`, guaranteeing database connection closure during pipe breaks | M3 | Survey R4 |
+| 12 | Table-Syntax Preserving Anti-Loop Filter | Modify repetition filter in `pipeline/vision_ocr.py:98-117` to recognize Markdown table row syntax (`|---|---|`) and avoid injecting metatext into valid tables | M3 | Survey R3 |
+| 13 | Control-Token & Thought Preamble Sanitization | Apply comprehensive sanitization (`<|grounding|>`, unclosed `<think>`, `<|im_start|>`, DeepSeek/Llama tags) across all document conversion endpoints | M3 | Survey R3 |
+| 14 | Tesseract OCR Preprocessing & PSM Tuning | Add grayscale/binarization, `--dpi 300`, `-l eng`, and appropriate `--psm` modes; fix aggressive suffix regex word merging | M3 | Survey R3 |
+| 15 | Dynamic Endpoint Failover | Automatically failover from LAN endpoint `http://192.168.1.26:11434` to local `http://127.0.0.1:11434` when LAN host is offline or timed out | M3 | Survey R3 |
+| 16 | Schema-Compliant Multimodal Catalog Generation | Ensure `multimodal_catalog.md` and `multimodal_visual_dataset.jsonl` satisfy all schema invariants with zero control tokens or loop warnings | M3 | Survey R3 |
+| 17 | 4-Tier E2E Test Suite & Adversarial Hardening | Comprehensive opaque-box test suite (Tiers 1-4) covering all 16 features, plus Tier 5 adversarial stress testing and Victory Audit | M-FINAL | Acceptance Criteria |
 
 ---
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Vector Store & RAG Navigation Hardening | Features 1, 2, 3, 4 (`pipeline/chunking.py`, `pipeline/vector_store.py`, `tests/test_vector_store.py`) | None | DONE |
-| M2 | Dataset Compilation & Decomposition Pipeline | Features 5, 6, 7 (`pipeline/dataset_builder.py`, `tests/test_export_schema_compliance.py`) | None | DONE |
-| M3 | Turkish Fine-Tuning Synthesis & Hybrid Arbitration | Features 8, 9, 10 (`pipeline/analyzer.py`, `pipeline/judge_engine.py`, `pipeline/cloud_gpu_offloader.py`) | None | DONE |
-| M4 | Architectural Modularity, Resource Teardown & API/CLI Hardening | Features 11, 12, 13 (`pipeline/db.py`, `run.py`, `api_server.py`, `pipeline/visual_dataset_builder.py`) | M1 | DONE |
-| M5 | Documentation Cleansing & Schema Synchronization | Features 14, 15, 16 (`pytest.ini`, docs, config templates, `tests/test_real_data_pipelines.py`) | M2, M4 | DONE |
-| M-FINAL | Final E2E Test Pass (100%) & Adversarial Coverage Hardening | Feature 17 (Pass all E2E Tiers 1-4, Tier 5 Adversarial Hardening, Victory Audit) | M1, M2, M3, M4, M5 | DONE |
+| E2E | Requirement-Driven E2E Test Suite | Build test infra and test cases for Tiers 1-4 across all 16 features; produce `TEST_READY.md` | None (parallel track) | DONE |
+| M1 | Document Layout, Reading-Order & Table Extraction | Features 1, 2, 3, 4, 5 (`pipeline/extractor.py`, `tests/test_document_layout.py`) | None | DONE |
+| M2 | Complete, Unfragmented Visual & Diagram Cropping | Features 6, 7, 8, 9, 10 (`pipeline/layout_analyzer.py`, `tests/test_visual_cropper.py`) | M1 | DONE |
+| M3 | OCR / VLM Fidelity, Catalog Quality & Resilience | Features 11, 12, 13, 14, 15, 16 (`pipeline/vision_ocr.py`, `visual_dataset_builder.py`, `llm_client.py`) | M1, M2 | DONE |
+| M-FINAL | 100% E2E Test Pass & Tier 5 Adversarial Coverage Hardening | Feature 17 (Pass all E2E Tiers 1-4, Phase 2 Tier 5 Adversarial Hardening, Victory Audit) | E2E, M1, M2, M3 | DONE |
 
 ---
 
 ## Interface Contracts
 
-### `pipeline/chunking.py` ↔ `pipeline/vector_store.py`
+### `pipeline/extractor.py` ↔ `pipeline/layout_analyzer.py`
 ```python
 @dataclass
-class TextChunk:
-    text: str
-    chunk_index: int
-    total_chunks: int
-    start_char: int
-    end_char: int
-    token_estimate: int
+class PageLayoutResult:
+    text: str                                  # Clean Markdown text with reading order preserved
+    tables: list[dict]                         # Extracted tables: [{"bbox": (x0, y0, x1, y1), "markdown": str, "caption": str}]
+    table_masks: list[tuple[float, float, float, float]]  # Negative exclusion bboxes for visual cropper
+    code_blocks: list[dict]                    # Fenced code blocks detected via monospace font spans
 
-class SmartTextChunker:
-    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 150): ...
-    def chunk_text(self, text: str, max_chunks: int = 500) -> list[TextChunk]: ...
-```
-
-### `pipeline/db.py` ↔ All Pipeline Modules
-```python
-@contextmanager
-def get_db_connection(db_path: str | Path, timeout: float = 60.0, wal_mode: bool = True) -> Generator[sqlite3.Connection, None, None]:
-    """Provides a managed SQLite connection with WAL mode, busy timeout, and automatic rollback on exception."""
-    ...
-
-@contextmanager
-def get_db_cursor(db_path: str | Path, timeout: float = 60.0) -> Generator[sqlite3.Cursor, None, None]:
-    """Provides a managed cursor that automatically commits on normal exit and rolls back on exception."""
+def extract_page_layout(page: fitz.Page) -> PageLayoutResult:
+    """Extracts text, tables, and exclusion masks from a PDF page using PyMuPDF."""
     ...
 ```
 
-### `pipeline/vector_store.py` ↔ API & CLI
+### `pipeline/layout_analyzer.py` ↔ `pipeline/visual_dataset_builder.py`
 ```python
-class ArchiveVectorStore:
-    def __init__(self, config: dict = None): ...
-    def load_to_vector_db(self, limit: int = None, batch_size: int = 32) -> int: ...
-    def search(self, query: str, top_k: int = 5, score_threshold: float = 0.40) -> list[dict]:
-        """Returns list of dicts:
-        {
-            "score": float,
-            "article_id": int | None,
-            "chunk_index": int,
-            "point_id": str,
-            "title": str,
-            "year": str | int,
-            "filename": str,
-            "text": str
-        }
-        """
+@dataclass
+class FigureCrop:
+    crop_id: str                              # Unique identifier (e.g. 'p15_fig_1')
+    page_number: int                          # 1-indexed page number
+    bbox: tuple[float, float, float, float]   # (x0, y0, x1, y1) in PDF points
+    image_path: str                           # Saved PNG crop path
+    caption: str                              # Associated caption or heading
+    crop_type: str                            # 'diagram', 'schematic', 'chart', 'drawing'
+
+class DocumentLayoutAnalyzer:
+    def analyze_page(
+        self,
+        page: fitz.Page,
+        table_masks: list[tuple[float, float, float, float]] = None
+    ) -> list[FigureCrop]:
+        """Extracts complete, unfragmented figures while excluding table masks and shaded text blocks."""
         ...
-    def close(self) -> None: ...
 ```
 
-### `pipeline/dataset_builder.py` Schema Invariants
-- **Alpaca SFT Output**:
-  ```json
-  {"instruction": "<instruction text>", "input": "", "output": "<response text>"}
-  ```
-  `input` must be strictly `""`. No `Context:...` or `Bağlam:...` static string leakage.
-- **DPO Triplet Output**:
-  ```json
-  {"prompt": "<prompt text>", "chosen": "<chosen response>", "rejected": "<rejected response>"}
-  ```
-  Exact 3 keys, zero extraneous fields (no `input`, no `metadata`).
+### `pipeline/llm_client.py` Resilient Endpoint Interface
+```python
+class ResilientOllamaClient:
+    def __init__(self, primary_url: str = "http://192.168.1.26:11434", fallback_url: str = "http://127.0.0.1:11434", timeout: float = 30.0): ...
+    def generate(self, model: str, prompt: str, images: list[str] = None) -> str: ...
+```
+
+---
+
+## Code Layout
+- `pipeline/extractor.py`: PDF layout extraction, margin filtering, PyMuPDF table extraction, code block preservation, safe close teardown.
+- `pipeline/layout_analyzer.py`: Visual diagram extraction, table exclusion masking, drawing path clustering, boundary expansion, deduplication.
+- `pipeline/vision_ocr.py`: VLM response sanitization, table-aware repetition filtering, Tesseract preprocessing and invocation.
+- `pipeline/visual_dataset_builder.py`: Multimodal catalog & dataset generation, VRAM lifecycle management.
+- `pipeline/llm_client.py`: Resilient HTTP client with automatic endpoint failover (LAN -> localhost).
+- `tests/test_document_layout.py`: Unit and layout tests for M1.
+- `tests/test_visual_cropper.py`: Unit and geometry tests for M2.
+- `tests/test_ocr_resilience.py`: Unit and resilience tests for M3.
+- `tests/e2e/`: Opaque-box 4-tier E2E test suite.

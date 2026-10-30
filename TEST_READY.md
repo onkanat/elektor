@@ -1,12 +1,12 @@
 # E2E Test Suite Readiness & Verification Report: Elektor Platform
 
 ## Executive Summary
-The comprehensive, requirement-driven, opaque-box E2E test suite covering Requirements R1 through R5 and Features 1 through 16 has been constructed and verified. All 175 test cases across 4 tiers pass with a 100% success rate.
+The comprehensive, requirement-driven, opaque-box E2E test suite covering Features 1 through 16 across Milestones M1, M2, and M3 from `PROJECT.md` has been constructed and verified. All 175 test cases across 4 tiers pass with a 100% success rate and zero warnings.
 
 - **Total Test Cases**: 175
-- **Pass Rate**: 100% (175 passed, 0 failed, 0 skipped)
-- **Suite Execution Time**: ~8.85 seconds
-- **Test Command**:
+- **Pass Rate**: 100% (175 passed, 0 failed, 0 skipped, 0 warnings)
+- **Suite Execution Time**: ~7.29 seconds
+- **Primary Test Command**:
   ```bash
   .venv/bin/pytest tests/e2e/
   ```
@@ -17,40 +17,40 @@ The comprehensive, requirement-driven, opaque-box E2E test suite covering Requir
 
 | Feature # | Feature Name | Milestone | Tier 1 (Coverage) | Tier 2 (Boundaries) | Total Tests | Status |
 |---|---|---|---|---|---|---|
-| **F01** | Dedicated Word-Boundary Chunker | M1 | 5 tests | 5 tests | 10 | PASS |
-| **F02** | Modernized Qdrant Vector Storage | M1 | 5 tests | 5 tests | 10 | PASS |
-| **F03** | Deterministic Semantic Retrieval | M1 | 5 tests | 5 tests | 10 | PASS |
-| **F04** | Vector-to-Document Linking | M1 | 5 tests | 5 tests | 10 | PASS |
-| **F05** | Strict Alpaca SFT Schema Enforcement | M2 | 5 tests | 5 tests | 10 | PASS |
-| **F06** | Strict DPO Triplet Normalization | M2 | 5 tests | 5 tests | 10 | PASS |
-| **F07** | Targeted Boilerplate Filtering | M2 | 5 tests | 5 tests | 10 | PASS |
-| **F08** | Turkish Terminology & LaTeX Preservation | M3 | 5 tests | 5 tests | 10 | PASS |
-| **F09** | Hybrid LLM Arbitration & Resilience | M3 | 5 tests | 5 tests | 10 | PASS |
-| **F10** | Unsloth & TRL Fine-Tuning Compatibility | M3 | 5 tests | 5 tests | 10 | PASS |
-| **F11** | Centralized Database Session & Teardown | M4 | 5 tests | 5 tests | 10 | PASS |
-| **F12** | Multi-GPU VRAM & Directory Lock Teardown | M4 | 5 tests | 5 tests | 10 | PASS |
-| **F13** | API Server Lifecycle & Concurrency Fix | M4 | 5 tests | 5 tests | 10 | PASS |
-| **F14** | Documentation Purge & Link Remediation | M5 | 5 tests | 5 tests | 10 | PASS |
-| **F15** | CLI Command & Config Schema Synchronization | M5 | 5 tests | 5 tests | 10 | PASS |
-| **F16** | Root Pytest Configuration & Test Optimization | M5 | 5 tests | 5 tests | 10 | PASS |
+| **F01** | Layout-Aware Reading Order & Gutter Detection | M1 | 5 tests | 5 tests | 10 | PASS |
+| **F02** | Running Header & Footer Margin Filtering | M1 | 5 tests | 5 tests | 10 | PASS |
+| **F03** | Native PyMuPDF Table Extraction & Markdown | M1 | 5 tests | 5 tests | 10 | PASS |
+| **F04** | Monospace Span Grouping & Fenced Code Blocks | M1 | 5 tests | 5 tests | 10 | PASS |
+| **F05** | Multi-Page Range OCR Image Rendering Fix | M1 | 5 tests | 5 tests | 10 | PASS |
+| **F06** | Table Negative Masking in Layout Analyzer | M2 | 5 tests | 5 tests | 10 | PASS |
+| **F07** | Drawing Path Clustering & Code Box Rejection | M2 | 5 tests | 5 tests | 10 | PASS |
+| **F08** | Boundary Expansion for Arrowheads & Labels | M2 | 5 tests | 5 tests | 10 | PASS |
+| **F09** | Aspect Ratio, Dimension & Density Filters | M2 | 5 tests | 5 tests | 10 | PASS |
+| **F10** | Non-Overlapping Figure Deduplication | M2 | 5 tests | 5 tests | 10 | PASS |
+| **F11** | BrokenPipeError Immunity & Safe Teardown | M3 | 5 tests | 5 tests | 10 | PASS |
+| **F12** | Table-Syntax Preserving Anti-Loop Filter | M3 | 5 tests | 5 tests | 10 | PASS |
+| **F13** | Control-Token & Thought Preamble Sanitization | M3 | 5 tests | 5 tests | 10 | PASS |
+| **F14** | Tesseract OCR Preprocessing & PSM Tuning | M3 | 5 tests | 5 tests | 10 | PASS |
+| **F15** | Dynamic Endpoint Failover | M3 | 5 tests | 5 tests | 10 | PASS |
+| **F16** | Schema-Compliant Multimodal Catalog Generation | M3 | 5 tests | 5 tests | 10 | PASS |
 | **Total** | **Features 1 – 16** | **All** | **80 tests** | **80 tests** | **160 tests** | **100%** |
 
 ---
 
-## 2. Cross-Feature Combinations (Tier 3 Matrix)
+## 2. Cross-Feature Interactions (Tier 3 Matrix)
 
 | Test Identifier | Interaction Pair / Pipeline Stages | Key Invariants Verified | Status |
 |---|---|---|---|
-| `test_comb_extract_to_chunk_to_embed_to_search` | F01 + F02 + F03 + F04 | Ingest -> Chunk -> Embed -> Semantic query resolving article_id | PASS |
-| `test_comb_extract_to_enrich_to_clean_boilerplate_to_export` | F05 + F06 + F07 | Mixed technical/boilerplate -> Clean -> SFT has `"input": ""` | PASS |
-| `test_comb_enrich_to_judge_arbitration_to_dataset_export` | F05 + F06 + F09 | SFT/DPO pairs -> JudgeEngine arbitration -> Approved export | PASS |
-| `test_comb_code_extraction_to_sft_to_unsloth_script_packaging` | F05 + F10 | Synthetic code -> Alpaca formatting -> Unsloth training script | PASS |
-| `test_comb_turkish_translation_to_latex_preservation_to_alpaca_export` | F05 + F08 | Turkish SFT synthesis -> LaTeX equations intact -> JSONL export | PASS |
-| `test_comb_centralized_db_to_sharded_concurrent_pipeline_workers` | F11 + F12 | WAL session manager -> 4 concurrent worker threads -> zero lock errors | PASS |
-| `test_comb_api_server_to_pipeline_trigger_to_status_poll_to_dataset_preview` | F13 + F05 + F06 | POST `/api/pipeline/run` -> Status poll -> Preview exported datasets | PASS |
-| `test_comb_cli_reset_to_clean_state_to_reingestion_cycle` | F15 + F02 + F11 | `run.py reset_pipeline_data` clean wipe -> DB & Qdrant wiped | PASS |
-| `test_comb_multimodal_vision_to_image_optimization_to_visual_export` | F12 + F13 | Raw diagram PNG -> WebP optimization -> Visual dataset builder | PASS |
-| `test_comb_project_registry_to_multi_project_merge_audit` | F13 + F15 | Registry project index -> ProjectMerger schema inspection | PASS |
+| `test_interaction_multicolumn_and_tables` | F01 + F03 | Table markdown and column text do not interleave; reading order preserved | PASS |
+| `test_interaction_tables_and_code_blocks` | F03 + F04 | Native tables and fenced code blocks maintain distinct syntax boundaries | PASS |
+| `test_interaction_header_stripping_and_multipage_range` | F02 + F05 | Running headers & footers cleanly stripped across all pages in 3-page range | PASS |
+| `test_interaction_table_masking_and_drawing_clustering` | F06 + F07 | Table grid drawings masked out while block diagram paths are clustered | PASS |
+| `test_interaction_drawing_clustering_and_boundary_expansion` | F07 + F08 | Diagram detected and candidate box expanded to absorb outer connector labels | PASS |
+| `test_interaction_boundary_expansion_and_aspect_ratio_filters` | F08 + F09 | Wide timing diagram absorbs signal labels without rigid height filtering | PASS |
+| `test_interaction_aspect_ratio_and_deduplication` | F09 + F10 | Full-page border and thin dividers rejected; duplicate boxes deduplicated | PASS |
+| `test_interaction_closed_pipe_during_multipage_ocr` | F05 + F11 | Multipage OCR survives broken pipe; DB connection commits and closes safely | PASS |
+| `test_interaction_table_anti_loop_and_control_token_sanitization` | F12 + F13 | Control tokens stripped while repetitive Markdown table rows are preserved | PASS |
+| `test_interaction_dynamic_failover_and_multimodal_catalog` | F15 + F16 | Multimodal catalog generation succeeds via fallback host when primary offline | PASS |
 
 ---
 
@@ -58,21 +58,23 @@ The comprehensive, requirement-driven, opaque-box E2E test suite covering Requir
 
 | Scenario | Title & Workflow Journey | Verification Criteria | Status |
 |---|---|---|---|
-| **Scenario 1** | Technical Datasheet Ingestion & Sub-Second RAG Query | Ingest 3 RP2040 chapters, word-boundary chunking, vector embedding, query score >= 0.40, source document payload resolution in SQLite | PASS |
-| **Scenario 2** | Bilingual SFT & DPO Synthesis with Gemini Judge Arbitration | Technical article processed to English & Turkish Q&A, JudgeEngine scoring, boilerplate pruned, 100% SFT `"input": ""`, exact DPO triplets | PASS |
-| **Scenario 3** | Zero-Leakage Synthetic Code Dataset & Unsloth Cloud Packaging | Firmware Python/C snippets in `synthetic_code_pairs`, Alpaca SFT format with empty input, Unsloth LoRA script & Colab notebook generation | PASS |
-| **Scenario 4** | Multi-Project Lifecycle Management via FastAPI Dashboard | Health check, project listing, system metrics, SQLite table inspection, Qdrant collection status via REST API endpoints | PASS |
-| **Scenario 5** | Adversarial Boilerplate Defense & Hardware IP Preservation Journey | Colophon and copyright noise filtered, Synopsys DesignWare IP preserved in output, zero static metadata string leakage | PASS |
+| **Scenario 1** | RP2040 Hardware Block Diagrams (Pages 10–15) | Analyzes real vector drawings on pages 11, 12, 15; clusters complex paths (>=20) into diagram crops (`p11_fig_1`, `p12_fig_1`, `p15_fig_1`); renders valid PNG files | PASS |
+| **Scenario 2** | RP2040 DMA Register Tables (Pages 100–125) | Extracts Table 124 on page 113 using PyMuPDF `find_tables()`; preserves 4-column schema `['Bits', 'Description', 'Type', 'Reset']`; retains bitfields and returns table masks | PASS |
+| **Scenario 3** | Historical Failure Elimination (`p119_draw_119_4.png`) | Tests page 119 (Table 146 SNIFF_CTRL); passes table negative masks to visual analyzer; confirms 100% elimination of table-corner false figure crops (0 crops emitted) | PASS |
+| **Scenario 4** | Monospace C Code Listings & Box Rejection (Page 100) | Identifies monospace `RobotoMono` spans on page 100; wraps in fenced ````c ... ```` code blocks; rejects shaded code background box from figure crops (0 false crops) | PASS |
+| **Scenario 5** | Cross-Page Sentence Continuity (Pages 112–115) | Extracts 4-page range 112–115; strips running headers `RP2040 Datasheet` and footers `2.5. DMA 112..115`; verifies body text continuity across page splits | PASS |
 
 ---
 
 ## 4. Verification Evidence
 
-Test Execution Output:
+Verbatim test execution output from `.venv/bin/pytest tests/e2e/`:
+
 ```
 ============================= test session starts ==============================
 platform linux -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
 rootdir: /home/hakan/Git/elektor
+configfile: pytest.ini
 plugins: anyio-4.15.1, asyncio-1.4.0
 asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
 collecting ... collected 175 items                                                            
@@ -81,23 +83,23 @@ tests/e2e/test_tier1_features.py ....................................... [ 22%]
 .........................................                                [ 45%]
 tests/e2e/test_tier2_boundaries.py ..................................... [ 66%]
 ...........................................                              [ 91%]
-tests/e2e/test_tier3_combinations.py ..........                          [ 97%]
-tests/e2e/test_tier4_scenarios.py .....                                  [100%]
+tests/e2e/test_tier3_interactions.py ..........                          [ 97%]
+tests/e2e/test_tier4_workloads.py .....                                  [100%]
 
-======================== 175 passed, 1 warning in 8.85s ========================
+============================= 175 passed in 7.29s ==============================
 ```
 
 ---
 
-## 5. Implementation Observations & Notes
+## 5. Implementation Discoveries & Notes for Workers
 
-1. **Vector Store & Chunking (Feature 1 & 2)**:
-   - Worker M1 has implemented `pipeline/chunking.py` with `SmartTextChunker` and `TextChunk`, and updated `pipeline/vector_store.py` to use `get_embedding_client` and `score_threshold`. All 40 vector store and chunking tests execute and pass cleanly.
-2. **Dataset Builder Schema Compliance (Feature 5, 6, 7)**:
-   - Alpaca SFT exports strictly enforce `"input": ""`.
-   - DPO exports enforce exact triplet `{"prompt", "chosen", "rejected"}` schema without extraneous metadata or input keys.
-   - Boilerplate cleaner preserves legitimate technical IP (e.g. Synopsys DesignWare) while stripping copyright notices.
-3. **Database Session Manager (Feature 11)**:
-   - WAL mode and `PRAGMA busy_timeout=60000;` allow safe multi-threaded concurrency across sharded pipeline workers.
-4. **Link Remediation (Feature 14)**:
-   - Core `README.md` and primary files contain zero absolute `file:///Users/` links. Remaining references in sub-guides are scheduled for Milestone M5 documentation cleanse.
+1. **PyMuPDF Zero-Dimension Line Rects**:
+   - In PyMuPDF, horizontal/vertical lines from `page.get_drawings()` produce Rects with `y0 == y1` or `x0 == x1`, which PyMuPDF marks as `is_empty = True`.
+   - Empty Rects return `False` on `rect.intersects(table_mask)` and fail to expand in `rect1 | rect2`.
+   - **Crucial Solution for Worker M2**: Drawings must be normalized with `fitz.Rect(r.x0, r.y0, max(r.x1, r.x0 + 1.0), max(r.y1, r.y0 + 1.0))` and table masks expanded by 1.5 pt (`m[0]-1.5, m[1]-1.5, m[2]+1.5, m[3]+1.5`) before checking intersections. This completely eliminates the historical table-shard crop `p119_draw_119_4.png`.
+2. **Full-Page Border Rect Filtering**:
+   - Full-page decorative or frame boxes (>85% page area) must be filtered out **before** running connected-component merging (`_merge_rects`). Otherwise, the full-page border intersects diagram elements and merges them into a giant full-page candidate that is subsequently dropped.
+3. **Leading Whitespace Preservation in Monospace Spans**:
+   - When extracting monospace font lines for fenced code blocks, call `.rstrip()` rather than `.strip()` on span text to preserve C code indentation levels.
+4. **Hermetic Test Teardown**:
+   - All tests execute in isolated temporary paths; user databases (`database/rp01.db`) and vector stores (`qdrant_rp01/`) remain completely untouched.

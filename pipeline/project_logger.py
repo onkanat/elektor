@@ -25,6 +25,37 @@ class ProjectWarningErrorFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         return record.levelno >= logging.WARNING
 
+class BrokenPipeShield:
+    """Guards stdout/stderr writes against BrokenPipeError and guarantees teardown."""
+    @staticmethod
+    def safe_print(*args, **kwargs):
+        try:
+            print(*args, **kwargs)
+            if kwargs.get("flush", False):
+                sys.stdout.flush()
+        except (BrokenPipeError, IOError, ValueError):
+            try:
+                sys.stdout = open(os.devnull, "w")
+            except Exception:
+                pass
+
+    @staticmethod
+    def safe_close_db(conn):
+        if conn is None:
+            return
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+safe_print = BrokenPipeShield.safe_print
+safe_close_db = BrokenPipeShield.safe_close_db
+
 class ProjectLogger:
     """
     Project-isolated logger utility that records ONLY WARNING and ERROR entries
@@ -50,7 +81,7 @@ class ProjectLogger:
 
     def info(self, message: str, module: str = "pipeline"):
         # Log info messages or print them gracefully
-        print(f"[{module}] {message}")
+        safe_print(f"[{module}] {message}")
 
     def warning(self, message: str, module: str = "pipeline"):
         self.logger.warning(f"[{module}] {message}")
@@ -96,9 +127,22 @@ def setup_global_project_logging(project_id: Optional[str] = None):
 
     # Global unhandled exception hook
     def custom_excepthook(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, BrokenPipeError):
+            try:
+                sys.stdout = open(os.devnull, "w")
+                sys.stderr = open(os.devnull, "w")
+            except Exception:
+                pass
+            sys.exit(0)
         tb_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-        proj_logger.error(f"Unhandled Exception: {exc_type.__name__}: {exc_value}\n{tb_msg}", module="sys_excepthook")
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        try:
+            proj_logger.error(f"Unhandled Exception: {exc_type.__name__}: {exc_value}\n{tb_msg}", module="sys_excepthook")
+        except Exception:
+            pass
+        try:
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        except (BrokenPipeError, IOError):
+            pass
 
     sys.excepthook = custom_excepthook
     return proj_logger

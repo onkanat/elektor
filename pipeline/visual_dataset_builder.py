@@ -41,9 +41,11 @@ class VisualDatasetBuilder:
         else:
             ports = [11434, 11435, 11436]
 
-        ollama_url = self.config.get("ollama_url", "http://localhost:11434")
-        parsed = urllib.parse.urlparse(ollama_url)
-        host = parsed.hostname or "localhost"
+        from pipeline.llm_client import resolve_active_ollama_endpoint
+        configured_url = self.config.get("ollama_url", "http://192.168.1.26:11434")
+        active_url = resolve_active_ollama_endpoint(configured_url, "http://127.0.0.1:11434")
+        parsed = urllib.parse.urlparse(active_url)
+        host = parsed.hostname or "127.0.0.1"
 
         active_ports = []
         for port in ports:
@@ -111,10 +113,13 @@ class VisualDatasetBuilder:
 
         # Create VisionOCRManager instances bound to worker ports
         import urllib.parse
-        ollama_url = self.config.get("ollama_url", "http://localhost:11434")
-        parsed_url = urllib.parse.urlparse(ollama_url)
+        from pipeline.llm_client import resolve_active_ollama_endpoint
+        from pipeline.vision_ocr import clean_vlm_response
+        configured_url = self.config.get("ollama_url", "http://192.168.1.26:11434")
+        active_url = resolve_active_ollama_endpoint(configured_url, "http://127.0.0.1:11434")
+        parsed_url = urllib.parse.urlparse(active_url)
         scheme = parsed_url.scheme or "http"
-        host = parsed_url.hostname or "localhost"
+        host = parsed_url.hostname or "127.0.0.1"
 
         try:
             vision_managers = []
@@ -129,16 +134,27 @@ class VisualDatasetBuilder:
                     print(f"Notice: Failed to initialize VisionOCRManager for port {p}: {e}")
 
             if not vision_managers:
-                # Fallback to single default manager
-                v_mgr = VisionOCRManager(config_path="config.json")
-                if not v_mgr.check_health():
-                    err_msg = (
-                        f"ERROR: Vision server at '{ollama_url}' is unreachable. "
-                        f"Please ensure Ollama is running and model '{self.vision_model}' is available."
-                    )
-                    print(err_msg)
-                    return {"status": "error", "message": err_msg, "exported_records": 0}
-                vision_managers.append(v_mgr)
+                # Try resolved active_url
+                cfg_active = self.config.copy()
+                cfg_active["ollama_url"] = active_url
+                v_mgr = VisionOCRManager(config_dict=cfg_active)
+                if v_mgr.check_health():
+                    vision_managers.append(v_mgr)
+                else:
+                    # Fallback to localhost if not already tested
+                    cfg_local = self.config.copy()
+                    cfg_local["ollama_url"] = "http://127.0.0.1:11434"
+                    v_mgr_local = VisionOCRManager(config_dict=cfg_local)
+                    if v_mgr_local.check_health():
+                        vision_managers.append(v_mgr_local)
+                        print(f"Notice: Dynamic failover to local vision server at 'http://127.0.0.1:11434'")
+                    else:
+                        err_msg = (
+                            f"ERROR: Vision server at '{configured_url}' and fallback 'http://127.0.0.1:11434' are unreachable. "
+                            f"Please ensure Ollama is running and model '{self.vision_model}' is available."
+                        )
+                        print(err_msg)
+                        return {"status": "error", "message": err_msg, "exported_records": 0}
 
             import concurrent.futures
 
@@ -203,7 +219,8 @@ class VisualDatasetBuilder:
                     print(f"[{idx}/{len(image_mappings)}] [Port {port}] ❌ Exception for {webp_full_path.name}: {e}", flush=True)
                     visual_description = ""
 
-                clean_text = visual_description.strip() if isinstance(visual_description, str) else ""
+                raw_text = visual_description.strip() if isinstance(visual_description, str) else ""
+                clean_text = clean_vlm_response(raw_text)
 
                 is_valid = (
                     clean_text

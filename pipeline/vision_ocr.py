@@ -1,8 +1,130 @@
 import base64
 import json
+import re
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from pipeline.llm_client import get_openai_client
+
+
+def _is_markdown_table_row(s: str) -> bool:
+    if not s or s.startswith("#"):
+        return False
+    if s.startswith("|") and s.endswith("|"):
+        return True
+    # GFM / CommonMark table row without outer pipes (e.g. "Register | Offset | Type | Description")
+    if "|" in s and not s.startswith(("- ", "* ", "> ")):
+        return True
+    return False
+
+
+def filter_repetition_anti_loop(text: str) -> str:
+    """Anti-loop filter preserving Markdown table rows (Feature 12)."""
+    if not text:
+        return ""
+    lines = text.split("\n")
+    cleaned_lines = []
+
+    last_line = None
+    repeats = 0
+    for line in lines:
+        s = line.strip()
+        is_table_row = _is_markdown_table_row(s)
+        if stripped := s:
+            if stripped == last_line and not is_table_row:
+                repeats += 1
+                if repeats < 2:
+                    cleaned_lines.append(line)
+                elif repeats == 2:
+                    cleaned_lines.append("*(Repetitive sequence truncated)*")
+                continue
+            else:
+                repeats = 0
+                last_line = stripped
+                cleaned_lines.append(line)
+        else:
+            cleaned_lines.append(line)
+
+    line_counts = {}
+    for l in cleaned_lines:
+        s = l.strip()
+        if len(s) > 5 and not _is_markdown_table_row(s):
+            line_counts[s] = line_counts.get(s, 0) + 1
+
+    final_lines = []
+    seen = {}
+    for l in cleaned_lines:
+        s = l.strip()
+        is_table_row = _is_markdown_table_row(s)
+        if not is_table_row and len(s) > 5 and line_counts.get(s, 0) > 4:
+            seen[s] = seen.get(s, 0) + 1
+            if seen[s] <= 3:
+                final_lines.append(l)
+            elif seen[s] == 4:
+                final_lines.append(f"*(Further repetitions of '{s}' truncated)*")
+            continue
+        final_lines.append(l)
+
+    return "\n".join(final_lines).strip()
+
+
+def clean_vlm_response(text: str) -> str:
+    """Strips control tokens, unclosed thinking tags, tokenizer artifacts, DeepSeek brackets,
+    and applies table-aware anti-loop filtering (Features 12 & 13).
+    """
+    if not text:
+        return ""
+
+    cleaned = text
+    # Iteratively remove innermost <think>...</think> blocks until none remain (supports nested tags)
+    prev = None
+    while prev != cleaned and "<think>" in cleaned and "</think>" in cleaned:
+        prev = cleaned
+        cleaned = re.sub(r"<think>(?:(?!<think>).)*?</think>", "", cleaned, flags=re.DOTALL)
+    # Remove unclosed thinking tags caused by generation cutoff
+    cleaned = re.sub(r"<think>.*$", "", cleaned, flags=re.DOTALL)
+
+    # DeepSeek Unicode thought tags (closed & unclosed, supports nesting)
+    prev = None
+    while prev != cleaned and "<｜thought｜>" in cleaned and "<｜end of thought｜>" in cleaned:
+        prev = cleaned
+        cleaned = re.sub(r"<｜thought｜>(?:(?!<｜thought｜>).)*?<｜end of thought｜>", "", cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r"<｜thought｜>.*$", "", cleaned, flags=re.DOTALL)
+
+    # DeepSeek fullwidth brackets
+    cleaned = re.sub(r"【.*?】", "", cleaned)
+
+    # Llama 3 header tags block - MUST be stripped BEFORE individual token replacement
+    cleaned = re.sub(r"<\|start_header_id\|>.*?<\|end_header_id\|>", "", cleaned, flags=re.DOTALL)
+
+    tokens_to_strip = [
+        "<|im_start|>user", "<|im_start|>assistant", "<|im_start|>system",
+        "<|im_start|>", "<|im_end|>", "<|endoftext|>", "<|grounding|>",
+        "<|start_header_id|>", "<|end_header_id|>", "<start_of_turn>", "<end_of_turn>",
+        "<|eot_id|>", "<|begin_of_text|>",
+        "<｜begin of sentence｜>", "<｜end of sentence｜>",
+        "<｜User｜>", "<｜Assistant｜>",
+        "<think>", "</think>"
+    ]
+    for tok in tokens_to_strip:
+        cleaned = cleaned.replace(tok, "")
+
+    # Tokenizer file artifacts (e.g. <|file:users.md:1:1|>)
+    cleaned = re.sub(r"<\|file:[^>]+>", "", cleaned)
+
+    # Strip conversational monologue preamble before first header or paragraph
+    cleaned = re.sub(r"^(?:let me|i will|analyzing|looking at).*?(?=\n#|\n\n|\Z)", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+    # Strip pre-header internal monologue if present
+    first_header_match = re.search(r"^#{1,3}\s+", cleaned, flags=re.MULTILINE)
+    if first_header_match and first_header_match.start() > 0:
+        preamble = cleaned[:first_header_match.start()].strip().lower()
+        if any(k in preamble for k in ["let me", "i will", "the user wants", "analyzing", "reconstruct", "looking at", "carefully"]):
+            cleaned = cleaned[first_header_match.start():]
+
+    # Apply table-preserving anti-loop filter
+    cleaned = filter_repetition_anti_loop(cleaned)
+    return cleaned.strip()
+
 
 class VisionOCRManager:
     def __init__(self, config_path="config.json", config_dict=None):
@@ -55,67 +177,7 @@ class VisionOCRManager:
 
     def _clean_vlm_response(self, text: str) -> str:
         """Strips raw ChatML / prompt control tokens, think tags, and deduplicates repetitive loops."""
-        if not text:
-            return ""
-        import re
-        # Remove thinking blocks if present in standard content
-        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-        for token in [
-            "<|im_start|>user", "<|im_start|>assistant", "<|im_start|>", "<|im_end|>",
-            "<|endoftext|>", "<think>", "</think>", "<|grounding|>"
-        ]:
-            text = text.replace(token, "")
-
-        # Remove tokenizer file artifacts (e.g. <|file:users.md:1:1|>)
-        text = re.sub(r"<\|file:[^>]+>", "", text)
-
-        # Strip pre-header internal monologue if present
-        first_header_match = re.search(r"^#{1,3}\s+", text, flags=re.MULTILINE)
-        if first_header_match and first_header_match.start() > 0:
-            preamble = text[:first_header_match.start()].lower()
-            if any(k in preamble for k in ["let me", "i will", "the user wants", "analyzing", "reconstruct", "looking at", "carefully"]):
-                text = text[first_header_match.start():]
-
-        # Anti-loop filter: collapse consecutive identical lines
-        lines = text.split("\n")
-        cleaned_lines = []
-        last_line = None
-        consecutive_repeats = 0
-        for line in lines:
-            stripped = line.strip()
-            if stripped and stripped == last_line:
-                consecutive_repeats += 1
-                if consecutive_repeats < 2:
-                    cleaned_lines.append(line)
-                elif consecutive_repeats == 2:
-                    cleaned_lines.append("*(Repetitive sequence truncated)*")
-                continue
-            else:
-                consecutive_repeats = 0
-                last_line = stripped if stripped else None
-                cleaned_lines.append(line)
-
-        # Anti-loop filter: collapse repetitive global lines appearing more than 6 times
-        line_counts = {}
-        for l in cleaned_lines:
-            s = l.strip()
-            if len(s) > 5:
-                line_counts[s] = line_counts.get(s, 0) + 1
-
-        final_lines = []
-        seen_count = {}
-        for l in cleaned_lines:
-            s = l.strip()
-            if len(s) > 5 and line_counts.get(s, 0) > 4:
-                seen_count[s] = seen_count.get(s, 0) + 1
-                if seen_count[s] <= 3:
-                    final_lines.append(l)
-                elif seen_count[s] == 4:
-                    final_lines.append(f"*(Further repetitions of '{s}' truncated)*")
-                continue
-            final_lines.append(l)
-
-        return "\n".join(final_lines).strip()
+        return clean_vlm_response(text)
 
     def describe_image(self, image_path: str, caption_context: str = "") -> str:
         """Uses a vision-language model (VLM) via OpenAI API or native Ollama API
@@ -357,11 +419,14 @@ class VisionOCRManager:
                     max_tokens=4096,
                     temperature=0.1
                 )
-                return response.choices[0].message.content.strip()
+                raw_content = response.choices[0].message.content or ""
+                return self._clean_vlm_response(raw_content.strip())
             except Exception:
                 import urllib.request
-                ollama_url = self.config.get("ollama_url", "http://localhost:11434").rstrip("/").removesuffix("/v1")
-                endpoint = f"{ollama_url}/api/chat"
+                import json
+                primary_url = self.config.get("ollama_url", "http://127.0.0.1:11434").rstrip("/").removesuffix("/v1")
+                fallback_url = "http://127.0.0.1:11434"
+
                 payload = {
                     "model": self.model_vision,
                     "messages": [
@@ -373,14 +438,29 @@ class VisionOCRManager:
                     ],
                     "stream": False
                 }
-                req = urllib.request.Request(
-                    endpoint,
-                    data=json.dumps(payload).encode("utf-8"),
-                    headers={"Content-Type": "application/json"}
-                )
-                with urllib.request.urlopen(req, timeout=90) as resp:
-                    res_data = json.loads(resp.read().decode("utf-8"))
-                    return res_data.get("message", {}).get("content", "").strip()
+                data_bytes = json.dumps(payload).encode("utf-8")
+
+                def _send(base: str) -> str:
+                    clean_b = base.rstrip("/").removesuffix("/v1")
+                    endpoint = f"{clean_b}/api/chat"
+                    req = urllib.request.Request(
+                        endpoint,
+                        data=data_bytes,
+                        headers={"Content-Type": "application/json"}
+                    )
+                    with urllib.request.urlopen(req, timeout=30) as resp:
+                        res_data = json.loads(resp.read().decode("utf-8"))
+                        return res_data.get("message", {}).get("content", "") or ""
+
+                try:
+                    raw_content = _send(primary_url)
+                except Exception:
+                    if primary_url != fallback_url:
+                        raw_content = _send(fallback_url)
+                    else:
+                        raise
+                return self._clean_vlm_response(raw_content.strip())
         except Exception as e:
-            print(f"Warning: DeepSeek-OCR document to markdown conversion error: {e}")
+            from pipeline.project_logger import safe_print
+            safe_print(f"Warning: DeepSeek-OCR document to markdown conversion error: {e}")
             return ""
