@@ -1,0 +1,13 @@
+# Hermes Agent Cron Blueprint for Nightly Elektor Dataset Curation
+name: elektor-nightly-dataset-audit
+schedule: "0 3 * * *"
+deliver: "local"
+skills:
+  - elektor-dataset-curation
+  - elektor-dataset-pipeline
+prompt: |
+  Execute the nightly Elektor dataset maintenance workflow:
+  1. Run `elektor_hermes_cli.py health` to verify SQLite (`db_path`) and Ollama status.
+  2. Run `elektor_hermes_cli.py run-stage clean_boilerplate` to strip any copyright/license noise.
+  3. Run `elektor_hermes_cli.py run-stage trigger --mode strict --threshold 7.0 --limit 50` to audit and score recent records.
+  4. Run `elektor_hermes_cli.py run-stage export` and summarize the final record counts in `exports/<project_id>/sft_dataset.jsonl` and `dpo_dataset.jsonl`.

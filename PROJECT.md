@@ -64,6 +64,7 @@ Every feature from the Survey phase appears here with its assigned milestone:
 | 15 | Dynamic Endpoint Failover | Automatically failover from LAN endpoint `http://192.168.1.26:11434` to local `http://127.0.0.1:11434` when LAN host is offline or timed out | M3 | Survey R3 |
 | 16 | Schema-Compliant Multimodal Catalog Generation | Ensure `multimodal_catalog.md` and `multimodal_visual_dataset.jsonl` satisfy all schema invariants with zero control tokens or loop warnings | M3 | Survey R3 |
 | 17 | 4-Tier E2E Test Suite & Adversarial Hardening | Comprehensive opaque-box test suite (Tiers 1-4) covering all 16 features, plus Tier 5 adversarial stress testing and Victory Audit | M-FINAL | Acceptance Criteria |
+| 18 | Nous Research Hermes Agent Skills & Stdio MCP Server | Expose the entire Elektor dataset, OCR/layout, RAG, and curation pipeline to Hermes agents via `hermes-agent/skills/data/*`, `elektor_hermes_cli.py`, and `elektor_mcp_server.py` | M4 | Hermes Agent Integration |
 
 ---
 
@@ -75,6 +76,7 @@ Every feature from the Survey phase appears here with its assigned milestone:
 | M2 | Complete, Unfragmented Visual & Diagram Cropping | Features 6, 7, 8, 9, 10 (`pipeline/layout_analyzer.py`, `tests/test_visual_cropper.py`) | M1 | DONE |
 | M3 | OCR / VLM Fidelity, Catalog Quality & Resilience | Features 11, 12, 13, 14, 15, 16 (`pipeline/vision_ocr.py`, `visual_dataset_builder.py`, `llm_client.py`) | M1, M2 | DONE |
 | M-FINAL | 100% E2E Test Pass & Tier 5 Adversarial Coverage Hardening | Feature 17 (Pass all E2E Tiers 1-4, Phase 2 Tier 5 Adversarial Hardening, Victory Audit) | E2E, M1, M2, M3 | DONE |
+| M4 | Nous Research Hermes Agent Skills & MCP Server | Feature 18 (`hermes-agent/`, `tests/test_hermes_agent_skills.py`, 405 passing tests) | M-FINAL | DONE |
 
 ---
 
@@ -122,6 +124,15 @@ class ResilientOllamaClient:
     def generate(self, model: str, prompt: str, images: list[str] = None) -> str: ...
 ```
 
+### `hermes-agent/scripts/` ↔ `pipeline/mcp_tools.py`
+```python
+# Stdio JSON-RPC 2.0 MCP tools exposed by elektor_mcp_server.py:
+search_vector_rag(query: str, top_k: int = 4) -> dict
+query_sqlite_knowledge(query: str, limit: int = 3) -> dict
+inject_sft_dpo_context(query: str, limit: int = 3) -> dict
+evaluate_knowledge_gap(base_response: str, enriched_response: str, context_text: str = "") -> dict
+```
+
 ---
 
 ## Code Layout
@@ -130,7 +141,11 @@ class ResilientOllamaClient:
 - `pipeline/vision_ocr.py`: VLM response sanitization, table-aware repetition filtering, Tesseract preprocessing and invocation.
 - `pipeline/visual_dataset_builder.py`: Multimodal catalog & dataset generation, VRAM lifecycle management.
 - `pipeline/llm_client.py`: Resilient HTTP client with automatic endpoint failover (LAN -> localhost).
+- `pipeline/mcp_tools.py`: Native Qdrant RAG, SQLite, SFT/DPO context, and knowledge gap evaluation functions.
+- `hermes-agent/`: Nous Research Hermes Agent skill definitions (`skills/data/*`), CLI tool bridge (`scripts/elektor_hermes_cli.py`), Stdio MCP server (`scripts/elektor_mcp_server.py`), and installer (`scripts/install_skills.sh`).
 - `tests/test_document_layout.py`: Unit and layout tests for M1.
 - `tests/test_visual_cropper.py`: Unit and geometry tests for M2.
 - `tests/test_ocr_resilience.py`: Unit and resilience tests for M3.
-- `tests/e2e/`: Opaque-box 4-tier E2E test suite.
+- `tests/test_hermes_agent_skills.py`: Automated validation of Hermes Agent skills, CLI subcommands, and MCP server.
+- `tests/e2e/`: Opaque-box 5-tier E2E test suite.
+

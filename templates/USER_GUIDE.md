@@ -190,4 +190,19 @@ PYTHONPATH=. uv run python run.py --config projects_myproject.json
 | `401 Unauthorized` (Ollama Cloud) | API anahtarı eksik veya 32 karakterde kırpılmış. | [ollama.com/settings/keys](https://ollama.com/settings/keys) üzerinden 57 karakterlik tam anahtarı kopyalayıp `export OLLAMA_API_KEY="..."` yapın. |
 | `GEMINI_API_KEY not configured` | Gemini API anahtarı tanımlanmamış. | [Google AI Studio](https://aistudio.google.com/app/apikey) üzerinden anahtar alıp `export GEMINI_API_KEY="..."` tanımlayın. |
 | Model Yanıtında Boş Çeviri | Düşünce (Reasoning) modelinin token limitine ulaşması. | `analyzer_max_tokens` değerini `4096` veya `8192` olarak artırın. |
-| `Connection error` (Local Ollama) | Yerel Ollama sunucusu kapalı. | Terminalde `ollama serve` komutunu çalıştırın. |
+| `Connection error` (Local/LAN Ollama) | Uzak LAN Ollama sunucusu kapalı. | `ResilientOllamaClient` otomatik olarak `http://127.0.0.1:11434` adresine failover yapar; yerel makinede `ollama serve` çalıştığından emin olun. |
+
+---
+
+## 6. OCR, Sayfa Düzeni ve Nous Research Hermes Agent Entegrasyonu
+
+Şablonlarla çalıştırılan tüm boru hattı aşamaları; çok sütunlu okuma sırası (`column gutter partitioning`), PyMuPDF `find_tables()` negatif tablo maskelemesi (`table_masks`), bütünlüklü devre şeması kırpma (`internal_drawings >= 20`) ve tablo-duyarlı VLM anti-loop korumalarını otomatik olarak uygular.
+
+Ayrıca bu şablonları **Nous Research Hermes Agent** (`akillibidik`, `aikonsol`, Hermes CLI ve MCP) üzerinden yönetmek için [`../hermes-agent/README.md`](../hermes-agent/README.md) dizinindeki araçları kullanabilirsiniz:
+
+```bash
+# Hermes Agent skill doğrulaması ve sağlık kontrolü:
+PYTHONPATH=. .venv/bin/python hermes-agent/scripts/elektor_hermes_cli.py validate-skills
+PYTHONPATH=. .venv/bin/python hermes-agent/scripts/elektor_hermes_cli.py health
+```
+

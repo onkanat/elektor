@@ -1,0 +1,48 @@
+{
+  "version": "1.0.0",
+  "repository": "onkanat/elektor",
+  "skills": [
+    {
+      "name": "elektor-dataset-pipeline",
+      "description": "Orchestrate Elektor PDF-to-SFT/DPO dataset pipeline.",
+      "files": [
+        "SKILL.md",
+        "references/cli-and-api.md",
+        "references/config-schema.md",
+        "templates/project_config.json",
+        "scripts/elektor_hermes_cli.py"
+      ]
+    },
+    {
+      "name": "elektor-ocr-layout",
+      "description": "Extract PDF layouts, OCR text, and schematic crops.",
+      "files": [
+        "SKILL.md",
+        "references/layout-and-cropping.md",
+        "references/vlm-ocr-tuning.md",
+        "scripts/elektor_hermes_cli.py"
+      ]
+    },
+    {
+      "name": "elektor-rag-memory",
+      "description": "Query Elektor Qdrant vectors and SQLite knowledge.",
+      "files": [
+        "SKILL.md",
+        "references/qdrant-and-sqlite.md",
+        "references/mcp-integration.md",
+        "scripts/elektor_hermes_cli.py"
+      ]
+    },
+    {
+      "name": "elektor-dataset-curation",
+      "description": "Curate, judge, and export Turkish SFT/DPO datasets.",
+      "files": [
+        "SKILL.md",
+        "references/sft-dpo-schemas.md",
+        "references/judge-and-autonomous-cron.md",
+        "templates/hermes_cron_blueprint.yaml",
+        "scripts/elektor_hermes_cli.py"
+      ]
+    }
+  ]
+}

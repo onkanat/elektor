@@ -61,3 +61,8 @@ flowchart TD
 | **FAZ-17** | **DeepSeek-OCR Multimodal Markdown Kataloğu & Zengin Görsel Raporlama** | **Tamamlandı ✅** | **Yüksek** |
 | **FAZ-18** | **Managed Agents Sandbox Hooks (`pre_tool_execution`, `post_tool_execution`) & Zamanlanmış Tetikleyiciler (Triggers)** | **Tamamlandı ✅** | **Yüksek** |
 | **FAZ-19** | **Hugging Face Hub Otomasyonu, Unsloth / Axolotl Cloud Kit & Google Vertex AI Gemini Fine-Tuning Reçetesi** | **Tamamlandı ✅** | **Orta** |
+| **FAZ-20** | **Bulut Şablonları (`ollama_cloud.json`, `gemini.json`), Çift Dilli İzolasyon & Universal Dataset Orchestrator** | **Tamamlandı ✅** | **Yüksek** |
+| **FAZ-21** | **Unsloth GPU Temiz Alpaca (`"input": ""`) / DPO İhracı & Hukuki Künye (`clean_boilerplate`) Filtresi** | **Tamamlandı ✅** | **Yüksek** |
+| **FAZ-22** | **OCR, PDF Sayfa Düzeni (Column Gutter, `find_tables`), Negatif Tablo Maskeli Şema Kırpma & VLM Anti-Loop Sağlamlaştırması** | **Tamamlandı ✅** | **Kritik** |
+| **FAZ-23** | **Nous Research Hermes Agent Yetenekleri (`hermes-agent/skills/data/*`), Birleşik CLI Köprüsü & Stdio JSON-RPC 2.0 MCP Sunucusu** | **Tamamlandı ✅** | **Yüksek** |
+

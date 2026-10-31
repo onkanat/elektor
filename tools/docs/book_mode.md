@@ -19,25 +19,25 @@ flowchart TD
 
 ### 📅 Ne Zaman ve Hangi Aşamada İşleniyor?
 
-#### 1. Kitap Bölümleme ve OCR Çıkarma Evresi (`python run.py extract`)
+#### 1. Kitap Bölümleme, Sayfa Düzeni ve Bütünlüklü Şema Kırpma Evresi (`python run.py extract`)
 - `input_mode: "book"` modunda [`pipeline/extractor.py`](../../pipeline/extractor.py) altındaki `ArchiveExtractor` tekli veya çoklu PDF kitaplarını işler.
-- İçindekiler Tablosu (TOC) taranarak veya akıllı sayfa sınırları algılanarak kitap ana bölümlere (chapters) ayrıştırılır ve SQLite veritabanındaki [`articles`](../../pipeline/extractor.py) tablosuna her bölüm bağımsız bir kayıt olarak kaydedilir.
-- Sayfalardaki şema, devre şeması ve blok diyagramlar PyMuPDF ile kırpılıp WebP/PNG biçiminde `downloads/extracted_images/` klasörüne aktarılır.
+- İçindekiler Tablosu (TOC) taranarak veya akıllı sayfa sınırları algılanarak kitap ana bölümlere (chapters) ayrıştırılır; üst/alt bilgi gürültüsü ($y \le 50$, $y \ge H - 50$) temizlenir, çok sütunlu okuma sırası (`column gutter partitioning`) korunur ve `page.find_tables()` ile register/parametre tabloları doğrudan Markdown tablosuna dönüştürülür.
+- [`pipeline/layout_analyzer.py`](../../pipeline/layout_analyzer.py), tespit edilen tablo kutularını negatif maske (`table_masks`) olarak dışlar; `internal_drawings >= 20` filtresi, ok ucu/pin etiketi sınır genişletmesi ve IoU tekilleştirme ile devre şemalarını ve blok diyagramları parçalanmadan `downloads/extracted_images/` klasörüne kırpar.
 
 #### 2. Derin Teknik Zenginleştirme Evresi (`python run.py enrich`)
 - [`pipeline/analyzer.py`](../../pipeline/analyzer.py) içindeki `ArchiveAnalyzer` veritabanındaki her bir kitap bölümünü işler.
 - Seçilen Persona (ör. `Professional Systems Engineer`) ve Konu (`Technical Documentation & Architecture`) çerçevesinde:
-  - Bölüm Başına Derinlemesine SFT Soru-Cevap Çiftleri
+  - Bölüm Başına Derinlemesine SFT Soru-Cevap Çiftleri (`"input": ""` sızıntısız Alpaca şeması)
   - DPO (Direct Preference Optimization) Doğrulama Verileri
   - Çok Turlu (Multi-turn) Kod & Şema Tartışma Diyalogları üretilir.
 
-#### 3. Multimodal Vizyon (FAZ-10 & FAZ-11) Evresi (`python run.py export_visual`)
-- Kırpılmış çizim ve şemalar DeepSeek-OCR (`deepseek-ocr:3b-bf16`) vizyon modeli üzerinden `<image>\nParse the figure.` resmi istemiyle analiz edilir.
-- Çıktılar LLaVA ve Qwen2-VL formatına dönüştürülerek `exports/<project_id>/multimodal_visual_dataset.jsonl` dosyasına yazılır.
+#### 3. Multimodal Vizyon (FAZ-10, FAZ-11 & FAZ-22) Evresi (`python run.py export_visual`)
+- Kırpılmış çizim ve şemalar DeepSeek-OCR (`deepseek-ocr:3b-bf16`) vizyon modeli ve Tesseract (`--dpi 300 --psm 6`) üzerinden analiz edilir. Tablo-duyarlı anti-loop filtresi ve kontrol token temizliği (`<|grounding|>`, `<think>`) uygulanır.
+- Çıktılar LLaVA ve Qwen2-VL formatına dönüştürülerek `exports/<project_id>/multimodal_visual_dataset.jsonl` ve `multimodal_catalog.md` dosyalarına yazılır.
 
-#### 4. Vektörleştirme ve İhraç Evresi (`python run.py embed` & `python run.py export`)
+#### 4. Vektörleştirme, İhraç ve Hermes Agent / MCP Erişimi (`python run.py embed` & `python run.py export`)
 - Kitap bölümleri vektörleştirilerek Qdrant veri tabanına yüklenir.
-- Sonuçlar `exports/<project_id>/` dizininde yayınlanmaya hazır JSONL ve Parquet formatlarında ihraç edilir.
+- Sonuçlar `exports/<project_id>/` dizininde yayınlanmaya hazır JSONL ve Parquet formatlarında ihraç edilir ve [`hermes-agent/`](../../hermes-agent/README.md) altındaki `elektor-ocr-layout` / `elektor-rag-memory` yetenekleri ve Stdio MCP sunucusu (`elektor_mcp_server.py`) üzerinden Hermes ajanlarına açılır.
 
 ---
 

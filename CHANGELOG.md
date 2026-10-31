@@ -5,6 +5,24 @@ All notable changes to the **Elektor Universal PDF & Rendergit Code Dataset Gene
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [22.0.0] - 2026-10-31
+
+### Added
+- **Nous Research Hermes Agent Skills Package & Stdio MCP Server (`hermes-agent/`)**:
+  - Created 4 official Hermes Agent skills under `hermes-agent/skills/data/` (`elektor-dataset-pipeline`, `elektor-ocr-layout`, `elektor-rag-memory`, `elektor-dataset-curation`) with compliant byte-0 YAML frontmatter, `<= 60` character descriptions, Progressive Disclosure Level 0/1/2 `references/` & `templates/`, `${HERMES_SKILL_DIR}` wrappers, and `[[as_document]]` lossless schematic gateway directives.
+  - Added unified JSON/CLI tool bridge (`hermes-agent/scripts/elektor_hermes_cli.py`) supporting `health`, `projects`, `rag-search`, `sqlite-search`, `dataset-context`, `inspect-crops`, `run-stage` (with `--shards` / `--workers` alias and `--shard-ports` multi-GPU routing), and `validate-skills`.
+  - Added zero-dependency Stdio JSON-RPC 2.0 MCP server (`hermes-agent/scripts/elektor_mcp_server.py`) exposing `search_vector_rag`, `query_sqlite_knowledge`, `inject_sft_dpo_context`, and `evaluate_knowledge_gap` to Hermes (`hermes mcp`) and MCP hosts.
+  - Added `hermes-agent/scripts/install_skills.sh` installer (`--check`, `--link`, `--copy`, `--uninstall`) and `.well-known/skills/index.json` discovery manifest.
+  - Added automated test suite (`tests/test_hermes_agent_skills.py`) validating all Hermes Agent invariants and JSON-RPC 2.0 MCP handshakes.
+- **OCR, PDF Layout Reconstruction & Unfragmented Visual Cropping Overhaul (`pipeline/extractor.py`, `pipeline/layout_analyzer.py`, `pipeline/vision_ocr.py`, `pipeline/llm_client.py`)**:
+  - **Layout-Aware Reading Order & Margin Filtering**: Added column-gutter projection partitioning for multi-column PDFs, repeating running header/footer stripping ($y \le 50\text{ pt}$, $y \ge \text{height} - 50\text{ pt}$), and monospace font span (`flags & 8`) fenced code block preservation.
+  - **Native PyMuPDF Table Extraction & Negative Masking**: Integrated `page.find_tables()` to convert datasheet register/pinout tables into GitHub-Flavored Markdown and pass `table_masks` exclusion bounding boxes to `DocumentLayoutAnalyzer`, eliminating false-positive table-cell corner crops (`p119_draw_119_4.png`).
+  - **Complete Figure Cropping & Deduplication**: Enforced internal drawing path count checks (`internal_drawings >= 20`) to reject shaded code boxes, adaptive boundary expansion for outer arrowheads and signal labels, and IoU-based figure deduplication.
+  - **VLM Anti-Loop Sanitizer, Tesseract Tuning & Failover**: Added table-syntax preserving repetition filter (`|---|---|`), `<|grounding|>` / unclosed `<think>` token stripping, grayscale/binarized `--dpi 300 --psm 6` Tesseract preprocessing, automatic LAN-to-localhost (`127.0.0.1:11434`) Ollama failover (`ResilientOllamaClient`), and `BrokenPipeError` teardown guards.
+  - Expanded test suite to **405 passing tests** across unit, integration, and 5-tier adversarial E2E suites (`tests/test_document_layout.py`, `tests/test_visual_cropper.py`, `tests/test_ocr_resilience.py`, `tests/e2e/`).
+
+---
+
 ## [21.0.0] - 2026-09-24
 
 ### Added

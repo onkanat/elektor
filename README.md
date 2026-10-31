@@ -30,6 +30,9 @@ Originally built for the Elektor Magazine Archive (1974–2025), the pipeline ha
 | **FAZ 18** | **Managed Agents Environment Hooks & Scheduled Triggers**: `.agents/hooks.json` altında Pre-tool Security Gate (`rm -rf /` ve bütçe engeli), Post-tool Dataset Linter (Python AST, LaTeX kontrolü) ve otonom `run.py trigger` zamanlayıcısı. | ✅ **Tamamlandı** |
 | **FAZ 19** | **Hugging Face Hub & Google Vertex AI Gemini Tuning**: Gelişmiş dataset kartları, Unsloth/Axolotl kitleri ve Google Vertex AI Supervised Fine-Tuning reçetesi (`vertex_ai_tuning.json`). | ✅ **Tamamlandı** |
 | **FAZ 20** | **Bulut Şablonları & Çift Dilli Veri İzolasyonu (Ollama Cloud, Gemini & Heuristic Fallback)**: Üretime hazır `templates/ollama_cloud.json` (`minimax-m3`, `gpt-oss:120b`) ve `templates/gemini.json` (`gemini-3.6-flash`) şablonları; dinamik ortam değişkeni `${VAR_NAME}` çözümleme; İngilizce ve Türkçe JSONL veri setlerinin mutlak izolasyonu; `tools/` altında 3 yeni tanı aracı (`test_gemini_config.py`, `test_ollama_cloud.py`, `test_langextract.py`) ve LangExtract çoklu sağlayıcı sezgisel kurtarma motoru. | ✅ **Tamamlandı** |
+| **FAZ 21** | **Unsloth GPU Fine-Tuning Temiz Alpaca/DPO İhracı & Hukuki Künye Filtresi**: `"input": ""` sıfır şablon sızıntısı (`clean_alpaca_input`), saf `prompt/chosen/rejected` DPO şeması ve Colophon/CC lisansı/telif hakkı gürültüsünü temizleyen `clean_boilerplate` motoru. | ✅ **Tamamlandı** |
+| **FAZ 22** | **OCR, PDF Sayfa Düzeni & Bütünlüklü Görsel Şema Kırpma Sağlamlaştırması**: Çok sütunlu okuma sırası (`column gutter partitioning`), üst/alt bilgi filtreleme, PyMuPDF `find_tables()` tabanlı Markdown tablo çıkarımı ve negatif tablo maskeleme (`table_masks` ile tablo köşelerinin şema olarak kırpılmasının engellenmesi), çizim yolu kümeleme (`internal_drawings >= 20`), ok ucu/etiket sınır genişletme, IoU tekilleştirme, tablo-duyarlı anti-loop VLM filtresi, kontrol token temizliği (`<|grounding|>`, `<think>`), LAN->localhost otomatik Ollama failover ve `BrokenPipeError` kalkanı. | ✅ **Tamamlandı** |
+| **FAZ 23** | **Nous Research Hermes Agent Yetenekleri (`hermes-agent/`) & Stdio MCP Sunucusu**: Resmi Hermes Agent standartlarına (`<= 60` kr. açıklama, Progressive Disclosure Level 0/1/2, `${HERMES_SKILL_DIR}`, `[[as_document]]`) uyumlu 4 modüler veri yeteneği (`elektor-dataset-pipeline`, `elektor-ocr-layout`, `elektor-rag-memory`, `elektor-dataset-curation`), birleşik JSON/CLI köprüsü (`elektor_hermes_cli.py`), sıfır bağımlılıklı Stdio JSON-RPC 2.0 MCP sunucusu (`elektor_mcp_server.py`) ve otomatik kurulum betiği (`install_skills.sh`). | ✅ **Tamamlandı** |
 
 ---
 
@@ -92,13 +95,23 @@ elektor/
   ├── USER_GUIDE.md             # End-to-end platform user guide with Web UI walkthroughs
   ├── ROADMAP.md                # Multi-phase development roadmap
   ├── .agents/                  # Gemini Managed Agents Environment Hooks & Scripts
+  ├── hermes-agent/             # Nous Research Hermes Agent skills, CLI bridge & Stdio MCP server
+  │    ├── README.md            # Hermes Agent overview & quickstart
+  │    ├── INSTALLATION.md      # Setup via external_dirs, symlinks, and MCP config
+  │    ├── ARCHITECTURE.md      # Progressive Disclosure & toolset architecture mapping
+  │    ├── .well-known/skills/  # Skill discovery manifest (index.json)
+  │    ├── scripts/             # elektor_hermes_cli.py, elektor_mcp_server.py, install_skills.sh
+  │    └── skills/data/         # 4 modular Hermes skills (pipeline, ocr-layout, rag-memory, curation)
   ├── pipeline/
   │    ├── __init__.py
   │    ├── gemini_client.py     # Resilient Gemini API client with TokenBudgetManager
   │    ├── judge_engine.py      # LLM-as-a-Judge & Editor-in-Chief arbitration engine
   │    ├── agent_hooks.py       # Pre/Post Environment Hooks manager & runner
   │    ├── scheduled_triggers.py# Autonomous scheduled trigger & background audit cron
-  │    ├── extractor.py         # PDF text extraction & SQLite metadata indexing
+  │    ├── extractor.py         # Layout-aware PDF text/table extraction & SQLite indexing
+  │    ├── layout_analyzer.py   # Negative table masking, drawing path clustering & figure cropping
+  │    ├── vision_ocr.py        # Table-aware anti-loop VLM sanitizer & Tesseract OCR engine
+  │    ├── mcp_tools.py         # Native Qdrant RAG, SQLite, and SFT/DPO context MCP tools
   │    ├── code_extractor.py    # Rendergit repo flattener & AST code parser
   │    ├── kiwix_extractor.py   # Kiwix OpenZIM (.zim) catalog archive extractor
   │    ├── langextract_engine.py# Google LangExtract engine with dynamic few-shot generator, multi-provider & heuristic fallback
@@ -113,7 +126,7 @@ elektor/
   ├── database/                 # Dedicated SQLite database directory (*.db)
   ├── exports/                  # Project-isolated dataset export directory
   ├── frontend/                 # React + Vite Web UI with Hata Ayıklama Konsolu & LangExtract panel
-  ├── tests/                    # Pytest test suite (61 tests)
+  ├── tests/                    # Pytest test suite (405 passing, 3 skipped across unit & 5-tier E2E)
   └── README.md
 ```
 
@@ -245,11 +258,33 @@ python run.py clean_boilerplate
 curl -X POST http://127.0.0.1:3456/api/clean-boilerplate
 ```
 
-### 8. Multimodal Technical Catalog & Visual Dataset Builder (`export_visual`)
-Uses a two-stage visual OCR pipeline (`deepseek-ocr:3b-bf16` + `ornith-1.5:9b`) combined with PyMuPDF layout context enrichment to extract and synthesize hardware diagrams, pinout tables, and system architectures:
+### 8. Multimodal Technical Catalog & Hardened OCR/Layout Pipeline (`export_visual`)
+Uses a hardened layout-aware PDF extractor (`pipeline/extractor.py`), negative table-masked figure cropper (`pipeline/layout_analyzer.py`), and two-stage visual OCR synthesizer (`pipeline/vision_ocr.py` + `pipeline/visual_dataset_builder.py`):
+- **Column-Gutter Reading Order & Margin Filtering**: Strips repeating running headers/footers ($y \le 50$, $y \ge H - 50$) and partitions two-column layouts without text interleaving.
+- **Native PyMuPDF Table Reconstruction & Negative Masking**: Extracts datasheet register/pinout tables via `page.find_tables()` into GitHub-Flavored Markdown and passes their bounding boxes as negative masks (`table_masks`) so table grid corners are never falsely cropped as figures.
+- **Unfragmented Figure Cropping**: Enforces drawing path clustering (`internal_drawings >= 20` to reject shaded code boxes), expands bounds for outer arrowheads/signal labels, and deduplicates overlapping boxes via IoU.
+- **Table-Aware Anti-Loop VLM Filter & Failover**: Strips control tokens (`<|grounding|>`, unclosed `<think>`), preserves valid Markdown table syntax (`|---|---|`), pre-processes scanned pages for Tesseract (`--dpi 300 --psm 6`), and automatically fails over from offline LAN Ollama hosts to `http://127.0.0.1:11434`.
 ```bash
 # Export WebP visual crops, multimodal_visual_dataset.jsonl, and multimodal_catalog.md
 python run.py export_visual
+```
+
+### 9. Nous Research Hermes Agent Skills & Stdio MCP Server (`hermes-agent/`)
+Exposes the entire Elektor dataset pipeline to [Nous Research Hermes Agent](https://hermes-agent.nousresearch.com/docs) (`akillibidik`, `aikonsol`, Hermes CLI, Gateway Bot, and Kanban workflows) via 4 compliant skills (`skills/data/`), a unified CLI bridge (`elektor_hermes_cli.py`), and a zero-dependency Stdio JSON-RPC 2.0 MCP server (`elektor_mcp_server.py`):
+- **4 Hermes Skills**: `elektor-dataset-pipeline`, `elektor-ocr-layout` (with `[[as_document]]` lossless diagram delivery), `elektor-rag-memory`, and `elektor-dataset-curation`.
+- **Stdio MCP Tools**: `search_vector_rag`, `query_sqlite_knowledge`, `inject_sft_dpo_context`, `evaluate_knowledge_gap`.
+```bash
+# Validate all Hermes Agent SKILL.md files and check installation status
+.venv/bin/python hermes-agent/scripts/elektor_hermes_cli.py validate-skills
+hermes-agent/scripts/install_skills.sh --check
+
+# Symlink skills into ~/.hermes/skills/data/
+hermes-agent/scripts/install_skills.sh --link
+
+# Run health, RAG search, or crop inspection via the Hermes CLI bridge
+.venv/bin/python hermes-agent/scripts/elektor_hermes_cli.py health
+.venv/bin/python hermes-agent/scripts/elektor_hermes_cli.py rag-search --query "RP2040 PIO state machine" --limit 5
+.venv/bin/python hermes-agent/scripts/elektor_hermes_cli.py inspect-crops --limit 5 --as-document
 ```
 
 ---
@@ -293,7 +328,7 @@ Install the test dependencies (**not** included in `requirements.txt`):
 ```bash
 pip install -r requirements-dev.txt
 ```
-Run the complete test suite across all modules (292 passing, 3 skipped):
+Run the complete test suite across all modules (405 passing, 3 skipped):
 ```bash
 pytest tests/
 ```

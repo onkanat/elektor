@@ -24,6 +24,9 @@ Bu kılavuz, **Elektor Universal PDF & Rendergit Code Dataset Generator Platform
 16. [🎨 Web UI LLM Hakem Paneli (`SectionJudge.tsx`) & Canlı Katalog Önizleme](#16--web-ui-llm-hakem-paneli-sectionjudgetsx--canlı-katalog-önizleme)
 17. [🧬 Çapalanmış Bilgi Çıkarımı (`langextract_grounded_dataset.jsonl`) Pratik Kullanımı](#17--çapalanmış-bilgi-çıkarımı-langextract_grounded_datasetjsonl-pratik-kullanımı)
 18. [☁️ Bulut Şablonları, Tanı Testleri & Çift Dilli İzolasyon (Faz 20)](#18-️-bulut-şablonları-tanı-testleri--çift-dilli-izolasyon-faz-20)
+19. [🚀 Universal Dataset Orchestrator & Davranış Distilasyonu Motoru (Faz 21)](#19--universal-dataset-orchestrator--davranış-distilasyonu-motoru-faz-21)
+20. [🔬 OCR, PDF Sayfa Düzeni & Bütünlüklü Şema Kırpma Sağlamlaştırması (Faz 22)](#20--ocr-pdf-sayfa-düzeni--bütünlüklü-şema-kırpma-sağlamlaştırması-faz-22)
+21. [🤖 Nous Research Hermes Agent Yetenekleri (`hermes-agent/`) & Stdio MCP Sunucusu (Faz 23)](#21--nous-research-hermes-agent-yetenekleri-hermes-agent--stdio-mcp-sunucusu-faz-23)
 
 ---
 
@@ -605,7 +608,103 @@ PYTHONPATH=. python tools/orchestrator.py compile-datasets --project kitap_proje
 
 ---
 
-*Rehber Son Güncelleme: 2026-09-04 | Elektor Universal Pipeline v20.0*
+## 20. 🔬 OCR, PDF Sayfa Düzeni & Bütünlüklü Şema Kırpma Sağlamlaştırması (Faz 22)
+
+Karmaşık mühendislik veri kâğıtları (ör. Raspberry Pi RP2040 / RP2350 datasheet'leri) ve çok sütunlu Elektor dergi sayfalarında yaşanan metin birbirine karışması, tablo köşelerinin yanlışlıkla şema olarak kırpılması (`p119_draw_119_4.png` gibi parçalı kırpıntılar), VLM tekrarlama döngüleri ve `BrokenPipeError` hataları 4 katmanlı mimari ile tamamen giderilmiştir:
+
+### 1. Sayfa Düzeni & Okuma Sırası Sadakati (`pipeline/extractor.py`)
+- **Üst/Alt Bilgi (Running Header/Footer) Filtresi**: Sayfa üst ve alt marjlarındaki ($y \le 50\text{ pt}$, $y \ge \text{height} - 50\text{ pt}$) tekrarlayan başlıklar, sayfa numaraları ve filigranlar metin birleştirilmeden önce temizlenir.
+- **Sütun Boşluğu Bölütlemesi (Column Gutter Partitioning)**: Çok sütunlu teknik sayfalar yatay projeksiyon analiziyle ayrıştırılır; önce sol sütun yukarıdan aşağıya, ardından sağ sütun okunarak cümlelerin sütunlar arasında birbirine girmesi engellenir.
+- **PyMuPDF Yerel Tablo Çıkarımı (`page.find_tables()`)**: Register bit-alanı (bitfield) ve pinout tabloları doğrudan GitHub-Flavored Markdown tablosuna (`| Bits | Name | Description |`) dönüştürülür ve sol üst başlıklarıyla eşleştirilir.
+- **Monospace Kod Blokları**: Monospace font bayrağına (`flags & 8`, `RobotoMono`, `Courier`) sahip kod parçaları otomatik olarak ````c ... ```` kod blokları içine alınır.
+- **Çoklu Sayfa Aralığı OCR Düzeltmesi**: `extract_pages_range` fonksiyonu `start_page` ile `end_page` arasındaki tüm sayfaları eksiksiz tarar.
+
+### 2. Bütünlüklü Görsel ve Devre Şeması Kırpma (`pipeline/layout_analyzer.py`)
+- **Negatif Tablo Maskeleme (`table_masks`)**: `find_tables()` tarafından tespit edilen tablo sınır kutuları `DocumentLayoutAnalyzer`'a negatif dışlama maskesi olarak iletilir. Böylece register tablolarının iç çizgileri veya köşeleri asla devre şeması olarak kırpılmaz.
+- **Çizim Yolu Kümeleme & Gölgeli Kod Kutusu Reddi**: Gerçek diyagramlar için iç vektör çizim sayısı kontrolü (`internal_drawings >= 20`) uygulanır; arka planı renklendirilmiş basit metin/kod kutuları elenir.
+- **Ok Ucu ve Pin Etiketi Sınır Genişletme**: Kırpma kutuları, diyagram dışındaki ok uçlarını, sinyal adlarını (`GPIO0`, `UART0_TX`, `3V3`) ve yakın alt yazıları (`Figure X:`) içine alacak şekilde uyarlamalı olarak genişletilir.
+- **IoU Tabanlı Tekilleştirme (Deduplication)**: İç içe geçen veya çakışan alt diyagram kutuları birleştirilerek her şemanın tek ve eksiksiz bir PNG/WebP olarak kaydedilmesi garanti edilir.
+
+### 3. OCR / VLM Sadakati, Tablo-Duyarlı Anti-Loop & Dayanıklılık (`pipeline/vision_ocr.py`, `pipeline/llm_client.py`)
+- **Tablo-Duyarlı Tekrarlama Filtresi**: Markdown tablo ayırıcı satırları (`|---|---|`) geçerli sözdizimi olarak tanınır ve VLM tekrarlama filtresi tarafından bozulmaz.
+- **Kontrol Token ve `<think>` Temizliği**: `<|grounding|>`, kapanmamış `<think>` blokları, `<|im_start|>` ve model kontrol etiketleri katalog ve JSONL çıktılarından tamamen ayıklanır.
+- **Tesseract Ön İşleme**: Taranmış sayfalar gri tonlama/ikilileştirme (binarization), `--dpi 300 -l eng --psm 6` parametreleriyle işlenir.
+- **Otomatik LAN ➔ Localhost Ollama Failover (`ResilientOllamaClient`)**: Yapılandırılan yerel ağ GPU sunucusu (`http://192.168.1.26:11434` veya `192.168.1.14:11434`) çevrimdışı olduğunda sistem kesintisiz olarak `http://127.0.0.1:11434` yerel Ollama servisine geçer.
+- **`BrokenPipeError` Kalkanı**: Tüm `stdout`/`stderr` günlükleme çağrıları ve SQLite bağlantı kapatma (`teardown`) adımları kapalı boru hatalarına karşı korumalıdır.
+
+---
+
+## 21. 🤖 Nous Research Hermes Agent Yetenekleri (`hermes-agent/`) & Stdio MCP Sunucusu (Faz 23)
+
+Elektor veri seti üretim hattı, [Nous Research Hermes Agent](https://hermes-agent.nousresearch.com/docs) (`akillibidik`, `aikonsol`, Hermes CLI, Telegram/Discord Gateway Botları ve Kanban görevleri) tarafından doğrudan kullanılabilmesi için [`hermes-agent/`](hermes-agent/README.md) klasörü altında standartlaştırılmıştır.
+
+### 1. Hermes Agent İçin 4 Modüler Veri Yeteneği (`hermes-agent/skills/data/`)
+
+| Skill Adı | Açıklama (`<= 60` kr.) | Temel Yetenekler ve Araçlar |
+| :--- | :--- | :--- |
+| **[`elektor-dataset-pipeline`](hermes-agent/skills/data/elektor-dataset-pipeline/SKILL.md)** | `Orchestrate Elektor PDF-to-SFT/DPO dataset pipeline.` | Sistem sağlığı (`health`), çoklu proje yönetimi (`projects`), aşamalı çalıştırma (`extract`, `enrich`, `embed`, `export`, `colab`, `self_test`). |
+| **[`elektor-ocr-layout`](hermes-agent/skills/data/elektor-ocr-layout/SKILL.md)** | `Extract PDF layouts, OCR text, and schematic crops.` | Çok sütunlu PDF okuma sırası, negatif tablo maskeli şema kırpma (`inspect-crops`), VLM OCR ve ağ geçitleri için `[[as_document]]` kayıpsız şema gönderimi. |
+| **[`elektor-rag-memory`](hermes-agent/skills/data/elektor-rag-memory/SKILL.md)** | `Query Elektor Qdrant vectors and SQLite knowledge.` | Qdrant semantik vektör arama (`rag-search`), SQLite makale ve zenginleştirme sorgulama (`sqlite-search`), bilgi boşluğu analizi (`dataset-context --evaluate-gap`). |
+| **[`elektor-dataset-curation`](hermes-agent/skills/data/elektor-dataset-curation/SKILL.md)** | `Curate, judge, and export Turkish SFT/DPO datasets.` | Hukuki/telif gürültüsü temizliği (`clean_boilerplate`), `"input": ""` sızıntısız SFT & DPO ihracı (`sft_dataset.jsonl`, `dpo_dataset.jsonl`), LLM-as-a-Judge (`judge` / `trigger --mode strict`) ve gece yarısı cron blueprint'i. |
+
+### 2. Birleşik Hermes CLI Köprüsü (`elektor_hermes_cli.py`)
+
+Hermes ajanları `terminal` aracı üzerinden `${HERMES_SKILL_DIR}/scripts/elektor_hermes_cli.py` betiğini çağırarak tüm işlemleri yapılandırılmış JSON çıktılarıyla yürütebilir:
+
+```bash
+# 1. Tüm SKILL.md dosyalarını resmi Hermes Agent standartlarına göre doğrula:
+.venv/bin/python hermes-agent/scripts/elektor_hermes_cli.py validate-skills
+
+# 2. FastAPI (:3456), Ollama (LAN + Local), SQLite ve Qdrant sağlık durumunu denetle:
+.venv/bin/python hermes-agent/scripts/elektor_hermes_cli.py health
+
+# 3. Qdrant vektör hafızasında semantik arama yap:
+.venv/bin/python hermes-agent/scripts/elektor_hermes_cli.py rag-search --query "RP2040 PIO FIFO" --limit 5
+
+# 4. SQLite articles veya enrichments tablosunda anahtar kelime ara:
+.venv/bin/python hermes-agent/scripts/elektor_hermes_cli.py sqlite-search --keyword "RP2040" --table articles --limit 3
+
+# 5. Kırpılan devre şemalarını ve multimodal kataloğu kayıpsız belge bayrağıyla incele:
+.venv/bin/python hermes-agent/scripts/elektor_hermes_cli.py inspect-crops --limit 5 --as-document
+```
+
+### 3. Sıfır Bağımlılıklı Stdio JSON-RPC 2.0 MCP Sunucusu (`elektor_mcp_server.py`)
+
+Hermes Agent'ın (`~/.hermes/config.yaml`) veya herhangi bir MCP istemcisinin Elektor araçlarını doğrudan native MCP tool olarak çağırması için [`hermes-agent/scripts/elektor_mcp_server.py`](hermes-agent/scripts/elektor_mcp_server.py) sunulmuştur:
+
+- **Sunulan MCP Araçları (`tools/list`)**:
+  1. `search_vector_rag(query, limit)` — Qdrant vektör veritabanından en alakalı teknik metin parçalarını getirir.
+  2. `query_sqlite_knowledge(keyword, limit)` — SQLite `articles` ve `enrichments` tablolarında arama yapar.
+  3. `inject_sft_dpo_context(topic, max_samples)` — İhraç edilen JSONL veri setlerinden ilgili SFT/DPO örneklerini çeker.
+  4. `evaluate_knowledge_gap(base_response, enriched_response, context_text)` — Veri seti öncesi ve sonrası bilgi kazancını (%) hesaplar.
+
+- **`~/.hermes/config.yaml` Entegrasyonu**:
+  ```yaml
+  skills:
+    external_dirs:
+      - /home/hakan/Git/elektor/hermes-agent/skills
+
+  mcp_servers:
+    elektor:
+      command: "/home/hakan/Git/elektor/.venv/bin/python"
+      args:
+        - "/home/hakan/Git/elektor/hermes-agent/scripts/elektor_mcp_server.py"
+      env:
+        ELEKTOR_REPO_PATH: "/home/hakan/Git/elektor"
+  ```
+
+- **Hızlı Kurulum Betiği (`install_skills.sh`)**:
+  ```bash
+  # Kurulum durumunu ve skill doğrulamasını kontrol et:
+  hermes-agent/scripts/install_skills.sh --check
+
+  # ~/.hermes/skills/data/ altına sembolik bağ (symlink) olarak kur:
+  hermes-agent/scripts/install_skills.sh --link
+  ```
+
+---
+
+*Rehber Son Güncelleme: 2026-10-31 | Elektor Universal Pipeline v22.0*
 
 
 
