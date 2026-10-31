@@ -8,14 +8,23 @@ RAG, SQLite, SFT/DPO context, and knowledge gap evaluation tools directly over s
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 HERE = Path(__file__).resolve()
-REPO_ROOT = HERE.parents[2]
+REPO_ROOT = Path(os.environ.get("ELEKTOR_REPO_PATH") or HERE.parents[2]).expanduser().resolve()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+# Pin CWD to the repo root before importing the pipeline: config.json, db_path
+# (database/rp01.db) and qdrant_db_path (qdrant_rp01/) are all resolved against
+# the current working directory. Hermes spawns this server from an arbitrary
+# directory, and without this pin get_active_config() finds no config.json, the
+# tools fall back to defaults and silently report "Database file not found" or
+# an empty Qdrant store.
+os.chdir(REPO_ROOT)
 
 from pipeline.mcp_tools import (  # noqa: E402
     evaluate_knowledge_gap,

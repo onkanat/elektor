@@ -98,6 +98,24 @@ To inspect detailed CLI flags or REST API routes, load the reference documentati
    Run `elektor_hermes_cli.py run-stage self_test` or inspect the exported JSONL line counts in `exports/<project_id>/`.
    - *Completion criterion*: Output files (`sft_dataset.jsonl`, `dpo_dataset.jsonl`, etc.) exist in `exports/<project_id>/`, are non-empty valid JSONL, and pass schema checks.
 
+## Hermes oturum korpusu (PDF yerine sohbet kaynagi)
+
+Sohbet gecmisinden egitim verisi cikarirken PDF boru hattini kullanma — kaynak PDF degil:
+
+```bash
+.venv/bin/python hermes-agent/scripts/hermes_sessions_to_dataset.py --out exports/<proje> --split
+```
+
+- Girdi salt-okunur `~/.hermes/state.db` (tablolar `sessions` + `messages`); cikti Elektor ile ayni semada
+  `chat_dataset.jsonl` / `sft_dataset.jsonl` / `dpo_dataset.jsonl` + `manifest.json` + `KAYNAK.md`.
+- **Tamamen deterministik: LLM yok, ag cagrisi yok.** Hacmin %80'i `role='tool'` mesaji (olculdu: 18,5 MB'un
+  15 MB'i) ve kullanici turu yalnizca ~%5 — yani zenginlestirme degil, **temizlik** darbogaz.
+- Kullanici mesajina harness zarf ekler: `[IMPORTANT: The user has invoked the "<skill>" skill ...]` + skill
+  govdesi. Bunlari oldugu gibi korpusa koymak talimati 1-6 KB'lik skill metnine cevirir; betik enjeksiyonu
+  atar, talimati `"<skill> yeteneğini kullan: <description>"` olarak kurar (`--drop-skill-turns` ile tamamen at).
+- Yerel LLM zenginlestirmesi gerekiyorsa Ollama'nin **native `/api/chat`** yolunu kullan ve `think:false` ver;
+  `/v1/chat/completions` yolunda dusunme kapatilamaz ve butce dusunme izine gider (olculdu: 500 token, icerik yok).
+
 ## Pitfalls
 
 - **Never overwrite `config.json` with nested keys**: Elektor's `config.json` uses flat top-level keys (`db_path`, `qdrant_db_path`, `ollama_url`, `qdrant_collection_name`, `project_id`). Always use `projects select --project-id <id>` or `POST /api/config` so paths stay synchronized.
