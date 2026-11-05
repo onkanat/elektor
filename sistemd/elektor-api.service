@@ -1,0 +1,14 @@
+[Unit]
+Description=Elektor FastAPI sunucusu (API + dashboard, 127.0.0.1:3456) — elektor_hermes_cli bridge
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/hakan/Git/elektor
+# run.py serve'deki reload=True servis için uygunsuz (dosya izleyici); doğrudan uvicorn, yalnız localhost
+ExecStart=/home/hakan/Git/elektor/.venv/bin/python -m uvicorn api_server:app --host 127.0.0.1 --port 3456
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

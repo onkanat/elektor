@@ -27,6 +27,11 @@ if ! curl -s --max-time 8 -o /dev/null "$OLLAMA_URL/api/tags"; then
     log "HATA: ollama erişilemez: $OLLAMA_URL — durduruldu (markerlara dokunulmadı)"
     exit 1
 fi
+# Kapı 0b: Elektor API (proje oluşturma/seçme bu ucu kullanır; list'in dosya-fallback'i create'te yok)
+if ! curl -s --max-time 8 -o /dev/null http://127.0.0.1:3456/api/health; then
+    log "HATA: Elektor API kapalı (127.0.0.1:3456) — elektor-api.service çalışmıyor mu?"
+    exit 1
+fi
 
 adim() {  # mevcut seçili proje için bir pipeline aşaması; başarısızsa HATA bayrağı + proje atlanır
     log "  [$PROJE] ADIM: $1"
