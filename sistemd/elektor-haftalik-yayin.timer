@@ -1,0 +1,10 @@
+[Unit]
+Description=Elektor haftalık dataset yayını (Pazar 04:30, off-peak)
+
+[Timer]
+OnCalendar=Sun *-*-* 04:30:00
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target
