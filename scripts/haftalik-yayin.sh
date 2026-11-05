@@ -123,7 +123,7 @@ for D in "$REPO"/exports/*/; do
     if [ "$N" -lt 1 ]; then log "  [yayın] ATLANDI (boş): $P"; continue; fi
     mkdir -p "$TMP/$P"; cp -a "$D"/. "$TMP/$P"/
 done
-PROJELER=$(ls "$REPO"/exports/ 2>/dev/null | tr '\n' ' ')
+PROJELER=$(ls -d "$TMP"/*/ 2>/dev/null | xargs -n1 basename | tr '\n' ' ')
 printf 'Elektor dataset yayını (projeler: %s)\ntarih: %s\n' "$PROJELER" "$(date '+%F %H:%M')" > "$TMP/YAYIN.md"
 git -C "$TMP" add -A
 git -C "$TMP" -c user.name='Aikonsol' -c user.email='Aikonsol@delinux01.local' \
