@@ -97,7 +97,7 @@ def run_self_test(config_path: str = "config.json"):
             [sys.executable, "-m", "pytest", "tests/", "-q", "--disable-warnings", "-o", "pythonpath=."],
             capture_output=True,
             text=True,
-            timeout=90,
+            timeout=300,  # takım tek başına ~82 sn (407 test); 90 sn zaman aşımı sınırında düşüyordu (ölçüldü 05.11)
             env=env
         )
         if res.returncode == 0:
