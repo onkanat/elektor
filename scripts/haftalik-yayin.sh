@@ -92,12 +92,13 @@ for KLASOR in "$PDF_KOK"/*/; do
 
     EXPORTS="$REPO/exports/$PROJE"
     TAZE=$(find "$EXPORTS" -maxdepth 1 -name '*.jsonl' -mmin -240 2>/dev/null | wc -l)
-    if [ "$TAZE" -lt 1 ]; then
-        log "HATA: [$PROJE] export taze değil — yayınlanmadı (marker dokunulmadı)"
+    SATIR=$(cat "$EXPORTS"/*.jsonl 2>/dev/null | wc -l)
+    # BOŞ export = başarısız koşu (ölçüldü 05.11: kaynakta çıkarılabilir doküman yoksa 7 taze ama 0 satır üretiliyor)
+    if [ "$TAZE" -lt 1 ] || [ "$SATIR" -lt 1 ]; then
+        log "HATA: [$PROJE] export boş ya da taze değil ($TAZE jsonl · $SATIR satır) — yayınlanmadı (marker dokunulmadı)"
         HATA=1
         continue
     fi
-    SATIR=$(cat "$EXPORTS"/*.jsonl 2>/dev/null | wc -l)
     log "  [$PROJE] export: $TAZE taze jsonl · $SATIR satır"
 
     touch "$MARKER"
@@ -115,7 +116,12 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 git init -q "$TMP"
 for D in "$REPO"/exports/*/; do
-    if [ -d "$D" ]; then P=$(basename "$D"); mkdir -p "$TMP/$P"; cp -a "$D"/. "$TMP/$P"/; fi
+    [ -d "$D" ] || continue
+    P=$(basename "$D")
+    # Yalnız VERİSİ OLAN projeler yayınlanır (boş/test kalıntıları dala girmez — ölçüldü 05.11)
+    N=$(cat "$D"/*.jsonl 2>/dev/null | wc -l)
+    if [ "$N" -lt 1 ]; then log "  [yayın] ATLANDI (boş): $P"; continue; fi
+    mkdir -p "$TMP/$P"; cp -a "$D"/. "$TMP/$P"/
 done
 PROJELER=$(ls "$REPO"/exports/ 2>/dev/null | tr '\n' ' ')
 printf 'Elektor dataset yayını (projeler: %s)\ntarih: %s\n' "$PROJELER" "$(date '+%F %H:%M')" > "$TMP/YAYIN.md"
