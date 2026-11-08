@@ -126,6 +126,29 @@ def clean_vlm_response(text: str) -> str:
     return cleaned.strip()
 
 
+# Ölçüm kanıtı 2026-11-08 (5 tur test): yoğun CAD/şema kropalarında deepseek-ocr 3B tekrar
+# döngüsüne düşer (aynı yanıt iki bağımsız koşumda); strata qwen3.8-flash-next (2×4060 Ti,
+# 256K, dflash2) "zone-walk" bölüm sözleşmesiyle pin eşlemelerini birebir okur.
+# Belge sayfası ise deepseek-ocr'ın kendi alanı (100+ tok/s, koordinat kutuları doğru).
+# İkili hat: belge → convert_document_to_markdown · şema/figür → describe_cropped_image(strata).
+VISION_SCHEME_ZONE_PROMPT = (
+    "Bu görüntü teknik bir şema/çizim/blok diyagram kropası. Dört BÖLÜM üret — her bölümün "
+    "başlığını BİREBİR yaz, hiçbirini boş geçemezsin; salt BELİRSİZLİKLER yazıp kurtaran yanıt geçersizdir.\n"
+    "### BÖLÜM 1 — SOL-OKUMA (en uzun bölüm)\n"
+    "Üç geçişte (sol/orta/sağ) okuduğun metni kelime kelime yaz: ref-des + değer + sinyal adı + "
+    "pin numarası çiftleri. Harf ayımı: I/l/1, O/0, B/8'e dikkat; bilinen terimlerle (MOSI/MISO, "
+    "VCC, GND) çelişen okumanı [?] işaretiyle düzelt.\n"
+    "### BÖLÜM 2 — ÇAPRAZ-BAĞ TABLOSU\n"
+    "Tablo: sinyal adı | bitişik ref/pin | okunan blok | uyum [OK/?]; eşleşmeyenleri ayrıca listele.\n"
+    "### BÖLÜM 3 — SENTEZ\n"
+    "Kimlik ve blok grupları (besleme / IO sırtı / konfigürasyon / diğer), kanıt satırıyla; "
+    "vendor yazısı görünmüyorsa açıkça 'görselde yok' de, tahmine dönme.\n"
+    "### BÖLÜM 4 — BELİRSİZLİKLER VE İSTEKLER (kısa)\n"
+    "(i) [?] işaretli okumalar, (ii) hangi bölgeye yakınlaştırma istersin, (iii) hangi ek görsel "
+    "(aynı şemanın başka sayfası / BOM / PCB foto) son sorunu çözerdi."
+)
+
+
 class VisionOCRManager:
     def __init__(self, config_path="config.json", config_dict=None):
         if isinstance(config_path, dict):
@@ -194,6 +217,49 @@ class VisionOCRManager:
             return f"[Error: Could not load image at {image_path}]"
 
         vision_tokens = int(self.config.get("vision_max_tokens", 4096))
+
+        # --- ŞEMA HATTI (ölçümle seçildi, 2026-11-08): CAD/yoğun-metin kropası → strata
+        # zone-walk; strata erişilemez/boş dönerse aşağıdaki mevcut deepseek-ocr + tesseract
+        # + ornith hattı OLDUĞU GİBİ devrede (geri dönüş garantili, davranış değişmez).
+        if (
+            self.config.get("vision_route_schematic_strata", False)
+            and self.config.get("schematic_strata_url")
+        ):
+            try:
+                strata_cfg = {
+                    "ollama_url": self.config.get("schematic_strata_url"),
+                    "ollama_api_key": self.config.get("schematic_strata_api_key", ""),
+                    "openai_timeout": self.config.get("openai_timeout", 600),
+                }
+                strata_client = get_openai_client(strata_cfg)
+                zone_text = VISION_SCHEME_ZONE_PROMPT
+                if caption_context:
+                    zone_text += f"\n\nBağlam/Başlık: {caption_context}"
+                strata_resp = strata_client.chat.completions.create(
+                    model=self.config.get("model_schematic_strata", "qwen3.8-flash-next-q2_0"),
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": zone_text},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/png;base64,{base64_data}"},
+                                },
+                            ],
+                        }
+                    ],
+                    max_tokens=int(self.config.get("vision_max_tokens_schematic", 3900)),
+                    temperature=0.2,
+                    top_p=0.9,
+                )
+                strata_text = self._clean_vlm_response(
+                    (strata_resp.choices[0].message.content or "").strip()
+                )
+                if strata_text:
+                    return strata_text
+            except Exception:
+                pass  # sessiz düşüş: mevcut iki-fazlı hat aynı kropayı işler
         prompt = (
             "Analyze and describe this technical diagram, pinout, or table in detail. "
             "Extract all visible components, pin numbers, signal names, data tables, memory blocks, and architectural connections. "
@@ -397,69 +463,69 @@ class VisionOCRManager:
             return ""
 
         try:
-            prompt = "<image>\n<|grounding|>Convert the document to markdown."
-            try:
-                messages = [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{base64_data}"
-                                }
-                            }
-                        ]
-                    }
-                ]
-                response = self.client.chat.completions.create(
-                    model=self.model_vision,
-                    messages=messages,
-                    max_tokens=4096,
-                    temperature=0.1
+            prompt = "<|grounding|>Convert the document to markdown."
+            # ÖLÇÜM KANITI (2026-11-08): Ollama 0.35'te deepseek-ocr + /v1 chat yolu bozuk
+            # çıktı verir ("\>"); yerel /api/generate+images yolu doğru üretir (1103 image-tok,
+            # koordinat kutuları + metin). Sıra NATİVE önce, /v1 yedek; "<image>" öneki
+            # şablonca zaten eklenir, elle yazılmaz.
+            import urllib.request
+            primary_url = self.config.get("ollama_url", "http://127.0.0.1:11434")
+            fallback_url = "http://127.0.0.1:11434"
+            payload = {
+                "model": self.config.get("model_document_ocr", self.model_vision),
+                "prompt": prompt,
+                "images": [base64_data],
+                "stream": False,
+                "keep_alive": "15m",
+                "options": {"temperature": 0.0, "num_predict": 4096},
+            }
+            data_bytes = json.dumps(payload).encode("utf-8")
+
+            def _send_generate(base: str) -> str:
+                clean_b = base.rstrip("/").removesuffix("/v1")
+                endpoint = f"{clean_b}/api/generate"
+                req = urllib.request.Request(
+                    endpoint,
+                    data=data_bytes,
+                    headers={"Content-Type": "application/json"}
                 )
-                raw_content = response.choices[0].message.content or ""
-                return self._clean_vlm_response(raw_content.strip())
+                with urllib.request.urlopen(req, timeout=300) as resp:
+                    return json.loads(resp.read().decode("utf-8")).get("response", "") or ""
+
+            try:
+                raw_content = _send_generate(primary_url)
             except Exception:
-                import urllib.request
-                import json
-                primary_url = self.config.get("ollama_url", "http://127.0.0.1:11434").rstrip("/").removesuffix("/v1")
-                fallback_url = "http://127.0.0.1:11434"
+                if primary_url != fallback_url:
+                    raw_content = _send_generate(fallback_url)
+                else:
+                    raise
 
-                payload = {
-                    "model": self.model_vision,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": prompt,
-                            "images": [base64_data]
-                        }
-                    ],
-                    "stream": False
-                }
-                data_bytes = json.dumps(payload).encode("utf-8")
-
-                def _send(base: str) -> str:
-                    clean_b = base.rstrip("/").removesuffix("/v1")
-                    endpoint = f"{clean_b}/api/chat"
-                    req = urllib.request.Request(
-                        endpoint,
-                        data=data_bytes,
-                        headers={"Content-Type": "application/json"}
-                    )
-                    with urllib.request.urlopen(req, timeout=30) as resp:
-                        res_data = json.loads(resp.read().decode("utf-8"))
-                        return res_data.get("message", {}).get("content", "") or ""
-
-                try:
-                    raw_content = _send(primary_url)
-                except Exception:
-                    if primary_url != fallback_url:
-                        raw_content = _send(fallback_url)
-                    else:
-                        raise
+            if raw_content.strip():
                 return self._clean_vlm_response(raw_content.strip())
+
+            # yerel yol boş dönerse /v1 chat-completions yedeği (eski davranış korunur)
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64_data}"
+                            }
+                        }
+                    ]
+                }
+            ]
+            response = self.client.chat.completions.create(
+                model=self.model_vision,
+                messages=messages,
+                max_tokens=4096,
+                temperature=0.1
+            )
+            raw_content = response.choices[0].message.content or ""
+            return self._clean_vlm_response(raw_content.strip())
         except Exception as e:
             from pipeline.project_logger import safe_print
             safe_print(f"Warning: DeepSeek-OCR document to markdown conversion error: {e}")
