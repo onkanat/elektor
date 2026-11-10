@@ -149,3 +149,6 @@ evaluate_knowledge_gap(base_response: str, enriched_response: str, context_text:
 - `tests/test_hermes_agent_skills.py`: Automated validation of Hermes Agent skills, CLI subcommands, and MCP server.
 - `tests/e2e/`: Opaque-box 5-tier E2E test suite.
 
+
+## Token katmanı (FAZ-24, 10.11.2026)
+Atropos arşivli; yalnız token katmanı vendored edildi (`pipeline/token_layer.py`, MIT, NousResearch/atropos @ 296a0bc5). Sözleşme: her satır tek örnek, `len(tokens)==len(loss_mask)`, mask {0,1} (0=prompt, 1=completion), DPO iki satır, kesme sondan. Komut: `python run.py tokens --project <id> --tokenizer <hf-id>`. Tam şartname: `~/Aikonsol/urunler/elektor/SARTNAME-token-katmani-ve-strata-20261110.md` (sha256 e68b31e5).

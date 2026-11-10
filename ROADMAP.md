@@ -66,3 +66,5 @@ flowchart TD
 | **FAZ-22** | **OCR, PDF Sayfa Düzeni (Column Gutter, `find_tables`), Negatif Tablo Maskeli Şema Kırpma & VLM Anti-Loop Sağlamlaştırması** | **Tamamlandı ✅** | **Kritik** |
 | **FAZ-23** | **Nous Research Hermes Agent Yetenekleri (`hermes-agent/skills/data/*`), Birleşik CLI Köprüsü & Stdio JSON-RPC 2.0 MCP Sunucusu** | **Tamamlandı ✅** | **Yüksek** |
 
+
+- [x] FAZ-24 (10.11.2026): Atropos token katmanı vendored + `run.py tokens` + testler (K1–K5 kanıt: urunler/elektor/kanit/A-031-token.md). Atropos arşivli; upstream yazma yok.

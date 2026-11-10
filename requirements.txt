@@ -18,3 +18,8 @@ beautifulsoup4>=4.12.0
 html2text>=2024.2.26
 libzim>=3.10.0
 json-repair>=0.63.0
+## -- FAZ-24: token katmanı (Atropos vendor) -- 10.11.2026, pinli
+
+transformers==5.22.2
+tokenizers==0.23.3
+jinja2==3.1.6

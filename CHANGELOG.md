@@ -5,6 +5,10 @@ All notable changes to the **Elektor Universal PDF & Rendergit Code Dataset Gene
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [FAZ-24] - 2026-11-10 — 2026-11-10
+### Added
+- **Token katmanı (Atropos'tan)**: Atropos arşivli **(04.07.2026)** — yalnız token-seviyesi veri hazırlama parçası alındı: `pipeline/token_layer.py` (vendor `atroposlib/utils/tokenize_for_trainer.py` @ `296a0bc5`, MIT — Nous Research) + `run.py tokens --project <id> --tokenizer <hf-id> [--max-len]` alt komutu; ihracatlar yanına `exports/<id>/dataset.tokens.jsonl` üretir (len(tokens)==len(loss_mask), mask {0,1}, DPO iki satır, kesme sondan `truncated` bayrağı). Testler: `tests/test_token_layer.py` (6 test, EXIT=0). Bağımlılıklar pinli: transformers==5.22.2, tokenizers==0.23.3, jinja2==3.1.6. RL katmanı (GRPO/PPO/advantages) ALINMADI.
+
 ## [22.0.0] - 2026-10-31
 
 ### Added

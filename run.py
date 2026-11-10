@@ -2,6 +2,7 @@ import argparse
 import sys
 import os
 import json
+import hashlib
 import shutil
 from pathlib import Path
 
@@ -267,6 +268,20 @@ Examples:
     clean_parser = subparsers.add_parser("clean_boilerplate", help="Scan database and prune non-technical/legal/colophon Q&A pairs")
     clean_parser.add_argument("--db", type=str, default=None, help="Path to SQLite database to clean (defaults to config.json db_path)")
 
+    # Token Layer subcommand (FAZ-24: Atropos token katmanı)
+    tokens_parser = subparsers.add_parser(
+        "tokens",
+        help="Metin ihracatlarından eğitim-hazır token+loss_mask JSONL'i üret (Atropos vendor)",
+    )
+    tokens_parser.add_argument("--project", type=str, required=True,
+                                help="Proje id (exports/<project>/ altındaki ihracatlar)")
+    tokens_parser.add_argument("--tokenizer", type=str, required=True,
+                               help="HF tokenizer id (lokal yüklenir; varsayılan YOK)")
+    tokens_parser.add_argument("--max-len", type=int, default=8192,
+                               help="Maksimum token (kesme sondan; varsayılan 8192)")
+    tokens_parser.add_argument("--outdir", type=str, default=None,
+                               help="Çıktı dizini (varsayılan exports/<project>/)")
+
     # HF Upload subcommand
     hf_parser = subparsers.add_parser("hf_upload", help="Upload exported dataset to Hugging Face Hub")
     hf_parser.add_argument("--repo_id", type=str, required=True, help="Target Hugging Face repo ID (e.g. username/repo-name)")
@@ -498,6 +513,49 @@ Examples:
         print(f"✅ Cleaning complete: {res.get('excluded_articles', 0)} articles excluded, {res.get('pruned_qas', 0)} Q&A items pruned.")
         print("Re-exporting clean datasets...")
         builder.export_datasets()
+
+    elif args.command == "tokens":
+        from pipeline.token_layer import iter_token_rows, load_tokenizer
+        project_id = args.project
+        base_dir = Path(args.outdir) if args.outdir else Path("exports") / project_id
+        out_file = base_dir / "dataset.tokens.jsonl"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        inputs = [
+            ("sft", "sft_dataset.jsonl"),
+            ("dpo", "dpo_dataset.jsonl"),
+            ("multi_turn", "chat_dataset.jsonl"),
+        ]
+        tokenizer = load_tokenizer(args.tokenizer)
+        rows = 0
+        trunc_count = 0
+        index = 0
+        with open(out_file, "w", encoding="utf-8") as fo:
+            for kind, fname in inputs:
+                src = base_dir / fname
+                if not src.exists():
+                    continue
+                raw = src.read_bytes()
+                sha16 = hashlib.sha256(raw).hexdigest()[:16]
+                lines = [ln for ln in raw.decode("utf-8", errors="replace").splitlines() if ln.strip()]
+                for line in lines:
+                    record = json.loads(line)
+                    index += 1
+                    for row in iter_token_rows(
+                        tokenizer,
+                        [(kind, record, str(src.relative_to(base_dir)), sha16, index)],
+                        project=project_id,
+                        tokenizer_id=args.tokenizer,
+                        max_len=args.max_len,
+                    ):
+                        if not row:
+                            continue
+                        fo.write(json.dumps(row, ensure_ascii=False) + "\n")
+                        rows += 1
+                        if row.get("truncated"):
+                            trunc_count += 1
+        print(f"✅ Token katmanı: {out_file} · satır={rows} · truncated={trunc_count} · tokenizer={args.tokenizer} · max_len={args.max_len}")
+        if rows == 0:
+            print("⚠️ Hiç satır üretilmedi — kaynak dosyalar boş/eksik olabilir.")
 
     elif args.command == "hf_upload":
         print("=== Step 5: Uploading Dataset to Hugging Face Hub ===")
