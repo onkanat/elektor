@@ -252,6 +252,7 @@ class VisionOCRManager:
                     max_tokens=int(self.config.get("vision_max_tokens_schematic", 3900)),
                     temperature=0.2,
                     top_p=0.9,
+                    extra_body={"chat_template_kwargs": {"enable_thinking": False}},
                 )
                 strata_text = self._clean_vlm_response(
                     (strata_resp.choices[0].message.content or "").strip()
@@ -430,20 +431,23 @@ class VisionOCRManager:
 
         # Try OpenAI SDK endpoint (for cloud providers or fallback)
         try:
-            response = self.client.chat.completions.create(
-                model=self.model_vision,
-                messages=messages,
-                max_tokens=vision_tokens,
-                temperature=temp,
-                top_p=top_p,
-                extra_body={
-                    "enable_thinking": False,
-                    "keep_alive": "30m",
-                    "repeat_penalty": 1.2,
-                    "frequency_penalty": 0.2,
-                    "presence_penalty": 0.2
-                }
-            )
+            from pipeline.llm_client import _llm_gate, thinking_off_kwargs
+            with _llm_gate(self.config):
+                response = self.client.chat.completions.create(
+                    model=self.model_vision,
+                    messages=messages,
+                    max_tokens=vision_tokens,
+                    temperature=temp,
+                    top_p=top_p,
+                    extra_body={
+                        # şartname 10.11: düz enable_thinking alanı YOK SAYILIYOR → doğru biçim
+                        "chat_template_kwargs": {"enable_thinking": False},
+                        "keep_alive": "30m",
+                        "repeat_penalty": 1.2,
+                        "frequency_penalty": 0.2,
+                        "presence_penalty": 0.2
+                    }
+                )
             choice = response.choices[0]
             content = (choice.message.content or "").strip()
             # Safety fallback: If model spent budget in reasoning, extract from reasoning

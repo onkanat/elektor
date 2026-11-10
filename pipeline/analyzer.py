@@ -64,8 +64,13 @@ class ArchiveAnalyzer:
         for attempt in range(1, max_retries + 1):
             try:
                 # Re-fetch pooled client
+                from pipeline.llm_client import _llm_gate, thinking_off_kwargs
                 client = get_openai_client(self.config)
-                response = client.chat.completions.create(**chat_kwargs)
+                with _llm_gate(self.config):
+                    response = client.chat.completions.create(
+                        **chat_kwargs,
+                        **thinking_off_kwargs(self.config)
+                    )
                 
                 reply_content = response.choices[0].message.content or ""
                 # Return standard dict format to keep compatibility with existing parsing

@@ -1,4 +1,5 @@
 import os
+import threading
 import httpx
 from openai import OpenAI, AsyncOpenAI
 
@@ -159,19 +160,47 @@ def unload_ollama_model(config: dict, model_name: str):
             pass
     print(f"  [Ollama Note] Unload model signal sent for '{model_name}'.")
 
+def thinking_off_kwargs(config: dict) -> dict:
+    """Şartname 10.11 (İP-2 ZORUNLU kural): Qwen3.8'de düz `enable_thinking` alanı YOK SAYILIYOR
+    (ölçüm: düz alan + '2+2' → 45 completion token, reasoning_content dolu). Doğru biçim:
+    extra_body.chat_template_kwargs.enable_thinking=false. `disable_thinking=true` (varsayılan)
+    iken TÜM analyzer/translator/judge çağrılarına uygulanır."""
+    if config.get("disable_thinking", True):
+        return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
+    return {}
+
+
+_LLM_GATE = None
+_LLM_GATE_LOCK = threading.Lock()
+
+
+def _llm_gate(config: dict):
+    """Strata = TEK 180B uç; `max_concurrency` (varsayılan 4) tüm chat-completion çağrılarını
+    tek semaforla sınırlar. Semafor ilk kullanımda config'ten kurulur (yeniden boyutlama =
+    süreç yeniden başlatınca geçerli). Tüm çağrı noktaları `with _llm_gate(config):` kullanır."""
+    global _LLM_GATE
+    if _LLM_GATE is None:
+        with _LLM_GATE_LOCK:
+            if _LLM_GATE is None:
+                _LLM_GATE = threading.BoundedSemaphore(int(config.get("max_concurrency", 4)))
+    return _LLM_GATE
+
+
 def call_llm(config: dict, system_instruction: str, user_prompt: str, temperature: float = 0.1, model_override: str = None) -> str:
     """Helper function to execute synchronous LLM completion using configured model."""
     client = get_openai_client(config)
     model_name = model_override or config.get("model_analyzer", "qwen3.5:4b")
-    
-    response = client.chat.completions.create(
-        model=model_name,
-        messages=[
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=temperature
-    )
+
+    with _llm_gate(config):
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=temperature,
+            **thinking_off_kwargs(config)
+        )
     return response.choices[0].message.content or ""
 
 
