@@ -142,3 +142,12 @@ Run specific tiers:
 .venv/bin/pytest tests/e2e/test_tier3_interactions.py -v
 .venv/bin/pytest tests/e2e/test_tier4_workloads.py -v
 ```
+
+## FAZ-24 (10.11.2026): Token katmanı testleri
+`tests/test_token_layer.py` — **6 unit test** (offline sahte tokenizer; ağ yok):
+1. uzunluk eşitliği (tokens↔loss_mask)
+2. mask {0,1} ve sınır hizası (prompt sonu → completion başı)
+3. DPO iki satır + aynı sample_id kökü
+4. truncation sondan + `truncated` bayrağı
+5. boş completion → satır yok
+6. multi-turn rol maskelemesi (system/user/tool=0, assistant=1)

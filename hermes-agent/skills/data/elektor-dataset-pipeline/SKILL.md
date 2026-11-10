@@ -73,6 +73,7 @@ To inspect detailed CLI flags or REST API routes, load the reference documentati
 | Clean Boilerplate | `elektor_hermes_cli.py run-stage clean_boilerplate` | `.venv/bin/python run.py clean_boilerplate` |
 | Export SFT/DPO JSONL | `elektor_hermes_cli.py run-stage export` | `.venv/bin/python run.py export` |
 | Export Visual Catalog | `elektor_hermes_cli.py run-stage export_visual --shards 1` | `.venv/bin/python run.py export_visual --shards 1` |
+| **Export Tokens (FAZ-24)** | — | `.venv/bin/python run.py tokens --project <id> --tokenizer <hf-id> [--max-len 8192]` |
 | Generate Notebooks | `elektor_hermes_cli.py run-stage colab --project rp01 --type all` | `.venv/bin/python run.py colab --project rp01 --type all` |
 
 ## Procedure
@@ -98,6 +99,14 @@ To inspect detailed CLI flags or REST API routes, load the reference documentati
    Run `elektor_hermes_cli.py run-stage self_test` or inspect the exported JSONL line counts in `exports/<project_id>/`.
    - *Completion criterion*: Output files (`sft_dataset.jsonl`, `dpo_dataset.jsonl`, etc.) exist in `exports/<project_id>/`, are non-empty valid JSONL, and pass schema checks.
 
+5. **Produce the trainer-ready token file (FAZ-24) — after `export`, never modifying text exports**
+   `.venv/bin/python run.py tokens --project <id> --tokenizer <hf-id> [--max-len 8192]` writes
+   `exports/<project_id>/dataset.tokens.jsonl` (each row: `sample_id/source_file/source_sha256/kind/tokens/loss_mask/;
+   len(tokens)==len(loss_mask); mask {0,1}, prompt 0 completion 1; DPO pair = two rows; tail truncation with
+   `truncated` flag; fully-cut completion = row skipped). Vendored core: Atropos `tokenize_for_trainer.py`
+   (MIT, archived) inside `pipeline/token_layer.py` with local-diffs header.
+   - *Completion criterion*: `pytest tests/test_token_layer.py -q` EXIT=0 and the source export files' sha256 unchanged.
+
 ## Hermes oturum korpusu (PDF yerine sohbet kaynagi)
 
 Sohbet gecmisinden egitim verisi cikarirken PDF boru hattini kullanma — kaynak PDF degil:
@@ -122,6 +131,8 @@ Sohbet gecmisinden egitim verisi cikarirken PDF boru hattini kullanma — kaynak
 - **Unreachable LAN Ollama server**: If `ollama_url` points to a LAN GPU host (e.g., `http://192.168.1.26:11434`) that is offline, `ResilientOllamaClient` automatically fails over to `http://127.0.0.1:11434`. Check `ollama.local_fallback.online` in the `health` report.
 - **Qdrant file lock contention**: When running in local disk mode (`qdrant_<project_id>/`), only one process can hold the Qdrant storage lock at a time.
 - **Boilerplate contamination in fine-tuning**: Always run `clean_boilerplate` before or right after `export` so license/copyright Q&A pairs do not pollute Unsloth LoRA training.
+- **transformers 5.x `apply_chat_template` returns `BatchEncoding`** (`input_ids`/`attention_mask` keys), not a token list — 4.x-era vendor/chat-template code indexing the return as a list silently gets 2-element garbage. Route every call through one normalize helper (`tokenize=True` + `input_ids[0]`; pattern: `_apply_tokens` in `pipeline/token_layer.py`) and fix the return type at all call sites.
+- **Policy (user, 10.11): automatic (scheduled) jobs must NOT depend on ECE_PC's Ollama** — it is hand-started and irregular. Embeddings run on the local Ollama (`embedding_url` = `127.0.0.1`, nomic pulled locally); the vision/OCR leg keeps ECE as a CONDITIONAL hop only (graceful skip when the port is closed — tesseract/local path continues); strata at `.105:8080` is the 24/7 lane. Sır: `${STRATA_API_KEY}` env; değer repo'ya yazılmaz.
 
 ## Verification
 

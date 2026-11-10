@@ -708,3 +708,16 @@ Hermes Agent'ın (`~/.hermes/config.yaml`) veya herhangi bir MCP istemcisinin El
 
 
 
+
+## 22. 🧮 Eğitim-Hazır Token Katmanı (FAZ-24 — Atropos vendor)
+
+Komut: `python run.py tokens --project <id> --tokenizer <hf-id> [--max-len 8192]`
+
+- **Ne üretir:** `exports/<id>/dataset.tokens.jsonl` — mevcut SFT/DPO/Chat ihracatlarından
+  eğitim-hazır token + loss-mask dosyası (tek satır = tek örnek) ve **diğer ihracatlara hiç dokunmaz**.
+- **Satır sözleşmesi:** `len(tokens)==len(loss_mask)`; `loss_mask ∈ {0,1}` — **0=bağlam (prompt/system/user/tool), 1=öğrenilir (assistant)**; PAD tokenı YOK; DPO çifti **iki satır** (`dpo_chosen`/`dpo_rejected`, aynı `sample_id` kökü); kesme **sondan** (`truncated:true`), completion tamamen kesilirse satır **yazılmaz**.
+- **Tokenizer NEDEN ZORUNLU:** kayıt eğitim hedef modeline göre seçilir; `--tokenizer <hf-id>` verilmeden çalışmaz (varsayılan yok). Tokenizer **lokal** yüklenir — strata/ollama uçlarına tokenizer isteği gitmez.
+- **Vendor:** NousResearch/atropos `tokenize_for_trainer.py` @ 296a0bc5 (arşivli 04.07.2026, MIT) — künye ve 6 yerel değişiklik `pipeline/token_layer.py` başında. Şema: `atroposlib/type_definitions.py` (yalnız Message TypedDict).
+- **Test:** `pytest tests/test_token_layer.py -q` → 6 test (bağımsız token_layer.py'dekiler: uzunluk eşitliği, mask sınırları, DPO iki satır, truncation, boş completion, multi-turn rol maskelemesi).
+
+*Rehber Son Güncelleme: 2026-11-10 | Elektor Universal Pipeline v22.0 — FAZ-24 eklendi*

@@ -204,6 +204,9 @@ python run.py --config templates/gemini.json pipeline
 
 # Run with Ollama Cloud:
 python run.py --config templates/ollama_cloud.json pipeline
+
+# FAZ-24: token katmanı (Atropos vendor; eğitim-hazır token+loss_mask JSONL'i)
+python run.py tokens --project kindi-docs --tokenizer Qwen/Qwen3.8-Flash-Next --max-len 8192
 ```
 
 ### 4. Kiwix OpenZIM & StackExchange Extractor (`kiwix`)
