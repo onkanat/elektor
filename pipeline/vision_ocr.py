@@ -500,9 +500,12 @@ class VisionOCRManager:
                 raw_content = _send_generate(primary_url)
             except Exception:
                 if primary_url != fallback_url:
-                    raw_content = _send_generate(fallback_url)
+                    try:
+                        raw_content = _send_generate(fallback_url)
+                    except Exception:
+                        raw_content = ""   # iki yerel uç da yok → /v1 yedeğine düş
                 else:
-                    raise
+                    raw_content = ""
 
             if raw_content.strip():
                 return self._clean_vlm_response(raw_content.strip())

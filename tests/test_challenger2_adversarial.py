@@ -229,10 +229,10 @@ def test_vision_ocr_convert_document_fails_to_fallback_to_localhost(tmp_path):
     def mock_urlopen(req, timeout=None):
         if "192.168.1.250" in req.full_url:
             raise urllib.error.URLError("[Errno 113] No route to host")
-        # Localhost fallback mock
+        # Localhost fallback mock (yeni doğal yol: /api/generate → {"response": ...})
         import json
         m = MagicMock()
-        m.read.return_value = json.dumps({"message": {"content": "# Converted Document"}}).encode("utf-8")
+        m.read.return_value = json.dumps({"response": "# Converted Document"}).encode("utf-8")
         ctx = MagicMock()
         ctx.__enter__.return_value = m
         return ctx
