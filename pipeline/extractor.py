@@ -454,6 +454,17 @@ class ArchiveExtractor:
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self.ocr_threshold = self.config.get("ocr_threshold_chars", 100)
         self.tesseract_cmd = self.config.get("tesseract_cmd", "tesseract")
+        # Outline segmentation controls. None/1 preserves the legacy behavior.
+        self.outline_max_depth = self.config.get("outline_max_depth")
+        if self.outline_max_depth is not None:
+            try:
+                self.outline_max_depth = max(0, int(self.outline_max_depth))
+            except (TypeError, ValueError):
+                self.outline_max_depth = None
+        try:
+            self.min_segment_pages = max(1, int(self.config.get("min_segment_pages", 1)))
+        except (TypeError, ValueError):
+            self.min_segment_pages = 1
         
         self.enable_vision_ocr = self.config.get("enable_vision_ocr", False)
         if self.enable_vision_ocr:
@@ -801,7 +812,7 @@ class ArchiveExtractor:
                 for line in lines[:3]:
                     if heading_pattern.match(line) and page_idx not in seen_pages:
                         seen_pages.add(page_idx)
-                        heading_nodes.append({"title": line[:80], "page": page_idx})
+                        heading_nodes.append({"title": line[:80], "page": page_idx, "depth": 0})
                         break
             except Exception:
                 pass
@@ -849,26 +860,42 @@ class ArchiveExtractor:
 
         return extracted_text, is_ocr
 
-    def parse_outline_nodes(self, reader, outline, parent_title=""):
-        """Recursively parses outline nodes into a list of (title, page_num) dicts"""
+    def parse_outline_nodes(self, reader, outline, parent_title="", depth=0):
+        """Recursively parses outline nodes into (title, page, depth) dicts.
+
+        ``depth`` is zero for top-level chapters and increases for nested
+        sections.  The parent title is attached to child titles so a flattened
+        outline stays readable, while the depth lets callers keep only the
+        top-level chapter structure.
+        """
         nodes = []
         if not outline:
             return nodes
-            
-        for item in outline:
+
+        handled_child_lists = set()
+        for idx, item in enumerate(outline):
             if isinstance(item, list):
-                nodes.extend(self.parse_outline_nodes(reader, item, parent_title))
-            else:
-                title = item.get("/Title", "")
-                page_num = None
-                try:
-                    page_num = reader.get_destination_page_number(item)
-                except Exception:
-                    pass
-                    
-                if page_num is not None:
-                    full_title = f"{parent_title} - {title}" if parent_title else title
-                    nodes.append({"title": full_title, "page": page_num})
+                if idx not in handled_child_lists:
+                    nodes.extend(self.parse_outline_nodes(reader, item, parent_title, depth + 1))
+                continue
+
+            title = item.get("/Title", "")
+            page_num = None
+            try:
+                page_num = reader.get_destination_page_number(item)
+            except Exception:
+                pass
+
+            if page_num is not None:
+                full_title = f"{parent_title} - {title}" if parent_title else title
+                nodes.append({"title": full_title, "page": page_num, "depth": depth})
+                # In a PDF outline a parent destination is followed by its
+                # children as a nested list.  Attach that list to this title.
+                if idx + 1 < len(outline) and isinstance(outline[idx + 1], list):
+                    handled_child_lists.add(idx + 1)
+                    nodes.extend(self.parse_outline_nodes(
+                        reader, outline[idx + 1], full_title, depth + 1
+                    ))
         return nodes
 
     def extract_pages_range(self, pdf_path, start_page, end_page):
@@ -1038,7 +1065,7 @@ class ArchiveExtractor:
                 for line in lines[:3]:
                     if heading_pattern.match(line) and page_idx not in seen_pages:
                         seen_pages.add(page_idx)
-                        heading_nodes.append({"title": line[:80], "page": page_idx})
+                        heading_nodes.append({"title": line[:80], "page": page_idx, "depth": 0})
                         break
             except Exception:
                 pass
@@ -1059,6 +1086,69 @@ class ArchiveExtractor:
             start, end = 0, limit
             
         cursor = self.conn.cursor()
+
+    def _build_outline_segments(self, nodes, total_pages):
+        """Build contiguous chapter segments from parsed outline nodes.
+
+        ``outline_max_depth`` keeps only top-level (or depth-limited) outline
+        nodes.  ``min_segment_pages`` merges very short adjacent sections so a
+        title page or a one-page preface does not become its own training
+        article.  Both settings are opt-in; their defaults preserve the old
+        behavior.
+        """
+        if not nodes:
+            return []
+
+        filtered = nodes
+        if self.outline_max_depth is not None:
+            filtered = [
+                n for n in nodes
+                if int(n.get("depth", 0)) <= self.outline_max_depth
+            ]
+            # Never turn a valid outline into an empty document if its roots
+            # are malformed; fall back to the full outline in that case.
+            if not filtered:
+                filtered = nodes
+
+        anchors = sorted(filtered, key=lambda x: x["page"])
+        anchors.append({"title": "Appendix / Index", "page": total_pages, "depth": 0})
+
+        raw = []
+        for i in range(len(anchors) - 1):
+            ch_title = anchors[i]["title"]
+            start_p = anchors[i]["page"]
+            end_p = anchors[i + 1]["page"] - 1
+            if start_p > end_p:
+                continue
+            if self.is_boilerplate_segment(ch_title):
+                safe_print(f"  [Skip Boilerplate] Skipping outline section: '{ch_title}'")
+                continue
+            raw.append({"title": ch_title, "start": start_p, "end": end_p})
+
+        if self.min_segment_pages > 1 and raw:
+            merged = []
+            for seg in raw:
+                if merged:
+                    prev = merged[-1]
+                    prev_pages = prev["end"] - prev["start"] + 1
+                    if prev_pages < self.min_segment_pages:
+                        prev["end"] = seg["end"]
+                        if seg["title"] not in prev["title"]:
+                            prev["title"] = (prev["title"] + " / " + seg["title"])[:180]
+                        continue
+                merged.append(dict(seg))
+            # Avoid a tiny trailing section; it belongs with the previous one.
+            if len(merged) > 1:
+                last = merged[-1]
+                if (last["end"] - last["start"] + 1) < self.min_segment_pages:
+                    last = merged.pop()
+                    prev = merged[-1]
+                    prev["end"] = last["end"]
+                    if last["title"] not in prev["title"]:
+                        prev["title"] = (prev["title"] + " / " + last["title"])[:180]
+            raw = merged
+
+        return [(s["title"], s["start"], s["end"]) for s in raw]
 
     def extract_book_segments(self, pdf_path):
         """Splits a single PDF book file into logical chapter segments using digital outline bookmarks, printed TOC, or scanned headings"""
@@ -1082,39 +1172,29 @@ class ArchiveExtractor:
         segments = []
         if unique_nodes:
             safe_print(f"Found {len(unique_nodes)} bookmarks/chapters in digital outline for {pdf_path.name}.")
-            unique_nodes.append({"title": "Appendix / Index", "page": total_pages})
-            for i in range(len(unique_nodes) - 1):
-                ch_title = unique_nodes[i]["title"]
-                start_p = unique_nodes[i]["page"]
-                end_p = unique_nodes[i+1]["page"] - 1
-                if start_p <= end_p:
-                    if self.is_boilerplate_segment(ch_title):
-                        safe_print(f"  [Skip Boilerplate] Skipping outline section: '{ch_title}'")
-                        continue
-                    segments.append((ch_title, start_p, end_p))
+            if self.outline_max_depth is not None:
+                depth_kept = sum(
+                    1 for n in unique_nodes
+                    if int(n.get("depth", 0)) <= self.outline_max_depth
+                )
+                safe_print(
+                    f"  [Outline Filter] depth<={self.outline_max_depth}: "
+                    f"{depth_kept}/{len(unique_nodes)} nodes kept"
+                )
+            segments = self._build_outline_segments(unique_nodes, total_pages)
         else:
             safe_print(f"No digital bookmarks found in {pdf_path.name}. Attempting OCR & printed TOC heading detection...")
             detected_headings = self.detect_scanned_headings(reader, total_pages)
             if detected_headings:
                 safe_print(f"Detected {len(detected_headings)} heading/chapter markers in {pdf_path.name}.")
-                detected_headings = sorted(detected_headings, key=lambda x: x["page"])
-                detected_headings.append({"title": "Appendix / End", "page": total_pages})
-                for i in range(len(detected_headings) - 1):
-                    ch_title = detected_headings[i]["title"]
-                    start_p = detected_headings[i]["page"]
-                    end_p = detected_headings[i+1]["page"] - 1
-                    if start_p <= end_p:
-                        if self.is_boilerplate_segment(ch_title):
-                            safe_print(f"  [Skip Boilerplate] Skipping detected heading: '{ch_title}'")
-                            continue
-                        segments.append((ch_title, start_p, end_p))
+                segments = self._build_outline_segments(detected_headings, total_pages)
             else:
                 safe_print(f"Splitting {pdf_path.name} into default 15-page segments.")
                 segment_size = 15
                 for start_p in range(0, total_pages, segment_size):
                     end_p = min(start_p + segment_size - 1, total_pages - 1)
                     segments.append((f"Section starting page {start_p + 1}", start_p, end_p))
-                    
+
         return segments, reader
 
     def process_all_articles(self, limit=None):

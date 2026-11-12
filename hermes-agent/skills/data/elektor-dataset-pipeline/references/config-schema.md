@@ -37,3 +37,8 @@ The Elektor pipeline stores its active configuration as a **flat JSON object** i
 - `ocr_threshold_chars`: Character threshold below which a PDF page triggers OCR fallback (`100`).
 - `tesseract_cmd`: System Tesseract binary (`"tesseract"`).
 - `enable_vision_ocr`: Enables `deepseek-ocr:3b-bf16` multimodal extraction (`true`).
+
+### 5. Outline Segmentation (opt-in)
+- `outline_max_depth`: Keep only outline nodes at this depth or shallower (`0` = top-level chapters, `1` = chapters + first-level sections). `null` (default) preserves the legacy all-bookmark behavior.
+- `min_segment_pages`: Merge adjacent outline sections shorter than this page count (`1` default = no merge; `2`–`3` avoids title-page/preface micro-articles).
+- These settings only affect PDFs that have a digital outline or detected headings; PDFs without either still use 15-page fallback segments.
