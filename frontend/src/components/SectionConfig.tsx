@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import type { PipelineConfig, PipelineState } from '../types';
+import type { HealthInfo, PipelineConfig, PipelineState } from '../types';
 import { ResetConfirmModal } from './ResetConfirmModal';
 import { ConfigEditorModal } from './ConfigEditorModal';
 
@@ -7,6 +7,8 @@ interface SectionConfigProps {
   config: PipelineConfig;
   onUpdateConfig: (newConfig: Partial<PipelineConfig>) => Promise<void>;
   pipelineState: PipelineState;
+  health?: HealthInfo | null;
+  runError?: string | null;
   onRunPipeline: (command: string, limit?: string, reset?: boolean, confirmReset?: boolean, shards?: number, shardPorts?: string) => void;
 }
 
@@ -14,6 +16,8 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
   config,
   onUpdateConfig,
   pipelineState,
+  health,
+  runError,
   onRunPipeline,
 }) => {
   const [formData, setFormData] = useState<PipelineConfig>(config);
@@ -106,6 +110,8 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
   };
 
   const isRunning = pipelineState.status === 'running';
+  const shardingSupported = health?.providers?.analyzer?.supports_sharding !== false;
+  const result = pipelineState.result;
 
   return (
     <div className="grid-2">
@@ -621,16 +627,17 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
             <input
               type="checkbox"
               id="shardingEnabled"
-              checked={shardingEnabled}
+              checked={shardingEnabled && shardingSupported}
               onChange={(e) => setShardingEnabled(e.target.checked)}
-              disabled={isRunning}
+              disabled={isRunning || !shardingSupported}
             />
-            <label htmlFor="shardingEnabled" style={{ fontSize: '0.8rem', cursor: 'pointer', color: 'var(--text-primary)' }}>
+            <label htmlFor="shardingEnabled" style={{ fontSize: '0.8rem', cursor: shardingSupported ? 'pointer' : 'not-allowed', color: 'var(--text-primary)' }}>
               Paralel İşleme Modunu Aktif Et
+              {!shardingSupported && <span style={{ color: '#fbbf24' }}> — uzak/Strata analyzer tek uç kullanır</span>}
             </label>
           </div>
 
-          {shardingEnabled && (
+          {shardingEnabled && shardingSupported && (
             <>
               {/* VRAM UYARI KARTI */}
               <div style={{
@@ -767,6 +774,19 @@ export const SectionConfig: React.FC<SectionConfigProps> = ({
             </span>
           )}
         </div>
+
+        {runError && (
+          <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5', padding: '0.6rem 0.8rem', borderRadius: 'var(--radius-sm)', marginBottom: '0.6rem', fontSize: '0.78rem' }}>
+            ⚠️ {runError}
+          </div>
+        )}
+
+        {result && (
+          <div style={{ background: result.fallback ? 'rgba(245,158,11,0.12)' : 'rgba(16,185,129,0.12)', border: `1px solid ${result.fallback ? 'rgba(245,158,11,0.4)' : 'rgba(16,185,129,0.4)'}`, color: result.fallback ? '#fcd34d' : '#6ee7b7', padding: '0.6rem 0.8rem', borderRadius: 'var(--radius-sm)', marginBottom: '0.6rem', fontSize: '0.78rem' }}>
+            {result.fallback ? '⚠️' : '✅'} Sonuç: {result.enriched ?? 0} enriched, {result.fallback ?? 0} fallback, {result.failed ?? 0} failed, {result.skipped ?? 0} skipped
+            {result.strict && result.fallback ? ' — strict üretim kapısı: export edilmedi' : ''}
+          </div>
+        )}
 
         <div className="terminal" ref={terminalRef}>
           {pipelineState.logs.length === 0 ? (

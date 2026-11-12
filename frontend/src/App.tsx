@@ -19,6 +19,7 @@ export const App: React.FC = () => {
   const [showProjectExplorer, setShowProjectExplorer] = useState<boolean>(false);
   const [showQuickHelp, setShowQuickHelp] = useState<boolean>(false);
   const [showHFModal, setShowHFModal] = useState<boolean>(false);
+  const [runError, setRunError] = useState<string | null>(null);
 
   const [pipelineState, setPipelineState] = useState<PipelineState>({
     status: 'idle',
@@ -26,6 +27,7 @@ export const App: React.FC = () => {
     start_time: null,
     end_time: null,
     exit_code: null,
+    result: null,
     logs: [],
   });
 
@@ -140,7 +142,8 @@ export const App: React.FC = () => {
     shardPorts?: string
   ) => {
     try {
-      await fetch('/api/pipeline/run', {
+      setRunError(null);
+      const res = await fetch('/api/pipeline/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -152,9 +155,15 @@ export const App: React.FC = () => {
           shard_ports: shardPorts,
         }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setRunError(err.detail || `Pipeline başlatılamadı (HTTP ${res.status})`);
+        return;
+      }
       fetchPipelineStatus();
     } catch (e) {
       console.error('Run pipeline error:', e);
+      setRunError('Pipeline başlatılırken ağ hatası oluştu.');
     }
   };
 
@@ -206,6 +215,8 @@ export const App: React.FC = () => {
                 config={config}
                 onUpdateConfig={handleUpdateConfig}
                 pipelineState={pipelineState}
+                health={health}
+                runError={runError}
                 onRunPipeline={handleRunPipeline}
               />
             )}

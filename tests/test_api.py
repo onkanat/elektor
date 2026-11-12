@@ -11,6 +11,9 @@ async def test_health_check():
         assert data["status"] == "ok"
         assert data["port"] == 3456
         assert "config" in data
+        assert "providers" in data
+        assert "analyzer" in data["providers"]
+        assert "ocr" in data["providers"]
 
 @pytest.mark.asyncio
 async def test_system_metrics():
@@ -39,6 +42,7 @@ async def test_pipeline_status():
         data = response.json()
         assert "status" in data
         assert "logs" in data
+        assert "result" in data
 
 @pytest.mark.asyncio
 async def test_pipeline_invalid_command():

@@ -84,7 +84,7 @@ def reset_pipeline_data(config_path="config.json"):
                 print(f"Warning: Could not delete export item {item.name}: {e}")
     print("Reset completed successfully. Starting pipeline from clean state.\n")
 
-def run_sharded_enrichment(config_path, limit, shards_count, shard_ports_str, enrich_pass="all"):
+def run_sharded_enrichment(config_path, limit, shards_count, shard_ports_str, enrich_pass="all", strict=False):
     import sqlite3
     import subprocess
     import shutil
@@ -92,13 +92,19 @@ def run_sharded_enrichment(config_path, limit, shards_count, shard_ports_str, en
     import urllib.parse
     import threading
     
-    ports = [p.strip() for p in shard_ports_str.split(",") if p.strip()]
-    if not ports:
-        print("Error: No ports provided for sharding.")
-        sys.exit(1)
-        
     with open(config_path, "r", encoding="utf-8") as f:
         base_config = json.load(f)
+
+    from pipeline.providers import analyzer_capabilities
+    caps = analyzer_capabilities(base_config)
+    if shards_count > 1 and not caps["supports_sharding"]:
+        print("Error: Uzak/Strata analyzer tek uç kullanır; --shards>1 desteklenmiyor.")
+        sys.exit(2)
+
+    ports = [p.strip() for p in (shard_ports_str or "").split(",") if p.strip()]
+    if shards_count > 1 and not ports:
+        print("Error: No ports provided for sharding.")
+        sys.exit(1)
         
     db_path = base_config.get("db_path", "database/rapberry_pi_pico_all.db")
     
@@ -169,8 +175,10 @@ def run_sharded_enrichment(config_path, limit, shards_count, shard_ports_str, en
                     "--config", temp_cfg_path,
                     "enrich",
                     "--limit", f"{shard_start_idx}:{shard_end_idx}",
-                    "--pass", p_mode
+                    "--pass", p_mode,
                 ]
+                if strict:
+                    cmd_args.append("--strict")
                 print(f"Starting Shard {i} ({p_mode.upper()} on Port {port}): Range {shard_start_idx}:{shard_end_idx}...")
                 p = subprocess.Popen(
                     cmd_args,
@@ -194,9 +202,13 @@ def run_sharded_enrichment(config_path, limit, shards_count, shard_ports_str, en
             for t in threads:
                 t.join()
                 
+            returncodes = []
             for shard_idx, p in processes:
                 p.wait()
+                returncodes.append(p.returncode)
                 print(f"Shard {shard_idx} ({p_mode.upper()} Phase) completed with exit code: {p.returncode}")
+            if any(rc != 0 for rc in returncodes):
+                return max(returncodes)
                 
         finally:
             for tf in temp_files:
@@ -204,6 +216,24 @@ def run_sharded_enrichment(config_path, limit, shards_count, shard_ports_str, en
                     os.unlink(tf)
                 except Exception:
                     pass
+
+def compute_enrich_exit(stats, strict):
+    """Return 2 when strict production cannot trust the run."""
+    if not stats:
+        return 0
+    if strict and (stats.get("fallback", 0) > 0 or stats.get("failed", 0) > 0):
+        return 2
+    if strict and stats.get("enriched", 0) == 0 and (stats.get("fallback", 0) or stats.get("failed", 0)):
+        return 2
+    return 0
+
+
+def emit_run_result(stats, strict):
+    payload = dict(stats or {})
+    payload["strict"] = bool(strict)
+    print("ELEKTOR_RESULT=" + json.dumps(payload, ensure_ascii=False))
+    return compute_enrich_exit(payload, strict)
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -242,6 +272,9 @@ Examples:
     enrich_parser.add_argument("--shards", type=int, default=1, help="Number of parallel shards to run")
     enrich_parser.add_argument("--shard-ports", type=str, default=None, help="Comma-separated list of Ollama port numbers (e.g. 11434,11435)")
     enrich_parser.add_argument("--pass", dest="enrich_pass", type=str, choices=["all", "english", "turkish"], default="all", help="Enrichment pass to run (all, english, turkish)")
+    enrich_flags = enrich_parser.add_mutually_exclusive_group()
+    enrich_flags.add_argument("--strict", action="store_true", help="Fallback/failed varsa EXIT=2 (üretim kapısı)")
+    enrich_flags.add_argument("--allow-fallback", action="store_true", help="Fallback satırlarını retry marker say; EXIT=0")
 
     # Embed subcommand
     embed_parser = subparsers.add_parser("embed", help="Chunk text, generate embeddings, and load to local Qdrant Vector DB")
@@ -296,6 +329,9 @@ Examples:
     pipeline_parser.add_argument("--shards", type=int, default=1, help="Number of parallel shards to run")
     pipeline_parser.add_argument("--shard-ports", type=str, default=None, help="Comma-separated list of Ollama port numbers (e.g. 11434,11435)")
     pipeline_parser.add_argument("--pass", dest="enrich_pass", type=str, choices=["all", "english", "turkish"], default="all", help="Enrichment pass to run (all, english, turkish)")
+    pipeline_flags = pipeline_parser.add_mutually_exclusive_group()
+    pipeline_flags.add_argument("--strict", action="store_true", help="Fallback/failed varsa EXIT=2 (varsayılan)")
+    pipeline_flags.add_argument("--allow-fallback", action="store_true", help="Fallback satırlarını retry marker say; EXIT=0")
     
     # API subcommand
     api_parser = subparsers.add_parser("api", help="Launch the unified web dashboard (FastAPI + React)")
@@ -376,15 +412,22 @@ Examples:
         shards = getattr(args, "shards", 1)
         shard_ports = getattr(args, "shard_ports", None)
         enrich_pass = getattr(args, "enrich_pass", "all")
-        
+        # Manual enrich resumes by default; production uses --strict explicitly.
+        strict = bool(getattr(args, "strict", False))
+        stats = None
+
         if shards > 1 and shard_ports:
-            run_sharded_enrichment(args.config, args.limit, shards, shard_ports, enrich_pass)
+            rc = run_sharded_enrichment(args.config, args.limit, shards, shard_ports, enrich_pass, strict=strict)
+            if rc:
+                sys.exit(2)
         else:
             analyzer = ArchiveAnalyzer(config_path=args.config)
             try:
-                analyzer.enrich_all(limit=args.limit, enrich_pass=enrich_pass)
+                stats = analyzer.enrich_all(limit=args.limit, enrich_pass=enrich_pass)
             finally:
                 analyzer.close()
+            if emit_run_result(stats, strict) != 0:
+                sys.exit(2)
             
     elif args.command == "embed":
         print("=== Step 3: Embed & Load to Qdrant Vector DB ===")
@@ -584,7 +627,12 @@ Examples:
         print("=== RUNNING FULL PIPELINE ===")
         limit = args.limit
         print(f"Processing sample limit: {limit} articles...\n")
-        
+        # Production is strict by default; --allow-fallback is the explicit
+        # resume/manual escape hatch.
+        strict = not bool(getattr(args, "allow_fallback", False))
+        if getattr(args, "strict", False):
+            strict = True
+
         # 1. Extract
         print("\n--- Step 1: Extracting text ---")
         extractor = ArchiveExtractor(config_path=args.config)
@@ -599,13 +647,19 @@ Examples:
         shard_ports = getattr(args, "shard_ports", None)
         enrich_pass = getattr(args, "enrich_pass", "all")
         if shards > 1 and shard_ports:
-            run_sharded_enrichment(args.config, limit, shards, shard_ports, enrich_pass)
+            rc = run_sharded_enrichment(args.config, limit, shards, shard_ports, enrich_pass, strict=strict)
+            if rc:
+                print("Strict production gate failed in a shard; skipping embed/export.")
+                sys.exit(2)
         else:
             analyzer = ArchiveAnalyzer(config_path=args.config)
             try:
-                analyzer.enrich_all(limit=limit, enrich_pass=enrich_pass)
+                stats = analyzer.enrich_all(limit=limit, enrich_pass=enrich_pass)
             finally:
                 analyzer.close()
+            if emit_run_result(stats, strict) != 0:
+                print("Strict production gate failed; skipping embed/export.")
+                sys.exit(2)
             
         # 3. Embed
         print("\n--- Step 3: Generating embeddings and loading to Qdrant ---")

@@ -55,6 +55,26 @@ export interface PipelineConfig {
   [key: string]: any;
 }
 
+export interface ProviderInfo {
+  kind: string;
+  online: boolean;
+  supports_sharding?: boolean;
+  structured_output?: string;
+  native_unload?: boolean;
+  native_api?: boolean;
+  family?: string;
+}
+
+export interface PipelineResult {
+  enriched?: number;
+  fallback?: number;
+  skipped?: number;
+  failed?: number;
+  exported?: boolean;
+  strict?: boolean;
+  [key: string]: unknown;
+}
+
 export interface HealthInfo {
   status: string;
   port: number;
@@ -64,6 +84,10 @@ export interface HealthInfo {
   available_models: string[];
   sqlite_exists: boolean;
   qdrant_exists: boolean;
+  providers?: {
+    analyzer?: ProviderInfo;
+    ocr?: ProviderInfo;
+  };
   config: PipelineConfig;
 }
 
@@ -73,6 +97,7 @@ export interface PipelineState {
   start_time: number | null;
   end_time: number | null;
   exit_code: number | null;
+  result?: PipelineResult | null;
   logs: string[];
 }
 

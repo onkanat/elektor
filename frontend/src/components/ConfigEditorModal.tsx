@@ -528,7 +528,7 @@ export const ConfigEditorModal: React.FC<ConfigEditorModalProps> = ({
               {filterMatches('analyzer_max_tokens Maksimum Token') && (
                 <div className="form-group">
                   <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>
-                    Analiz Token Limiti (<code>analyzer_max_tokens</code>)
+                    Veri Seti Çıktı Bütçesi (<code>analyzer_max_tokens</code>)
                   </label>
                   <input
                     type="number"
@@ -537,7 +537,7 @@ export const ConfigEditorModal: React.FC<ConfigEditorModalProps> = ({
                     onChange={(e) => handleFieldChange('analyzer_max_tokens', Number(e.target.value))}
                   />
                   <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
-                    Model çıkarımında izin verilen maksimum token penceresi
+                    Model penceresi değil; compact=4096, rich=8192/16384 veri profili
                   </span>
                 </div>
               )}
