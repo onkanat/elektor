@@ -22,6 +22,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenHFUploadModal,
 }) => {
   const isOllamaOnline = Boolean(health?.ollama_online) || health?.ollama_status === 'online' || (health?.ollama_status ? health.ollama_status.startsWith('online') : false);
+  const analyzerOnline = health?.providers?.analyzer?.online ?? isOllamaOnline;
+  const ocrOnline = health?.providers?.ocr?.online ?? isOllamaOnline;
 
   return (
     <header className="app-header">
@@ -110,9 +112,13 @@ export const Header: React.FC<HeaderProps> = ({
           🤗 HF & Bulut GPU
         </button>
 
-        <div className={`badge ${isOllamaOnline ? 'online' : 'offline'}`}>
+        <div className={`badge ${analyzerOnline ? 'online' : 'offline'}`} title={health?.providers?.analyzer?.kind || 'analyzer'}>
           <span className="dot"></span>
-          Ollama: {isOllamaOnline ? 'Aktif' : 'Çevrimdışı'}
+          Analizör: {analyzerOnline ? 'Aktif' : 'Çevrimdışı'}
+        </div>
+        <div className={`badge ${ocrOnline ? 'online' : 'offline'}`} title={health?.providers?.ocr?.kind || 'ocr'}>
+          <span className="dot"></span>
+          OCR: {ocrOnline ? 'Aktif' : 'Çevrimdışı'}
         </div>
       </div>
     </header>

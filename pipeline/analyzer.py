@@ -33,6 +33,7 @@ class ArchiveAnalyzer:
         from pipeline.project_logger import get_project_logger
         self.logger = get_project_logger()
         self.openai_client = get_openai_client(self.config)
+        self.run_stats = {"enriched": 0, "fallback": 0, "skipped": 0, "failed": 0}
         
         # Connect/Initialize SQLite database with WAL mode and timeout
         self.conn = sqlite3.connect(self.db_path, timeout=30.0)
@@ -292,45 +293,70 @@ class ArchiveAnalyzer:
         return None
 
     def call_ollama_json(self, system_prompt, user_prompt, model=None, keep_alive=None, num_predict=8192):
-        """Helper to call LLM model and expect a JSON output, optimized with token limit and temp"""
+        """Call the analyzer model and return a parsed JSON object.
+
+        LaTeX-producing prompts must not use server-side ``response_format``:
+        Strata validates JSON before the client sees it, and sequences such as
+        ``\\frac`` are ambiguous (``\\f`` is a valid JSON escape). Client-side
+        parsing preserves those commands. ``server_json`` remains available
+        for short, LaTeX-free calls, with a client-parse fallback on a
+        structured-output error.
+        """
         if model is None:
             model = self.model_name
-        try:
-            client = get_openai_client(self.config)
+
+        from pipeline.llm_client import _llm_gate, thinking_off_kwargs
+        from pipeline.providers import analyzer_capabilities
+
+        caps = analyzer_capabilities(self.config)
+        modes = [True, False] if caps["structured_output"] == "server_json" else [False]
+        last_error = None
+        for use_response_format in modes:
             chat_kwargs = {
                 "model": model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
+                    {"role": "user", "content": user_prompt},
                 ],
-                "response_format": {"type": "json_object"},
-                "temperature": 0.2
+                "temperature": 0.2,
             }
             if num_predict:
                 chat_kwargs["max_tokens"] = num_predict
-                
-            response = client.chat.completions.create(**chat_kwargs)
-            content = response.choices[0].message.content or ""
-            
-            # Clean think tags and markdown code blocks
-            clean_content = content.strip()
-            if "<think>" in clean_content and "</think>" in clean_content:
-                clean_content = clean_content.split("</think>", 1)[1].strip()
-            if clean_content.startswith("```json"):
-                clean_content = clean_content[7:]
-            elif clean_content.startswith("```"):
-                clean_content = clean_content[3:]
-            if clean_content.endswith("```"):
-                clean_content = clean_content[:-3]
-            clean_content = clean_content.strip()
+            if use_response_format:
+                chat_kwargs["response_format"] = {"type": "json_object"}
+            try:
+                client = get_openai_client(self.config)
+                with _llm_gate(self.config):
+                    response = client.chat.completions.create(
+                        **chat_kwargs, **thinking_off_kwargs(self.config)
+                    )
+                content = response.choices[0].message.content or ""
+                clean_content = content.strip()
+                if " thinking" in clean_content and " response" in clean_content:
+                    clean_content = clean_content.split(" response", 1)[1].strip()
+                if clean_content.startswith("```json"):
+                    clean_content = clean_content[7:]
+                elif clean_content.startswith("```"):
+                    clean_content = clean_content[3:]
+                if clean_content.endswith("```"):
+                    clean_content = clean_content[:-3]
+                clean_content = clean_content.strip()
 
-            res = ArchiveAnalyzer.parse_json_robust(clean_content)
-            if res is not None:
-                return res
-            return json.loads(clean_content)
-        except Exception as e:
-            print(f"  LLM JSON call error (Model: {model}): {e}")
-            return None
+                res = ArchiveAnalyzer.parse_json_robust(clean_content)
+                if res is not None:
+                    return res
+                return json.loads(clean_content)
+            except Exception as e:
+                last_error = e
+                print(f"  LLM JSON call error (Model: {model}, response_format={use_response_format}): {e}")
+                # Only a server-side structured-output failure justifies the
+                # no-response_format retry; transport/auth errors should not
+                # trigger a second expensive generation.
+                if use_response_format and "structured_output" not in str(e) and "Invalid \\escape" not in str(e):
+                    return None
+        if last_error is not None:
+            print(f"  LLM JSON call failed after fallback (Model: {model}): {last_error}")
+        return None
 
     def analyze_article_english(self, article_id, title, text):
         """Performs English technical analysis (summary, topics, 10 detailed Q&As, DPO) using self.model_name"""
@@ -719,6 +745,19 @@ class ArchiveAnalyzer:
             "tr_dpo_pairs": tr_res["tr_dpo_pairs"]
         }
 
+    def _record_enrichment_result(self, data, summary_key="summary", sft_key="sft_qa"):
+        """Record a pass result; empty/unavailable output is a retry marker."""
+        try:
+            sft = json.loads(data.get(sft_key) or "[]")
+        except Exception:
+            sft = []
+        summary = str(data.get(summary_key) or "").strip()
+        unavailable = {"", "Summary unavailable.", "Özet bulunamadı."}
+        if sft and summary not in unavailable:
+            self.run_stats["enriched"] += 1
+        else:
+            self.run_stats["fallback"] += 1
+
     def enrich_code_units(self, limit=None, enrich_pass="all"):
         """Enriches extracted AST code_units into synthetic SFT instruction pairs in English and Turkish"""
         cursor = self.conn.cursor()
@@ -948,6 +987,7 @@ class ArchiveAnalyzer:
 
     def enrich_all(self, limit=None, enrich_pass="all"):
         """Enriches extracted articles and AST code units in SQLite DB using a two-pass batch optimization"""
+        self.run_stats = {"enriched": 0, "fallback": 0, "skipped": 0, "failed": 0}
         if enrich_pass in ["all", "english"]:
             self.enrich_code_units(limit=limit, enrich_pass=enrich_pass)
 
@@ -1021,8 +1061,10 @@ class ArchiveAnalyzer:
                         ))
                         self.conn.commit()
                         count1 += 1
+                        self._record_enrichment_result(eng_data)
                     except Exception as e:
                         print(f"Error in English Pass for article {article_id}: {e}")
+                        self.run_stats["failed"] += 1
                         self.conn.rollback()
                 
                 print(f"Pass 1 (English) complete. Enriched {count1} articles with {self.qa_count} English Q&A pairs each.")
@@ -1083,8 +1125,10 @@ class ArchiveAnalyzer:
                                 ))
                                 self.conn.commit()
                                 count_tr += 1
+                                self._record_enrichment_result(tr_data, "turkish_summary", "tr_sft_qa")
                             except Exception as e:
                                 print(f"Error in Direct Turkish Pass for article {article_id}: {e}")
+                                self.run_stats["failed"] += 1
                                 self.conn.rollback()
 
                         print(f"Pass 2 (Direct Turkish) complete. Enriched {count_tr} articles directly in Turkish.")
@@ -1111,6 +1155,7 @@ class ArchiveAnalyzer:
                         for row in pass2_rows:
                             article_id, title, summary, sft_qa_raw, dpo_pairs_raw, existing_tr_summary = row
                             if not summary or summary == "Summary unavailable.":
+                                self.run_stats["skipped"] += 1
                                 continue
                                 
                             try:
@@ -1131,10 +1176,12 @@ class ArchiveAnalyzer:
                                 ))
                                 self.conn.commit()
                                 count2 += 1
+                                self._record_enrichment_result(tr_res, "turkish_summary", "tr_sft_qa")
                             except Exception as e:
                                 err_msg = f"Error in Pass 2 for article {article_id}: {e}"
                                 print(f"  {err_msg}")
                                 self.logger.error(err_msg, module="analyzer")
+                                self.run_stats["failed"] += 1
                                 self.conn.rollback()
                                 
                         print(f"Pass 2 (Translation) complete. Translated {count2} articles into Turkish using TranslateGemma.")
@@ -1149,6 +1196,7 @@ class ArchiveAnalyzer:
             print("Turkish Pass: Skipped (generation_language is English-only).")
             
         print("All enrichment steps completed successfully.")
+        return dict(self.run_stats)
 
     def close(self):
         self.conn.close()

@@ -116,3 +116,34 @@ def test_multiturn_roles_masked():
     # assistant segmentleri = 1; system/user segmentleri = 0
     assert any(m == 1 for m in mask)
     assert sum(mask) < len(mask)  # en az bir maskeli segment var
+
+
+def test_empty_sft_output_is_skipped():
+    tok = FakeTokenizer()
+    row = encode_sft(tok, {"instruction": "q", "input": "", "output": ""},
+                     tokenizer_id="test/fake", max_len=8192)
+    assert row == {}
+
+
+def test_empty_dpo_answer_is_skipped():
+    tok = FakeTokenizer()
+    rows = encode_dpo(tok, {"prompt": "q", "chosen": "iyi cevap", "rejected": ""},
+                      tokenizer_id="test/fake", max_len=8192, project="p",
+                      index=1, source_file="dpo.jsonl", source_sha="x" * 16)
+    assert len(rows) == 1
+    assert rows[0]["kind"] == "dpo_chosen"
+
+
+def test_n_trainable_tokens_matches_mask_sum():
+    tok = FakeTokenizer()
+    row = encode_sft(tok, {"instruction": "q", "input": "", "output": "a" * 40},
+                     tokenizer_id="test/fake", max_len=8192)
+    assert row["n_trainable_tokens"] == sum(row["loss_mask"])
+    assert row["n_trainable_tokens"] > 0
+
+
+def test_multiturn_without_assistant_is_skipped():
+    tok = FakeTokenizer()
+    row = encode_multiturn(tok, {"messages": [{"role": "user", "content": "q"}]},
+                           tokenizer_id="test/fake", max_len=8192)
+    assert row == {}

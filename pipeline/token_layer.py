@@ -145,6 +145,7 @@ def _finish_row(row: Dict[str, Any], tokens: List[int], mask: List[int],
             "n_tokens": len(tokens),
             "n_prompt_tokens": prompt_len,
             "n_completion_tokens": len(tokens) - prompt_len,
+            "n_trainable_tokens": sum(mask),
             "truncated": truncated,
         }
     )
@@ -152,19 +153,23 @@ def _finish_row(row: Dict[str, Any], tokens: List[int], mask: List[int],
 
 
 def _truncate(tokens: List[int], mask: List[int], max_len: int):
-    """Kesme sondan; completion tamamen kesildiyse (mask yok) (None,..) döner."""
+    """Kesme sondan; eğitilebilir token yoksa satır üretme (None,..) döner."""
+    if not any(m == 1 for m in mask):
+        return None, None, None
     if len(tokens) <= max_len:
         return tokens, mask, False
     tokens = tokens[:max_len]
     mask = mask[:max_len]
     if not any(m == 1 for m in mask):
-        return tokens, mask, None
+        return None, None, None
     return tokens, mask, True
 
 
 def encode_sft(tokenizer, record: Dict[str, Any], *, tokenizer_id: str,
                max_len: int) -> Dict[str, Any]:
     """{instruction,input,output} → tek satır (mask: prompt 0, output 1)."""
+    if not (record.get("output") or "").strip():
+        return {}
     chat = _sft_chat(record)
     res = tokenize_for_trainer(tokenizer, chat, train_on_all_assistant_turns=False)
     tokens = list(res["tokens"])
@@ -197,6 +202,8 @@ def encode_dpo(tokenizer, record: Dict[str, Any], *, tokenizer_id: str,
     """{prompt,chosen,rejected} → İKİ satır, aynı sample_id kökü."""
     rows: List[Dict[str, Any]] = []
     for kind, answer_key in (("dpo_chosen", "chosen"), ("dpo_rejected", "rejected")):
+        if not (record.get(answer_key) or "").strip():
+            continue
         chat: List[Message] = [
             {"role": "user", "content": (record.get("prompt") or "").strip(), "reward": None},
             {"role": "assistant", "content": (record.get(answer_key) or "").strip(), "reward": None},
@@ -216,6 +223,9 @@ def encode_dpo(tokenizer, record: Dict[str, Any], *, tokenizer_id: str,
 def encode_multiturn(tokenizer, record: Dict[str, Any], *, tokenizer_id: str,
                      max_len: int) -> Dict[str, Any]:
     """{messages:[...]} → her assistant turu 1, system/user/tool 0."""
+    if not any((m.get("role") == "assistant" and str(m.get("content", "")).strip())
+               for m in (record.get("messages") or [])):
+        return {}
     chat: List[Message] = []
     for m in record.get("messages") or []:
         chat.append({"role": m.get("role", "user"),

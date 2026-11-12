@@ -134,10 +134,27 @@ def get_embedding_client(config: dict) -> OpenAI:
     return get_openai_client(emb_cfg)
 
 def unload_ollama_model(config: dict, model_name: str):
-    """Sends a native Ollama API request to unload the specified model from VRAM immediately."""
+    """Send a native Ollama unload request only for a model native to that host.
+
+    When the analyzer runs on a remote OpenAI-compatible endpoint, its model is
+    not loaded on the OCR host.  Sending ``keep_alive: 0`` for that name only
+    creates noise (and used to target the wrong model).  The local OCR model is
+    still allowed to unload when its provider advertises native unloading.
+    """
     import urllib.request
     import json
+    from pipeline.providers import analyzer_capabilities, ocr_capabilities
     if not model_name:
+        return
+    analyzer = analyzer_capabilities(config)
+    ocr = ocr_capabilities(config)
+    is_ocr_model = model_name == str(config.get("model_vision") or "")
+    if is_ocr_model:
+        if not ocr["native_unload"]:
+            print(f"  [Provider] Skipping unload for remote OCR model '{model_name}'.")
+            return
+    elif not analyzer["native_unload"]:
+        print(f"  [Provider] Skipping unload for remote analyzer model '{model_name}'.")
         return
     ollama_url = config.get("ollama_url", "http://localhost:11434")
     # Clean the URL to get the base Ollama endpoint (remove /v1 if present)

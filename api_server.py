@@ -46,6 +46,7 @@ pipeline_state: Dict[str, Any] = {
     "start_time": None,
     "end_time": None,
     "exit_code": None,
+    "result": None,
     "logs": []
 }
 pipeline_lock = threading.Lock()
@@ -340,6 +341,22 @@ async def health_check(request: Request = None):
     db_file = Path(config.get("db_path") or f"database/{active_pid}.db")
     qdrant_path = Path(config.get("qdrant_db_path") or f"qdrant_{active_pid}")
 
+    from pipeline.providers import analyzer_capabilities, ocr_capabilities
+    a_caps = analyzer_capabilities(config)
+    o_caps = ocr_capabilities(config)
+    analyzer_online = cache.get("ollama_online", False) if not a_caps["remote"] else False
+    if a_caps["remote"] and config.get("openai_base_url"):
+        try:
+            base = str(config["openai_base_url"]).rstrip("/")
+            headers = {}
+            if config.get("openai_api_key"):
+                headers["Authorization"] = f"Bearer {config['openai_api_key']}"
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.get(f"{base}/models", headers=headers)
+                analyzer_online = resp.status_code == 200
+        except Exception:
+            analyzer_online = False
+
     return {
         "status": "ok",
         "port": port,
@@ -349,6 +366,10 @@ async def health_check(request: Request = None):
         "available_models": cache.get("available_models", []),
         "sqlite_exists": db_file.exists(),
         "qdrant_exists": qdrant_path.exists(),
+        "providers": {
+            "analyzer": {**a_caps, "online": analyzer_online},
+            "ocr": {**o_caps, "online": cache.get("ollama_online", False)},
+        },
         "config": config
     }
 
@@ -424,7 +445,7 @@ def update_config(data: Dict[str, Any] = Body(...)):
     return {"status": "success", "config": current}
 
 # Pipeline Execution Background Task
-def run_pipeline_process(cmd, limit, reset, shards=1, shard_ports=None, enrich_pass="all"):
+def run_pipeline_process(cmd, limit, reset, shards=1, shard_ports=None, enrich_pass="all", strict=None, allow_fallback=False):
     global pipeline_state
     current_cfg = get_config()
     current_pid = current_cfg.get("project_id", "default_project")
@@ -439,7 +460,8 @@ def run_pipeline_process(cmd, limit, reset, shards=1, shard_ports=None, enrich_p
         pipeline_state["start_time"] = time.time()
         pipeline_state["end_time"] = None
         pipeline_state["exit_code"] = None
-        pipeline_state["logs"] = [f"=== Starting pipeline subcommand: '{cmd}' (Limit: {limit}, Reset: {reset}, Shards: {shards}, Ports: {shard_ports}, Project: {current_pid}) ==="]
+        pipeline_state["result"] = None
+        pipeline_state["logs"] = [f"=== Starting pipeline subcommand: '{cmd}' (Limit: {limit}, Reset: {reset}, Shards: {shards}, Ports: {shard_ports}, Strict: {strict}, Project: {current_pid}) ==="]
 
     args = [sys.executable, "run.py", "--config", str(CONFIG_PATH), cmd]
     if limit:
@@ -457,6 +479,11 @@ def run_pipeline_process(cmd, limit, reset, shards=1, shard_ports=None, enrich_p
         args.extend(["--shards", str(shards), "--shard-ports", str(shard_ports)])
     if enrich_pass and enrich_pass != "all":
         args.extend(["--pass", enrich_pass])
+    if strict is True:
+        args.append("--strict")
+    elif (allow_fallback or strict is False) and cmd in ("enrich", "pipeline"):
+        # An explicit false must override the pipeline's strict default.
+        args.append("--allow-fallback")
 
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
@@ -475,6 +502,11 @@ def run_pipeline_process(cmd, limit, reset, shards=1, shard_ports=None, enrich_p
                 clean_line = line.rstrip()
                 with pipeline_lock:
                     pipeline_state["logs"].append(clean_line)
+                    if clean_line.startswith("ELEKTOR_RESULT="):
+                        try:
+                            pipeline_state["result"] = json.loads(clean_line.split("=", 1)[1])
+                        except Exception:
+                            pass
                     if len(pipeline_state["logs"]) > 1000:
                         pipeline_state["logs"].pop(0)
 
@@ -506,12 +538,29 @@ def trigger_pipeline(payload: Dict[str, Any] = Body(...)):
     shards = payload.get("shards", 1)
     shard_ports = payload.get("shard_ports")
     enrich_pass = payload.get("enrich_pass", "all")
+    allow_fallback = bool(payload.get("allow_fallback", False))
+    strict = payload.get("strict")
+    if strict is None:
+        strict = cmd == "pipeline" and not allow_fallback
+    else:
+        strict = bool(strict) and not allow_fallback
 
     if reset and not confirm_reset:
         raise HTTPException(
             status_code=400,
             detail="GÜVENLİK UYARISI: Veritabanı ve veri setlerinin sıfırlanması için confirm_reset=True onayı zorunludur."
         )
+
+    if shards > 1 and cmd in ["enrich", "pipeline", "export_visual"]:
+        from pipeline.providers import analyzer_capabilities
+        caps = analyzer_capabilities(get_config())
+        if not caps["supports_sharding"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Uzak/Strata analyzer tek uç kullanır; shards>1 desteklenmiyor."
+            )
+        if not shard_ports:
+            raise HTTPException(status_code=400, detail="shards>1 için shard_ports zorunludur.")
 
     with pipeline_lock:
         if pipeline_state["status"] == "running":
@@ -521,13 +570,14 @@ def trigger_pipeline(payload: Dict[str, Any] = Body(...)):
         pipeline_state["start_time"] = time.time()
         pipeline_state["end_time"] = None
         pipeline_state["exit_code"] = None
-        pipeline_state["logs"] = [f"=== Starting pipeline subcommand: '{cmd}' (Limit: {limit}, Reset: {reset}, Shards: {shards}, Ports: {shard_ports}) ==="]
+        pipeline_state["result"] = None
+        pipeline_state["logs"] = [f"=== Starting pipeline subcommand: '{cmd}' (Limit: {limit}, Reset: {reset}, Shards: {shards}, Ports: {shard_ports}, Strict: {strict}) ==="]
 
-    thread = threading.Thread(target=run_pipeline_process, args=(cmd, limit, reset, shards, shard_ports, enrich_pass))
+    thread = threading.Thread(target=run_pipeline_process, args=(cmd, limit, reset, shards, shard_ports, enrich_pass, strict, allow_fallback))
     thread.daemon = True
     thread.start()
 
-    return {"status": "started", "command": cmd, "limit": limit, "reset": reset, "shards": shards, "shard_ports": shard_ports, "enrich_pass": enrich_pass}
+    return {"status": "started", "command": cmd, "limit": limit, "reset": reset, "shards": shards, "shard_ports": shard_ports, "enrich_pass": enrich_pass, "strict": strict, "allow_fallback": allow_fallback}
 
 
 @app.get("/api/pipeline/status")
