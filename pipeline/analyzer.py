@@ -4,6 +4,29 @@ from pathlib import Path
 from datetime import datetime
 from pipeline.llm_client import get_openai_client
 
+
+def _clean_json_content(content: str) -> str:
+    """Return the JSON payload from an LLM response.
+
+    Reasoning tags are stripped only when they form a leading wrapper.  A
+    literal `` thinking``/`` response`` pair inside a JSON string is data, not a
+    wrapper; splitting on it corrupts otherwise valid JSON.
+    """
+    text = (content or "").strip().lstrip("\ufeff")
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    text = text.strip()
+    if text.startswith("</think>"):
+        return text
+    if text.startswith(" thinking") and " response" in text:
+        text = text.split(" response", 1)[1].strip()
+    return text
+
+
 class ArchiveAnalyzer:
     def __init__(self, config_path="config.json"):
         with open(config_path, "r", encoding="utf-8") as f:
@@ -331,16 +354,7 @@ class ArchiveAnalyzer:
                         **chat_kwargs, **thinking_off_kwargs(self.config)
                     )
                 content = response.choices[0].message.content or ""
-                clean_content = content.strip()
-                if " thinking" in clean_content and " response" in clean_content:
-                    clean_content = clean_content.split(" response", 1)[1].strip()
-                if clean_content.startswith("```json"):
-                    clean_content = clean_content[7:]
-                elif clean_content.startswith("```"):
-                    clean_content = clean_content[3:]
-                if clean_content.endswith("```"):
-                    clean_content = clean_content[:-3]
-                clean_content = clean_content.strip()
+                clean_content = _clean_json_content(content)
 
                 res = ArchiveAnalyzer.parse_json_robust(clean_content)
                 if res is not None:

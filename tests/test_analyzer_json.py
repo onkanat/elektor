@@ -72,3 +72,54 @@ def test_transport_error_does_not_retry(monkeypatch):
 
     assert result is None
     assert len(client.chat.completions.calls) == 1
+
+
+def test_literal_reasoning_tags_inside_json_are_preserved(monkeypatch):
+    payload = {
+        "summary": "The server saves a  thinking block and a  response block.",
+        "topics": ["thinking"],
+        "sft_qa": [
+            {
+                "question": "What is a  thinking block?",
+                "answer": "It is saved before the  response text; do not drop it.",
+            }
+        ],
+        "dpo_pair": {"question": "q", "chosen": "c", "rejected": "r"},
+    }
+    raw = json.dumps(payload)
+    client = FakeClient([raw])
+    monkeypatch.setattr(analyzer_module, "get_openai_client", lambda cfg: client)
+
+    result = _analyzer({"disable_thinking": True, "max_concurrency": 4}).call_ollama_json("sys", "user")
+
+    assert result == payload
+
+
+def test_leading_reasoning_wrapper_is_stripped(monkeypatch):
+    payload = {
+        "summary": "ok",
+        "sft_qa": [{"question": "q", "answer": "a"}],
+        "dpo_pair": {"question": "q", "chosen": "c", "rejected": "r"},
+    }
+    raw = " thinkinginternal reasoning</think>\n" + json.dumps(payload)
+    client = FakeClient([raw])
+    monkeypatch.setattr(analyzer_module, "get_openai_client", lambda cfg: client)
+
+    result = _analyzer({"disable_thinking": True, "max_concurrency": 4}).call_ollama_json("sys", "user")
+
+    assert result == payload
+
+
+def test_fenced_json_with_literal_reasoning_tags_is_preserved(monkeypatch):
+    payload = {
+        "summary": "Use  thinking and  response as literal labels.",
+        "sft_qa": [{"question": "q", "answer": "a"}],
+        "dpo_pair": {"question": "q", "chosen": "c", "rejected": "r"},
+    }
+    raw = "```json\n" + json.dumps(payload) + "\n```"
+    client = FakeClient([raw])
+    monkeypatch.setattr(analyzer_module, "get_openai_client", lambda cfg: client)
+
+    result = _analyzer({"disable_thinking": True, "max_concurrency": 4}).call_ollama_json("sys", "user")
+
+    assert result == payload
