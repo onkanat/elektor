@@ -147,3 +147,16 @@ def test_multiturn_without_assistant_is_skipped():
     row = encode_multiturn(tok, {"messages": [{"role": "user", "content": "q"}]},
                            tokenizer_id="test/fake", max_len=8192)
     assert row == {}
+
+
+def test_n_completion_tokens_matches_mask_sum():
+    tok = FakeTokenizer()
+    messages = [
+        {"role": "system", "content": "sistem"},
+        {"role": "user", "content": "soru 1"},
+        {"role": "assistant", "content": "yanıt 1"},
+        {"role": "user", "content": "soru 2"},
+        {"role": "assistant", "content": "yanıt 2"},
+    ]
+    row = encode_multiturn(tok, {"messages": messages}, tokenizer_id="test/fake", max_len=8192)
+    assert row["n_completion_tokens"] == sum(row["loss_mask"])

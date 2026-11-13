@@ -144,7 +144,7 @@ def _finish_row(row: Dict[str, Any], tokens: List[int], mask: List[int],
             "loss_mask": mask,
             "n_tokens": len(tokens),
             "n_prompt_tokens": prompt_len,
-            "n_completion_tokens": len(tokens) - prompt_len,
+            "n_completion_tokens": sum(mask),
             "n_trainable_tokens": sum(mask),
             "truncated": truncated,
         }
