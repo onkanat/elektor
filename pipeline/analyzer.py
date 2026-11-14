@@ -710,7 +710,7 @@ class ArchiveAnalyzer:
         for i in range(1, len(dpo_pairs_list) + 1):
             dpo_q_match = re.search(r'^\**\s*(?:DPO_Q|DPO_Soru|DPO_S)\s*(?::\**|\**:)\s*(.*?)(?=\n\**\s*(?:DPO_Chosen|DPO_Seçilen|DPO_Tercih_Edilen|DPO_Reddedilen|DPO_Rejected|DPO_|$))', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
             dpo_chosen_match = re.search(r'^\**\s*(?:DPO_Chosen|DPO_Seçilen|DPO_Tercih_Edilen)\s*(?::\**|\**:)\s*(.*?)(?=\n\**\s*(?:DPO_Rejected|DPO_Reddedilen|DPO_|$))', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-            dpo_rej_match = re.search(r'^\**\s*(?:DPO_Rejected|DPO_Reddedilen)\s*(?::\**|\**:)\s*(.*?)(?=\n\**\s*(?:DPO_|$))', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+            dpo_rej_match = re.search(r'^\**\s*(?:DPO_Rejected|DPO_Reddedilen)\s*(?::\**|\**:)\s*(.*?)(?=\n\**\s*DPO_|\Z)', content_norm, re.IGNORECASE | re.DOTALL | re.MULTILINE)
             
             cleaned_dq = clean_val(dpo_q_match)
             cleaned_dc = clean_val(dpo_chosen_match)
