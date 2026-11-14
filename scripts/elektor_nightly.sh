@@ -12,6 +12,7 @@ LOG="$LOG_DIR/$(date +%Y%m%d).log"
 LOCK="$ROOT/.elektor-nightly.lock"
 STATE="$ROOT/database/macair-teknik.nightly.next"
 DONE_FILE="$ROOT/database/macair-teknik.nightly.done"
+EXTRACT_DONE="$ROOT/database/macair-teknik.extracted"
 BATCH_SIZE=25
 STRATA_URL="http://192.168.1.105:8080/v1/models"
 
@@ -46,7 +47,7 @@ fi
 # Stop new batches at the end of the approved window. A batch that is already
 # running is allowed to finish; the next cron run resumes from the state file.
 DOW=$(date +%u)
-if [ "$DOW" -ge 6 ]; then END_HOUR=8; else END_HOUR=7; fi
+END_HOUR=8  # 12.11.2026 kararı: ağır işler 02:00-08:00
 HOUR=$((10#$(date +%H)))
 
 if ! curl -fsS -m 15 -H "Authorization: Bearer $STRATA_API_KEY" "$STRATA_URL" >/dev/null; then
@@ -77,14 +78,23 @@ PY
 }
 
 TOTAL=$(article_count)
-if [ "$TOTAL" -eq 0 ]; then
-    echo "No articles yet; running full filtered extraction (max 3h)..."
+if [ -f "$EXTRACT_DONE" ] && [ "$TOTAL" -eq 0 ]; then
+    echo "extract marker present but DB is empty; clearing stale marker"
+    rm -f "$EXTRACT_DONE"
+fi
+if [ ! -f "$EXTRACT_DONE" ]; then
+    if [ "$TOTAL" -eq 0 ]; then
+        echo "No articles yet; running full filtered extraction (max 3h)..."
+    else
+        echo "Extraction incomplete ($TOTAL articles); resuming (max 3h)..."
+    fi
     timeout 3h "$PY" run.py --config "$CONFIG" extract
     rc=$?
     if [ "$rc" -ne 0 ]; then
-        echo "extract failed/timeout rc=$rc"
+        echo "extract failed/timeout rc=$rc; will retry next run"
         exit "$rc"
     fi
+    touch "$EXTRACT_DONE"
     TOTAL=$(article_count)
 fi
 if [ "$TOTAL" -le 0 ]; then
