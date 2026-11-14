@@ -114,7 +114,7 @@ while [ "$NEXT" -lt "$TOTAL" ]; do
     END=$((NEXT + BATCH_SIZE))
     if [ "$END" -gt "$TOTAL" ]; then END=$TOTAL; fi
     echo "--- enrich range [$NEXT:$END] at $(date '+%F %T') ---"
-    timeout 45m "$PY" run.py --config "$CONFIG" enrich --limit "$NEXT:$END" --pass english
+    timeout 45m "$PY" run.py --config "$CONFIG" enrich --limit "$NEXT:$END" --pass all
     rc=$?
     if [ "$rc" -ne 0 ]; then
         echo "enrich failed/timeout rc=$rc at range [$NEXT:$END]; state kept for retry"
