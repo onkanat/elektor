@@ -67,7 +67,7 @@ def _find_master_cli() -> Path:
         candidate2 = parent / "scripts" / "elektor_hermes_cli.py"
         if candidate2.exists() and candidate2 != here:
             return candidate2
-    env_repo = os.environ.get("ELEKTOR_REPO_PATH") or _read_hermes_repo_path() or "/home/hakan/Git/elektor"
+    env_repo = os.environ.get("ELEKTOR_REPO_PATH") or _read_hermes_repo_path() or "/home/onkanat/Git/elektor"
     return Path(env_repo).expanduser().resolve() / "hermes-agent" / "scripts" / "elektor_hermes_cli.py"
 
 

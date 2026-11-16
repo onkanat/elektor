@@ -22,7 +22,7 @@ metadata:
     config:
       - key: elektor.repo_path
         description: "Absolute path to the Elektor repository"
-        default: "/home/hakan/Git/elektor"
+        default: "/home/onkanat/Git/elektor"
         prompt: "Elektor repository path"
     blueprint:
       schedule: "0 3 * * *"

@@ -239,7 +239,7 @@ def split_of(key: str) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Hermes state.db -> Elektor uyumlu SFT/DPO/chat JSONL (yerel, API'siz)")
     ap.add_argument("--db", default=str(Path.home() / ".hermes" / "state.db"))
-    ap.add_argument("--out", default="/home/hakan/Git/elektor/exports/hermes_sessions")
+    ap.add_argument("--out", default="/home/onkanat/Git/elektor/exports/hermes_sessions")
     ap.add_argument("--min-assistant", type=int, default=80)
     ap.add_argument("--min-session-messages", type=int, default=4)
     ap.add_argument("--max-chars", type=int, default=6000)

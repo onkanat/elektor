@@ -1,6 +1,6 @@
 # Kurulum ve Yapılandırma Kılavuzu (`INSTALLATION.md`)
 
-Bu belge, `/home/hakan/Git/elektor/hermes-agent/` içindeki yeteneklerin (Skills), yardımcı CLI betiğinin ve MCP sunucusunun **Nous Research Hermes Agent** (`https://hermes-agent.nousresearch.com/docs`) ortamına nasıl tanıtılacağını açıklar.
+Bu belge, `/home/onkanat/Git/elektor/hermes-agent/` içindeki yeteneklerin (Skills), yardımcı CLI betiğinin ve MCP sunucusunun **Nous Research Hermes Agent** (`https://hermes-agent.nousresearch.com/docs`) ortamına nasıl tanıtılacağını açıklar.
 
 ---
 
@@ -12,10 +12,10 @@ Hermes Agent, `~/.hermes/config.yaml` içindeki `skills.external_dirs` ayarını
 # ~/.hermes/config.yaml (veya ~/.hermes/profiles/akillibidik/config.yaml)
 skills:
   external_dirs:
-    - /home/hakan/Git/elektor/hermes-agent/skills
+    - /home/onkanat/Git/elektor/hermes-agent/skills
   config:
     elektor:
-      repo_path: "/home/hakan/Git/elektor"
+      repo_path: "/home/onkanat/Git/elektor"
       api_url: "http://127.0.0.1:3456"
 ```
 
@@ -25,23 +25,23 @@ Bu yapılandırma eklendiğinde Hermes Agent açılışta `skills/data/` altınd
 
 ## Yöntem 2: `install_skills.sh` ile `$HERMES_HOME/skills/data/` Altına Kurulum
 
-Skill klasörlerini doğrudan `~/.hermes/skills/data/` dizinine sembolik bağ (symlink) veya kopya olarak kurmak için [install_skills.sh](file:///home/hakan/Git/elektor/hermes-agent/scripts/install_skills.sh) betiğini kullanabilirsiniz:
+Skill klasörlerini doğrudan `~/.hermes/skills/data/` dizinine sembolik bağ (symlink) veya kopya olarak kurmak için [install_skills.sh](file:///home/onkanat/Git/elektor/hermes-agent/scripts/install_skills.sh) betiğini kullanabilirsiniz:
 
 ```bash
 # 1. Mevcut durumu ve SKILL.md standart uyumluluğunu denetle (Salt-okunur):
-/home/hakan/Git/elektor/hermes-agent/scripts/install_skills.sh --check
+/home/onkanat/Git/elektor/hermes-agent/scripts/install_skills.sh --check
 
 # 2. Sembolik bağ (symlink) olarak ~/.hermes/skills/data/ altına bağla:
-/home/hakan/Git/elektor/hermes-agent/scripts/install_skills.sh --link
+/home/onkanat/Git/elektor/hermes-agent/scripts/install_skills.sh --link
 
 # 3. Bağımsız kopya olarak kurmak için (--force ile mevcut kopyaların üzerine yazılır):
-/home/hakan/Git/elektor/hermes-agent/scripts/install_skills.sh --copy
+/home/onkanat/Git/elektor/hermes-agent/scripts/install_skills.sh --copy
 
 # 4. Belirli bir Hermes profiline (örn. akillibidik) kurmak için:
-HERMES_HOME="$HOME/.hermes/profiles/akillibidik" /home/hakan/Git/elektor/hermes-agent/scripts/install_skills.sh --link
+HERMES_HOME="$HOME/.hermes/profiles/akillibidik" /home/onkanat/Git/elektor/hermes-agent/scripts/install_skills.sh --link
 
 # 5. Hermes CLI üzerinden Elektor depo ve API adresini yapılandırmak için:
-hermes config set skills.config.elektor.repo_path /home/hakan/Git/elektor
+hermes config set skills.config.elektor.repo_path /home/onkanat/Git/elektor
 hermes config set skills.config.elektor.api_url http://127.0.0.1:3456
 ```
 
@@ -54,11 +54,11 @@ Hermes ajanlarının `search_vector_rag`, `query_sqlite_knowledge`, `inject_sft_
 ```yaml
 mcp_servers:
   elektor:
-    command: "/home/hakan/Git/elektor/.venv/bin/python"
+    command: "/home/onkanat/Git/elektor/.venv/bin/python"
     args:
-      - "/home/hakan/Git/elektor/hermes-agent/scripts/elektor_mcp_server.py"
+      - "/home/onkanat/Git/elektor/hermes-agent/scripts/elektor_mcp_server.py"
     env:
-      ELEKTOR_REPO_PATH: "/home/hakan/Git/elektor"
+      ELEKTOR_REPO_PATH: "/home/onkanat/Git/elektor"
 ```
 
 ---

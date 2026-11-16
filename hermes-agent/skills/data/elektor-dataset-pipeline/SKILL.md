@@ -18,7 +18,7 @@ metadata:
     config:
       - key: elektor.repo_path
         description: "Absolute path to the Elektor repository"
-        default: "/home/hakan/Git/elektor"
+        default: "/home/onkanat/Git/elektor"
         prompt: "Elektor repository path"
       - key: elektor.api_url
         description: "Base URL for the Elektor FastAPI backend"
@@ -39,7 +39,7 @@ End-to-end orchestration skill for the Elektor Universal PDF & Rendergit Dataset
 
 ## Prerequisites
 
-- Repository located at `elektor.repo_path` (default `/home/hakan/Git/elektor`) with Python virtualenv `.venv/bin/python` (or `python3` in PATH).
+- Repository located at `elektor.repo_path` (default `/home/onkanat/Git/elektor`) with Python virtualenv `.venv/bin/python` (or `python3` in PATH).
 - Local (`http://127.0.0.1:11434`) or LAN Ollama server (`ollama_url` in `config.json`) and/or `GEMINI_API_KEY` for Judge arbitration.
 - `terminal` toolset enabled in Hermes Agent.
 

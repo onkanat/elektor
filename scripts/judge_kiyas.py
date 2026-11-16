@@ -15,7 +15,7 @@ sys.path.insert(0, ".")
 
 FROZEN_SET_SHA = "ec50676668ab57c4e4ea10810daba2aa6c5c60bd68af95aaf8ab75be445e4ab6"
 SFT_FILE = "exports/kindi-docs/sft_dataset.jsonl"
-OUT_DIR = "/home/hakan/Aikonsol/urunler/elektor/kanit"
+OUT_DIR = "/home/onkanat/Aikonsol/urunler/elektor/kanit"
 
 
 def frozen_samples(n=20):

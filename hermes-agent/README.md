@@ -74,19 +74,19 @@ hermes-agent/
 
 ### 1. Skill Dosyalarını Doğrulama
 ```bash
-/home/hakan/Git/elektor/.venv/bin/python /home/hakan/Git/elektor/hermes-agent/scripts/elektor_hermes_cli.py validate-skills
+/home/onkanat/Git/elektor/.venv/bin/python /home/onkanat/Git/elektor/hermes-agent/scripts/elektor_hermes_cli.py validate-skills
 ```
 
 ### 2. Sistem ve Veri Tabanı Sağlığını Kontrol Etme
 ```bash
-/home/hakan/Git/elektor/.venv/bin/python /home/hakan/Git/elektor/hermes-agent/scripts/elektor_hermes_cli.py health
+/home/onkanat/Git/elektor/.venv/bin/python /home/onkanat/Git/elektor/hermes-agent/scripts/elektor_hermes_cli.py health
 ```
 
 ### 3. Hermes Agent İçine Kurulum (`~/.hermes/skills/data/`)
 ```bash
-/home/hakan/Git/elektor/hermes-agent/scripts/install_skills.sh --check
+/home/onkanat/Git/elektor/hermes-agent/scripts/install_skills.sh --check
 # Symlink ile kurmak için:
-/home/hakan/Git/elektor/hermes-agent/scripts/install_skills.sh --link
+/home/onkanat/Git/elektor/hermes-agent/scripts/install_skills.sh --link
 ```
 
 ### 4. Hermes CLI veya Sohbet İçinde Kullanım

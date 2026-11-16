@@ -20,7 +20,7 @@ flowchart TD
         MCP["elektor_mcp_server.py\n(Stdio JSON-RPC 2.0 MCP)"]
     end
 
-    subgraph Elektor["Elektor Pipeline (/home/hakan/Git/elektor)"]
+    subgraph Elektor["Elektor Pipeline (/home/onkanat/Git/elektor)"]
         EXT["pipeline/extractor.py & layout_analyzer.py\nLayout + Negatif Tablo Maskeli Şema Kırpma"]
         VOC["pipeline/vision_ocr.py & visual_dataset_builder.py\nDeepSeek-OCR + Ornith-1.5:9b Katalog"]
         ANA["pipeline/analyzer.py\nTürkçe/İngilizce SFT & DPO Sentezi"]

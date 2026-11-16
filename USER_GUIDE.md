@@ -682,15 +682,15 @@ Hermes Agent'ın (`~/.hermes/config.yaml`) veya herhangi bir MCP istemcisinin El
   ```yaml
   skills:
     external_dirs:
-      - /home/hakan/Git/elektor/hermes-agent/skills
+      - /home/onkanat/Git/elektor/hermes-agent/skills
 
   mcp_servers:
     elektor:
-      command: "/home/hakan/Git/elektor/.venv/bin/python"
+      command: "/home/onkanat/Git/elektor/.venv/bin/python"
       args:
-        - "/home/hakan/Git/elektor/hermes-agent/scripts/elektor_mcp_server.py"
+        - "/home/onkanat/Git/elektor/hermes-agent/scripts/elektor_mcp_server.py"
       env:
-        ELEKTOR_REPO_PATH: "/home/hakan/Git/elektor"
+        ELEKTOR_REPO_PATH: "/home/onkanat/Git/elektor"
   ```
 
 - **Hızlı Kurulum Betiği (`install_skills.sh`)**:

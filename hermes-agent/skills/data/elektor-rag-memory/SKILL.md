@@ -13,7 +13,7 @@ metadata:
     config:
       - key: elektor.repo_path
         description: "Absolute path to the Elektor repository"
-        default: "/home/hakan/Git/elektor"
+        default: "/home/onkanat/Git/elektor"
         prompt: "Elektor repository path"
       - key: elektor.api_url
         description: "Base URL for the Elektor FastAPI backend"

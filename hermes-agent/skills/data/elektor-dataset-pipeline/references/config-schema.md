@@ -1,6 +1,6 @@
 # Elektor Flat `config.json` Schema Reference
 
-The Elektor pipeline stores its active configuration as a **flat JSON object** in `/home/hakan/Git/elektor/config.json` (and per-project files in `projects_<project_id>.json`).
+The Elektor pipeline stores its active configuration as a **flat JSON object** in `/home/onkanat/Git/elektor/config.json` (and per-project files in `projects_<project_id>.json`).
 
 ## Key Flat Configuration Keys
 
@@ -8,7 +8,7 @@ The Elektor pipeline stores its active configuration as a **flat JSON object** i
 - `project_id`: Unique project slug (e.g., `"rp01"`, `"sdr_engineers"`).
 - `dataset_name` / `dataset_name_tr`: Dataset identifier for English and Turkish exports (e.g., `"rp_pico"`).
 - `input_mode`: `"folder"`, `"book"`, `"rendergit"`, or `"kiwix"`.
-- `input_path`: Directory or file path containing input PDFs, Git repo, or ZIM archive (e.g., `"/home/hakan/PDF/raspberyy"`).
+- `input_path`: Directory or file path containing input PDFs, Git repo, or ZIM archive (e.g., `"/home/onkanat/PDF/raspberyy"`).
 - `db_path`: SQLite database file path (e.g., `"database/rp01.db"`).
 - `qdrant_db_path`: Local Qdrant storage directory (e.g., `"qdrant_rp01"`).
 - `qdrant_collection_name`: Qdrant collection name (e.g., `"rp01_articles"`).

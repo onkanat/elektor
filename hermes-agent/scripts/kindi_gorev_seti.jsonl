@@ -1,5 +1,5 @@
 {"id": "T01", "kategori": "disk", "prompt": "/tmp ne kadar yer kaplıyor, bak", "beklenen": {"arac": "disk_usage", "arguman": {"path": "/tmp"}}}
-{"id": "T02", "kategori": "disk", "prompt": "Hermes logları şişmiş mi? ~/.hermes/logs boyutuna bak", "beklenen": {"arac": "disk_usage", "arguman": {"path": "/home/hakan/.hermes/logs"}}}
+{"id": "T02", "kategori": "disk", "prompt": "Hermes logları şişmiş mi? ~/.hermes/logs boyutuna bak", "beklenen": {"arac": "disk_usage", "arguman": {"path": "/home/onkanat/.hermes/logs"}}}
 {"id": "T03", "kategori": "disk", "prompt": "/var/log dolmuş mu ölç", "beklenen": {"arac": "disk_usage", "arguman": {"path": "/var/log"}}}
 {"id": "T04", "kategori": "disk", "prompt": "ana diskte ne kadar boş yer var", "beklenen": {"arac": "disk_usage", "arguman": {"path": "/"}}}
 {"id": "T05", "kategori": "cron", "prompt": "son 24 saatte hata veren cron işi var mı", "beklenen": {"arac": "cron_health", "arguman": {"since_hours": 24}}}

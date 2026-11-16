@@ -5,7 +5,7 @@ from pathlib import Path
 from pipeline.layout_analyzer import DocumentLayoutAnalyzer, FigureCrop
 from pipeline.extractor import extract_page_layout
 
-RP2040_PATH = "/home/hakan/PDF/raspberyy/RP-008371-DS-1-rp2040-datasheet.pdf"
+RP2040_PATH = "/home/onkanat/PDF/raspberyy/RP-008371-DS-1-rp2040-datasheet.pdf"
 
 
 @pytest.fixture

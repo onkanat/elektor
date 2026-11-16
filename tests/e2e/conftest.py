@@ -20,7 +20,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 # Real RP2040 benchmark PDF path
-RP2040_PATH = "/home/hakan/PDF/raspberyy/RP-008371-DS-1-rp2040-datasheet.pdf"
+RP2040_PATH = "/home/onkanat/PDF/raspberyy/RP-008371-DS-1-rp2040-datasheet.pdf"
 
 
 # ============================================================================

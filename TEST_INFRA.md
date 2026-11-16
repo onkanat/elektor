@@ -8,13 +8,13 @@ This document specifies the architectural guidelines, execution mechanics, herme
 ## 1. Test Harness & Runner Configuration
 
 - **Framework**: Pytest (`pytest >= 8.0`, with `pytest-asyncio` and `anyio`)
-- **Virtual Environment Interpreter**: `/home/hakan/Git/elektor/.venv/bin/python`
+- **Virtual Environment Interpreter**: `/home/onkanat/Git/elektor/.venv/bin/python`
 - **Primary Test Runner Command**:
   ```bash
   .venv/bin/pytest tests/e2e/ -v
   ```
 - **Execution Target Directory**: `tests/e2e/`
-- **Root Path Injection**: Handled autonomously via `tests/e2e/conftest.py`, ensuring repo root `/home/hakan/Git/elektor` is prefixed onto `sys.path`. No manual `PYTHONPATH` exports required.
+- **Root Path Injection**: Handled autonomously via `tests/e2e/conftest.py`, ensuring repo root `/home/onkanat/Git/elektor` is prefixed onto `sys.path`. No manual `PYTHONPATH` exports required.
 
 ---
 
@@ -76,7 +76,7 @@ Exercises pairwise combinations across pipeline boundaries:
 10. Dynamic endpoint failover + Multimodal catalog generation (F15 + F16)
 
 ### Tier 4: Real-World Application Workloads (5 Tests)
-Exercises real PDF extraction on `/home/hakan/PDF/raspberyy/RP-008371-DS-1-rp2040-datasheet.pdf`:
+Exercises real PDF extraction on `/home/onkanat/PDF/raspberyy/RP-008371-DS-1-rp2040-datasheet.pdf`:
 1. Pages 10-15 hardware block diagrams (Figures 2, 3, 5 on pages 11, 12, 15)
 2. Pages 100-125 register tables (Table 124 on page 113, 4-column schema)
 3. Historical crop failure elimination on page 119 (`p119_draw_119_4.png` 0 false crops)
@@ -122,7 +122,7 @@ To ensure the test suite is immediately runnable and verifiable while implementa
 2. **Synthetic PDF Generator Factory**:
    - Programmatically synthesizes in-memory and disk PDFs with multi-column text, running headers/footers, vector table grids, monospace code spans, and complex vector diagrams.
 3. **Real RP2040 Datasheet Fixture**:
-   - Safely mounts `/home/hakan/PDF/raspberyy/RP-008371-DS-1-rp2040-datasheet.pdf` in read-only mode for realistic benchmark extraction.
+   - Safely mounts `/home/onkanat/PDF/raspberyy/RP-008371-DS-1-rp2040-datasheet.pdf` in read-only mode for realistic benchmark extraction.
 4. **Hermetic Teardown & Temporary Filesystem**:
    - All generated crops and test databases write to isolated `/tmp/` paths or `tempfile.TemporaryDirectory()`, leaving production databases (`database/rp01.db`, `qdrant_rp01/`) untouched.
 

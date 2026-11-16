@@ -3,7 +3,7 @@ Description=Elektor haftalık dataset yayını — yeni kaynak → pipeline → 
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash /home/hakan/Git/elektor/scripts/haftalik-yayin.sh
+ExecStart=/bin/bash /home/onkanat/Git/elektor/scripts/haftalik-yayin.sh
 # Bir kitabın zenginleştirilmesi saatler sürebilir (ECE ornith-1.5:9b); tavan 8 saat.
 TimeoutStartSec=28800
 Nice=10

@@ -44,7 +44,7 @@ SYS_V2 = (
     "yedek_tazeligi, notify. Silme/taşıma/yeniden başlatma aracin YOK.\n"
     "1) Istek bir arac gerektiriyorsa TEK arac cagrisi uret, aciklama yazma.\n"
     "2) YOL KURALI: tum yol argumanlari MUTLAK olmali. '~' veya goreli yol KULLANMA. "
-    "Ev dizini /home/hakan, log dizini /home/hakan/.hermes/logs.\n"
+    "Ev dizini /home/onkanat, log dizini /home/onkanat/.hermes/logs.\n"
     "3) HABER KURALI (DIGER KURALLARDAN ONCE GELIR): istekte 'haber ver', 'gonder', 'bildir' "
     "fiillerinden biri varsa YALNIZCA notify cagir; olcum/disk/cron araci cagirma. "
     "machine alani: aikonsol | akillibidik | macair.\n"

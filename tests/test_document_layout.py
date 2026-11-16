@@ -19,7 +19,7 @@ from pipeline.extractor import (
     ArchiveExtractor,
 )
 
-BENCHMARK_RP2040_PATH = "/home/hakan/PDF/raspberyy/RP-008371-DS-1-rp2040-datasheet.pdf"
+BENCHMARK_RP2040_PATH = "/home/onkanat/PDF/raspberyy/RP-008371-DS-1-rp2040-datasheet.pdf"
 
 
 # ============================================================================

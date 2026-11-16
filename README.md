@@ -297,7 +297,7 @@ hermes-agent/scripts/install_skills.sh --link
 ```json
 {
   "input_mode": "folder",
-  "input_path": "/home/hakan/PDF/raspberyy",
+  "input_path": "/home/onkanat/PDF/raspberyy",
   "db_path": "database/rp01.db",
   "qdrant_db_path": "qdrant_rp01",
   "ollama_url": "http://192.168.1.14:11434",

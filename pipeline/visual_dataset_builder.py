@@ -187,7 +187,7 @@ class VisualDatasetBuilder:
                             page_num = int(m.group(1))
                             doc_context.append(f"Page {page_num}")
                             # Extract ground truth text from original datasheet PDF if accessible
-                            pdf_dir = Path(self.config.get("input_path", "/home/hakan/PDF/raspberyy"))
+                            pdf_dir = Path(self.config.get("input_path", "/home/onkanat/PDF/raspberyy"))
                             pdf_stem = raw_fn.split("_p")[0]
                             candidate_pdf = pdf_dir / f"{pdf_stem}.pdf"
                             if not candidate_pdf.exists() and pdf_dir.exists():

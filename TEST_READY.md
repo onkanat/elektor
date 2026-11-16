@@ -73,7 +73,7 @@ Verbatim test execution output from `.venv/bin/pytest tests/e2e/`:
 ```
 ============================= test session starts ==============================
 platform linux -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
-rootdir: /home/hakan/Git/elektor
+rootdir: /home/onkanat/Git/elektor
 configfile: pytest.ini
 plugins: anyio-4.15.1, asyncio-1.4.0
 asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function

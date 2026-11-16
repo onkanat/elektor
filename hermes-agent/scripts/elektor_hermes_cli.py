@@ -111,7 +111,7 @@ def resolve_repo_root() -> Path:
         if (parent / "run.py").exists() and (parent / "pipeline").is_dir():
             return parent
 
-    default_path = Path("/home/hakan/Git/elektor")
+    default_path = Path("/home/onkanat/Git/elektor")
     if (default_path / "run.py").exists():
         return default_path
     return Path.cwd()
