@@ -1137,7 +1137,7 @@ def clone_and_extract_code(payload: Dict[str, Any] = Body(...)):
 
     # Flatten repository (rendergit format)
     rendergit_out_path = Path("exports") / f"{project_id}_rendergit.md"
-    flattened_text, parsed_files = flatten_repository_rendergit(repo_dir, output_file=rendergit_out_path)
+    flattened_text, parsed_files = flatten_repository_rendergit(repo_dir, output_file=rendergit_out_path, v2=True)
 
     extracted_units = []
     if extract_ast:

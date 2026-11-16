@@ -15,8 +15,19 @@ IGNORE_DIRS = {
 IGNORE_EXTENSIONS = {
     ".pyc", ".pyo", ".pyd", ".so", ".dll", ".dylib", ".exe", ".bin", ".tar", ".gz",
     ".zip", ".7z", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".pdf", ".db",
-    ".sqlite", ".sqlite3", ".pkl", ".feather", ".parquet", ".onnx", ".pt", ".safetensors"
+    ".sqlite", ".sqlite3", ".pkl", ".feather", ".parquet", ".onnx", ".pt", ".safetensors",
+    # S1: model/ağırlık, medya, font, JVM, nesne kodu, tensör/kolonar formatları
+    ".gguf", ".mlmodel", ".wav", ".mp3", ".mp4", ".webm", ".ogg", ".flac",
+    ".woff", ".woff2", ".ttf", ".otf", ".wasm", ".jar", ".war", ".o", ".a",
+    ".so.1", ".lib", ".obj", ".npy", ".npz", ".h5", ".ckpt", ".msgpack",
+    ".arrow", ".orc", ".lance", ".ggml", ".idx",
 }
+
+# Çok ekli girdiler (".so.1") Path.suffix ile eşleşmez -> ad sonu karşılaştırması
+LONG_IGNORE_EXTENSIONS = {ext for ext in IGNORE_EXTENSIONS if ext.count(".") > 1}
+
+# _looks_binary sniff penceresi (bayt)
+SNIFF_BYTES = 8192
 
 
 class CodeAnalyzer(ast.NodeVisitor):
@@ -180,11 +191,174 @@ def clone_repository(repo_url: str, target_dir: Path) -> Path:
     return target_dir
 
 
-def flatten_repository_rendergit(repo_dir: Path, output_file: Optional[Path] = None) -> Tuple[str, List[Path]]:
+def _ignored_extension(path: Path) -> bool:
+    """Uzantı hızlı yolu: tek ekli (.so) ve çok ekli (.so.1) girişleri kapsar."""
+    name = path.name.lower()
+    suffix = path.suffix.lower()
+    if suffix in IGNORE_EXTENSIONS:
+        return True
+    return any(ext.count(".") > 1 and name.endswith(ext) for ext in LONG_IGNORE_EXTENSIONS)
+
+
+def _looks_binary(path: Path, sniff: int = SNIFF_BYTES) -> bool:
+    """
+    Emniyet ağı: ilk ``sniff`` baytı okuyup ikili dosya olup olmadığına karar verir.
+
+    Kural (S1 şartnamesi): NUL oranı > %1 **veya** çözülemeyen UTF-8 oranı > %30.
+    Okunamayan dosya için False döner; çağıran taraf ``unreadable`` sebebiyle atlar.
+    """
+    try:
+        with open(path, "rb") as fh:
+            chunk = fh.read(sniff)
+    except OSError:
+        return False
+    if not chunk:
+        return False
+    if chunk.count(b"\x00") / len(chunk) > 0.01:
+        return True
+    try:
+        chunk.decode("utf-8")
+        return False
+    except UnicodeDecodeError:
+        text = chunk.decode("utf-8", errors="replace")
+        undecodable = text.count("\ufffd")
+        return (undecodable / max(1, len(text))) > 0.30
+
+
+def _rendergit_sidecar_paths(output_file: Optional[Path], repo_dir: Path) -> Tuple[Path, Path]:
+    """
+    ``exports/<project_id>_skipped.jsonl`` ve ``..._coverage.json`` yollarını üretir.
+
+    Üretimde ``output_file`` zaten ``exports/<project_id>_rendergit.md`` olduğu için
+    yan dosyalar aynı dizine (exports/) düşer. ``output_file`` verilmemişse ``exports/``.
+    """
+    base_dir = output_file.parent if output_file is not None else Path("exports")
+    if output_file is not None:
+        stem = output_file.name
+        if stem.endswith("_rendergit.md"):
+            stem = stem[: -len("_rendergit.md")]
+        else:
+            stem = output_file.stem or repo_dir.name
+    else:
+        stem = repo_dir.name
+    return base_dir / f"{stem}_skipped.jsonl", base_dir / f"{stem}_coverage.json"
+
+
+def _flatten_repository_rendergit_v2(repo_dir: Path, output_file: Optional[Path] = None) -> Tuple[str, List[Path]]:
+    """
+    S1 (v2) yolu: ikili dosyalar uzantı listesi **ve** magic-byte sniff ile elenir,
+    atlanan her dosya ``exports/<project_id>_skipped.jsonl`` dosyasına yazılır ve
+    ``exports/<project_id>_coverage.json`` kapsam özeti üretilir.
+    """
+    tree_lines: List[str] = []
+    file_contents: List[str] = []
+    parsed_files: List[Path] = []
+    skipped: List[Dict[str, Any]] = []
+    bytes_rendered = 0
+
+    tree_lines.append(f"# Repository Structure: {repo_dir.name}\n")
+    tree_lines.append("```")
+
+    for root, dirs, files in os.walk(repo_dir):
+        dirs[:] = sorted(d for d in dirs if d not in IGNORE_DIRS and not d.startswith("."))
+
+        rel_root = Path(root).relative_to(repo_dir)
+        indent = "  " * len(rel_root.parts) if str(rel_root) != "." else ""
+
+        if str(rel_root) != ".":
+            tree_lines.append(f"{indent}📁 {rel_root.name}/")
+
+        for file in sorted(files):
+            if file.startswith(".") or file in IGNORE_DIRS:
+                continue
+
+            file_path = Path(root) / file
+            rel_file_path = file_path.relative_to(repo_dir)
+            try:
+                size = file_path.stat().st_size
+            except OSError:
+                size = 0
+
+            reason: Optional[str] = None
+            if _ignored_extension(file_path):
+                reason = "ext"
+            elif _looks_binary(file_path):
+                reason = "sniff"
+
+            if reason is None:
+                try:
+                    content = file_path.read_text(encoding="utf-8", errors="replace")
+                except (OSError, ValueError):
+                    reason = "unreadable"
+                else:
+                    tree_lines.append(f"{indent}  📄 {rel_file_path}")
+                    header = f"================================================================================\n" \
+                             f"FILE: {rel_file_path}\n" \
+                             f"================================================================================\n"
+                    file_contents.append(f"{header}\n```{file_path.suffix[1:] if file_path.suffix else ''}\n{content}\n```\n")
+                    parsed_files.append(file_path)
+                    bytes_rendered += size
+                    continue
+
+            skipped.append({
+                "path": str(rel_file_path),
+                "reason": reason,
+                "bytes": size,
+                "ext": file_path.suffix.lower(),
+            })
+
+    tree_lines.append("```\n\n")
+    if skipped:
+        tree_lines.append(f"<!-- {len(skipped)} dosya atlandı (ikili/okunamaz); ayrıntı: {repo_dir.name}_skipped.jsonl -->\n\n")
+
+    flattened_text = "".join(tree_lines) + "\n\n# File Contents\n\n" + "\n".join(file_contents)
+
+    if output_file:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(flattened_text, encoding="utf-8")
+
+    skipped_path, coverage_path = _rendergit_sidecar_paths(output_file, repo_dir)
+    by_reason: Dict[str, int] = {"ext": 0, "sniff": 0, "unreadable": 0}
+    by_ext: Dict[str, int] = {}
+    bytes_skipped = 0
+    for entry in skipped:
+        by_reason[entry["reason"]] = by_reason.get(entry["reason"], 0) + 1
+        by_ext[entry["ext"] or "<yok>"] = by_ext.get(entry["ext"] or "<yok>", 0) + 1
+        bytes_skipped += entry["bytes"]
+
+    coverage = {
+        "files_total": len(parsed_files) + len(skipped),
+        "files_rendered": len(parsed_files),
+        "files_skipped": len(skipped),
+        "bytes_rendered": bytes_rendered,
+        "bytes_skipped": bytes_skipped,
+        "by_reason": by_reason,
+        "by_ext": by_ext,
+    }
+
+    try:
+        skipped_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(skipped_path, "w", encoding="utf-8") as fh:
+            for entry in skipped:
+                fh.write(json.dumps({"path": entry["path"], "reason": entry["reason"], "bytes": entry["bytes"]}, ensure_ascii=False) + "\n")
+        coverage_path.write_text(json.dumps(coverage, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except OSError as e:
+        print(f"Uyarı: rendergit yan dosyaları yazılamadı ({skipped_path.parent}): {e}")
+
+    return flattened_text, parsed_files
+
+
+def flatten_repository_rendergit(repo_dir: Path, output_file: Optional[Path] = None, *, v2: bool = False) -> Tuple[str, List[Path]]:
     """
     Traverses repository directory, generating a rendergit-style single markdown document.
     Returns (flattened_text, list_of_parsed_source_files).
+
+    ``v2=True`` ikili dosya kör noktasını kapatan yolu açar (uzantı listesi + sniff +
+    skipped/coverage kaydı). Varsayılan (v2=False) bayt-identik eski davranıştır.
     """
+    if v2:
+        return _flatten_repository_rendergit_v2(repo_dir, output_file)
+
     tree_lines = []
     file_contents = []
     parsed_files = []

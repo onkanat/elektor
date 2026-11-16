@@ -1231,7 +1231,7 @@ class ArchiveExtractor:
                 repo_dir = Path(repo_input)
 
             rendergit_out_path = Path("exports") / f"{project_id}_rendergit.md"
-            flattened_text, parsed_files = flatten_repository_rendergit(repo_dir, output_file=rendergit_out_path)
+            flattened_text, parsed_files = flatten_repository_rendergit(repo_dir, output_file=rendergit_out_path, v2=True)
 
             extracted_units = extract_and_store_code_units(
                 parsed_files=parsed_files,
