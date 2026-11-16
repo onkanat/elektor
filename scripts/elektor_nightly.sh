@@ -19,8 +19,8 @@ STRATA_URL="http://192.168.1.105:8080/v1/models"
 mkdir -p "$LOG_DIR"
 touch "$LOG"
 exec 9>"$LOCK"
-if ! flock -n 9; then
-    echo "$(date '+%F %T %z') another nightly run is active; exiting" >> "$LOG"
+if ! flock -w 90 9; then
+    echo "$(date '+%F %T %z') another nightly run is active (90 sn beklendi); exiting" >> "$LOG"
     exit 0
 fi
 exec >> "$LOG" 2>&1
@@ -78,6 +78,16 @@ PY
 }
 
 TOTAL=$(article_count)
+INPUT=$("$PY" -c "import json;print(json.load(open('$CONFIG')).get('input_path',''))" 2>/dev/null || echo "")
+SIG_FILE="$ROOT/database/macair-teknik.sources.sig"
+SIG=""
+if [ -n "$INPUT" ] && [ -d "$INPUT" ]; then
+    SIG=$(find "$INPUT" -type f -iname '*.pdf' -printf '%P\n' 2>/dev/null | sort | md5sum | cut -d' ' -f1)
+fi
+if [ -f "$EXTRACT_DONE" ] && [ -n "$SIG" ] && [ -f "$SIG_FILE" ] && [ "$(tr -cd 'a-f0-9' < "$SIG_FILE")" != "$SIG" ]; then
+    echo "kaynak listesi degisti (imza $SIG); EXTRACT_DONE temizlendi -> yeni dosyalar cikarilacak"
+    rm -f "$EXTRACT_DONE"
+fi
 if [ -f "$EXTRACT_DONE" ] && [ "$TOTAL" -eq 0 ]; then
     echo "extract marker present but DB is empty; clearing stale marker"
     rm -f "$EXTRACT_DONE"
@@ -95,6 +105,7 @@ if [ ! -f "$EXTRACT_DONE" ]; then
         exit "$rc"
     fi
     touch "$EXTRACT_DONE"
+    if [ -n "${SIG:-}" ]; then printf '%s\n' "$SIG" > "$SIG_FILE"; fi
     TOTAL=$(article_count)
 fi
 if [ "$TOTAL" -le 0 ]; then
@@ -102,9 +113,15 @@ if [ "$TOTAL" -le 0 ]; then
     exit 1
 fi
 
+KALAN_EMBED=$("$PY" -c "import sqlite3;print(sqlite3.connect('$ROOT/database/macair-teknik.db').execute('select count(*) from articles where is_embedded=0').fetchone()[0])" 2>/dev/null || echo 0)
 if [ -f "$DONE_FILE" ]; then
-    echo "Nightly corpus already marked done ($TOTAL articles); exiting"
-    exit 0
+    DONE_SIG=$(tr -cd 'a-f0-9' < "$DONE_FILE")
+    if [ "${KALAN_EMBED:-0}" -eq 0 ] && { [ -z "${SIG:-}" ] || [ -z "$DONE_SIG" ] || [ "$DONE_SIG" = "$SIG" ]; }; then
+        echo "Nightly corpus already marked done ($TOTAL articles, kalan_embed=0); exiting"
+        exit 0
+    fi
+    echo "DONE isareti bayat (kalan_embed=${KALAN_EMBED:-?}, imza ${SIG:-yok} / done ${DONE_SIG:-yok}); temizlendi"
+    rm -f "$DONE_FILE"
 fi
 
 NEXT=0
@@ -149,7 +166,12 @@ if [ "$NEXT" -ge "$TOTAL" ]; then
         --project macair-teknik \
         --tokenizer Qwen/Qwen2.5-0.5B-Instruct \
         --max-len 4096 || echo "token layer skipped/failed (non-fatal)"
-    touch "$DONE_FILE"
+    echo "--- embed (parcali: 50 makale + 5 dk fan beklemesi) ---"
+    ( cd "$ROOT" && LIMIT=50 SLEEP=300 MAX_SEC=1800 MAX_TUR=4 WINDOW_END="$END_HOUR" LABEL=nightly-embed \
+        bash "$ROOT/bin/elektor-embed-parcali.sh" )
+    KALAN_EMBED2=$("$PY" -c "import sqlite3;print(sqlite3.connect('$ROOT/database/macair-teknik.db').execute('select count(*) from articles where is_embedded=0').fetchone()[0])" 2>/dev/null || echo 0)
+    echo "embed turu bitti · kalan=$KALAN_EMBED2"
+    printf '%s\n' "${SIG:-yok}" > "$DONE_FILE"
     echo "nightly corpus complete"
 fi
 
