@@ -269,6 +269,11 @@ Examples:
                                 help="rendergit: repo-göreli hariç tutma deseni (tekrarlanabilir, ör. --exclude third_party)")
     extract_parser.add_argument("--include-ext", type=str, default=None, metavar="UZANTILAR",
                                 help="rendergit: yalnız bu uzantıları işle (virgülle, ör. py,ts,md)")
+    # S3 (rendergit): birim tipi daraltması ve code kolonunu kapatma
+    extract_parser.add_argument("--units", type=str, default=None, metavar="TİPLER",
+                                help="rendergit: code_units filtresi (virgülle; varsayılan function,class,loop)")
+    extract_parser.add_argument("--store-code", dest="store_code", type=str, default=None, metavar="0|1",
+                                help="rendergit: code kolonunu sakla (1, varsayılan) veya NULL bırak (0 → DB küçülür)")
 
     # Enrich subcommand
     enrich_parser = subparsers.add_parser("enrich", help="Enrich text using local Ollama model (Summary, Q&A, DPO, Turkish)")
@@ -412,6 +417,10 @@ Examples:
             rendergit_overrides["rendergit_exclude"] = args.exclude
         if getattr(args, "include_ext", None):
             rendergit_overrides["rendergit_include_ext"] = args.include_ext
+        if getattr(args, "units", None):
+            rendergit_overrides["rendergit_units"] = args.units
+        if getattr(args, "store_code", None) is not None:
+            rendergit_overrides["rendergit_store_code"] = args.store_code
         if rendergit_overrides and Path(args.config).is_file():
             cfg = json.loads(Path(args.config).read_text(encoding="utf-8"))
             cfg.update(rendergit_overrides)

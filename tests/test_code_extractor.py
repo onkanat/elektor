@@ -409,3 +409,177 @@ def test_skipped_dirs_are_recorded(tmp_path):
     coverage = json.loads((tmp_path / "dirs_coverage.json").read_text(encoding="utf-8"))
     assert {"path": "vendor/", "reason": "exclude"} in coverage["dirs_skipped"]
     assert {"path": "skipdir/", "reason": "gitignore"} in coverage["dirs_skipped"]
+
+
+# ---------------------------------------------------------------------------
+# S3 — BOM/CRLF normalizasyonu, hash dedupe, --units filtresi, DB inceltme
+# ---------------------------------------------------------------------------
+
+BOM_CHAR = "\ufeff"
+
+UNITS_SOURCE = (
+    "def one(a):\n"
+    "    return a + 1\n"
+    "\n"
+    "class Box:\n"
+    "    def size(self):\n"
+    "        return 1\n"
+    "\n"
+    "def two():\n"
+    "    total = 0\n"
+    "    for i in range(3):\n"
+    "        total += i\n"
+    "        total += 1\n"
+    "    return total\n"
+)
+
+
+def _units_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "units_repo"
+    repo.mkdir()
+    (repo / "m.py").write_text(UNITS_SOURCE, encoding="utf-8")
+    return repo
+
+
+def test_s3_bom_stripped_and_crlf_normalized(tmp_path):
+    out, text, _ = _run_fixture(tmp_path)
+    assert BOM_CHAR not in text                      # BOM'lu dosya BOM taşımaz
+    assert "\r" not in text                          # CRLF → LF
+    assert "def bom_func():" in text
+    assert "def crlf_func():" in text
+
+
+def test_s3_duplicate_content_written_once(tmp_path):
+    out, text, _ = _run_fixture(tmp_path)
+    coverage = json.loads((out.parent / "mini_coverage.json").read_text(encoding="utf-8"))
+
+    assert coverage["files_deduplicated"] == 1
+    dup = coverage["duplicates"][0]
+    assert dup["path"] == "dup_b.py"
+    assert dup["duplicate_of"] == "dup_a.py"
+    assert dup["bytes"] == (FIXTURE_REPO / "dup_b.py").stat().st_size
+
+    # içerik yalnız bir kez yazılır
+    assert text.count("def dup_func()") == 1
+    dup_block = text.split("FILE: dup_b.py", 1)[1].split("FILE: ", 1)[0]
+    assert "duplicate_of: dup_a.py" in dup_block
+    assert "def dup_func()" not in dup_block
+
+
+def test_s3_bom_file_parses_for_ast(tmp_path):
+    errs = tmp_path / "bom_ast.json"
+    units = extract_and_store_code_units(
+        [FIXTURE_REPO / "bom.py"], FIXTURE_REPO, tmp_path / "bom.db", "pb", ast_errors_path=errs
+    )
+    assert [u["name"] for u in units] == ["bom_func"]      # BOM AST'yi bozmuyor
+    assert json.loads(errs.read_text(encoding="utf-8"))["files_with_errors"] == 0
+
+
+def test_s3_db_columns_indexes_and_offsets(tmp_path):
+    repo = _units_repo(tmp_path)
+    db = tmp_path / "u.db"
+    errs = tmp_path / "ast_errors.json"
+
+    units = extract_and_store_code_units([repo / "m.py"], repo, db, "p1", ast_errors_path=errs)
+    assert {u["unit_type"] for u in units} == {"function", "class", "loop"}
+
+    conn = sqlite3.connect(db)
+    row = conn.execute(
+        "SELECT sha1, byte_offset, end_offset, code FROM code_units WHERE name = 'one'"
+    ).fetchone()
+    source_bytes = (repo / "m.py").read_text(encoding="utf-8").encode("utf-8")
+    assert len(row[0]) == 40
+    assert row[1] == 0
+    assert source_bytes[row[1]:row[2]].decode("utf-8").startswith(row[3])
+    index_names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert {
+        "idx_code_units_project_file",
+        "idx_code_units_project_type",
+        "idx_code_units_project_name",
+    } <= index_names
+    like_plan = [r[3] for r in conn.execute(
+        "EXPLAIN QUERY PLAN SELECT COUNT(*) FROM code_units WHERE project_id = ? AND name LIKE ?",
+        ("p1", "one%"),
+    )]
+    assert any("idx_code_units_project_name" in line for line in like_plan), like_plan
+    conn.close()
+
+    payload = json.loads(errs.read_text(encoding="utf-8"))
+    assert payload["files_parsed"] == 1
+    assert payload["files_with_errors"] == 0
+    assert payload["units_stored"] == len(units)
+    assert payload["store_code"] is True
+    assert payload["units_filter"] == ["class", "function", "loop"]
+
+
+def test_s3_units_filter_drops_loops_only_when_asked(tmp_path):
+    repo = _units_repo(tmp_path)
+
+    default_db = tmp_path / "default.db"
+    default_units = extract_and_store_code_units(
+        [repo / "m.py"], repo, default_db, "p1", ast_errors_path=tmp_path / "d.json"
+    )
+    assert any(u["unit_type"] == "loop" for u in default_units)         # varsayılan korunur
+
+    filtered_db = tmp_path / "filtered.db"
+    filtered = extract_and_store_code_units(
+        [repo / "m.py"], repo, filtered_db, "p1", units="function,class",
+        ast_errors_path=tmp_path / "f.json",
+    )
+    assert {u["unit_type"] for u in filtered} == {"function", "class"}
+    assert len(filtered) == len(default_units) - sum(
+        1 for u in default_units if u["unit_type"] == "loop"
+    )
+
+    conn = sqlite3.connect(filtered_db)
+    assert conn.execute("SELECT COUNT(*) FROM code_units WHERE unit_type = 'loop'").fetchone()[0] == 0
+    conn.close()
+    assert json.loads((tmp_path / "f.json").read_text(encoding="utf-8"))["units_filter"] == ["class", "function"]
+
+
+def test_s3_store_code_zero_nulls_code_column(tmp_path):
+    repo = _units_repo(tmp_path)
+    full_db = tmp_path / "full.db"
+    full = extract_and_store_code_units(
+        [repo / "m.py"], repo, full_db, "p1", ast_errors_path=tmp_path / "full.json"
+    )
+
+    thin_db = tmp_path / "thin.db"
+    thin = extract_and_store_code_units(
+        [repo / "m.py"], repo, thin_db, "p1", store_code="0", ast_errors_path=tmp_path / "thin.json"
+    )
+    assert len(thin) == len(full)
+
+    conn = sqlite3.connect(thin_db)
+    assert conn.execute("SELECT COUNT(*) FROM code_units").fetchone()[0] == len(full)
+    assert conn.execute("SELECT COUNT(*) FROM code_units WHERE code IS NOT NULL").fetchone()[0] == 0
+    # sha1 / offset kolonları code kapatılsa da dolu
+    assert conn.execute("SELECT COUNT(*) FROM code_units WHERE sha1 IS NULL OR byte_offset IS NULL").fetchone()[0] == 0
+    conn.close()
+    assert json.loads((tmp_path / "thin.json").read_text(encoding="utf-8"))["store_code"] is False
+
+
+def test_s3_invalid_unit_type_raises(tmp_path):
+    repo = _units_repo(tmp_path)
+    with pytest.raises(ValueError):
+        extract_and_store_code_units(
+            [repo / "m.py"], repo, tmp_path / "x.db", "p1", units="function,loops"
+        )
+
+
+def test_s3_ast_errors_counted(tmp_path):
+    repo = tmp_path / "bad_repo"
+    repo.mkdir()
+    (repo / "ok.py").write_text("def ok_fn():\n    return 1\n", encoding="utf-8")
+    (repo / "bad.py").write_text("def broken(:\n    pass\n", encoding="utf-8")
+
+    errs = tmp_path / "ast.json"
+    units = extract_and_store_code_units(
+        [repo / "ok.py", repo / "bad.py"], repo, tmp_path / "b.db", "p1", ast_errors_path=errs
+    )
+    payload = json.loads(errs.read_text(encoding="utf-8"))
+    assert payload["files_considered"] == 2
+    assert payload["files_parsed"] == 1
+    assert payload["files_with_errors"] == 1
+    assert payload["errors"][0]["file_path"] == "bad.py"
+    assert [u["name"] for u in units] == ["ok_fn"]

@@ -1247,7 +1247,9 @@ class ArchiveExtractor:
                 repo_dir=repo_dir,
                 db_path=Path(self.db_path),
                 project_id=project_id,
-                repo_url=repo_input
+                repo_url=repo_input,
+                units=self.config.get("rendergit_units"),
+                store_code=self.config.get("rendergit_store_code", True),
             )
 
             # Store flattened repo text as an article entry in SQLite DB

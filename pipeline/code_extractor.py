@@ -2,6 +2,7 @@ import io
 import os
 import ast
 import json
+import hashlib
 import sqlite3
 import subprocess
 import time
@@ -77,7 +78,8 @@ class CodeAnalyzer(ast.NodeVisitor):
                 "docstring": ast.get_docstring(node) or "",
                 "code": code,
                 "line_count": line_count,
-                "lineno": node.lineno
+                "lineno": node.lineno,
+                "end_lineno": getattr(node, "end_lineno", node.lineno)
             })
         self.generic_visit(node)
 
@@ -103,7 +105,8 @@ class CodeAnalyzer(ast.NodeVisitor):
                 "docstring": ast.get_docstring(node) or "",
                 "code": code,
                 "line_count": line_count,
-                "lineno": node.lineno
+                "lineno": node.lineno,
+                "end_lineno": getattr(node, "end_lineno", node.lineno)
             })
         self.generic_visit(node)
 
@@ -123,7 +126,8 @@ class CodeAnalyzer(ast.NodeVisitor):
                 "docstring": ast.get_docstring(node) or "",
                 "code": code,
                 "line_count": line_count,
-                "lineno": node.lineno
+                "lineno": node.lineno,
+                "end_lineno": getattr(node, "end_lineno", node.lineno)
             })
         self.generic_visit(node)
 
@@ -139,7 +143,8 @@ class CodeAnalyzer(ast.NodeVisitor):
                 "docstring": "",
                 "code": code,
                 "line_count": len(code.splitlines()),
-                "lineno": lineno
+                "lineno": lineno,
+                "end_lineno": end_lineno
             })
         self.generic_visit(node)
 
@@ -155,7 +160,8 @@ class CodeAnalyzer(ast.NodeVisitor):
                 "docstring": "",
                 "code": code,
                 "line_count": len(code.splitlines()),
-                "lineno": lineno
+                "lineno": lineno,
+                "end_lineno": end_lineno
             })
         self.generic_visit(node)
 
@@ -387,16 +393,52 @@ def _rendergit_sidecar_paths(output_file: Optional[Path], repo_dir: Path) -> Tup
     return base_dir / f"{stem}_skipped.jsonl", base_dir / f"{stem}_coverage.json"
 
 
-def _write_file_blocks(sink, render_files: Sequence[Tuple[Path, Path]]) -> None:
+def _read_text_normalized(path: Path) -> str:
+    """
+    S3: BOM'u atar (``utf-8-sig``) ve satır sonlarını LF'e normalleştirir (``newline=None``).
+    Böylece BOM'lu dosyanın ilk karakteri ``\\ufeff`` olmaz, CRLF'li dosya LF'e iner.
+    """
+    with open(path, "r", encoding="utf-8-sig", errors="replace", newline=None) as fh:
+        return fh.read()
+
+
+def _sha1_text(text: str) -> str:
+    """İçeriğin sha1'i (dedupe ve ``code_units.sha1`` için tek biçim)."""
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def _line_byte_offsets(text: str) -> List[int]:
+    """Normalize edilmiş metnin satır başı bayt ofsetleri (0-tabanlı, UTF-8)."""
+    offsets = [0]
+    total = 0
+    for line in text.splitlines(keepends=True):
+        total += len(line.encode("utf-8"))
+        offsets.append(total)
+    return offsets
+
+
+def _write_file_blocks(
+    sink,
+    render_files: Sequence[Tuple[Path, Path]],
+    *,
+    dedupe: bool = True,
+    duplicates: Optional[List[Dict[str, Any]]] = None,
+) -> None:
     """
     Dosya gövdelerini **akışlı** yazar: içerik listesi biriktirilmez, her dosya
     okunur, yazılır ve bırakılır (S2 bellek kuralı).
+
+    S3: okuma ``utf-8-sig`` + ``newline=None`` ile yapılır (BOM atılır, CRLF→LF).
+    ``dedupe=True`` iken aynı içerik ikinci kez yazılmaz; blok başlığına
+    ``duplicate_of: <ilk yol>`` işareti düşülür ve dosya ``duplicates`` listesine eklenir.
     """
+    seen: Dict[str, str] = {}
     for index, (file_path, rel_file_path) in enumerate(render_files):
         if index:
             sink.write("\n")
+        rel_posix = Path(rel_file_path).as_posix()
         try:
-            content = file_path.read_text(encoding="utf-8", errors="replace")
+            content = _read_text_normalized(file_path)
         except (OSError, ValueError) as e:
             sink.write(f"<!-- Could not read {rel_file_path}: {e} -->\n")
             continue
@@ -406,6 +448,23 @@ def _write_file_blocks(sink, render_files: Sequence[Tuple[Path, Path]]) -> None:
             f"FILE: {rel_file_path}\n"
             + "=" * 80 + "\n"
         )
+        digest = _sha1_text(content) if dedupe else None
+        original = seen.get(digest) if dedupe else None
+        if original is not None:
+            sink.write(
+                f"{header}\n<!-- duplicate_of: {original} (sha1 {digest}); "
+                f"içerik ilk kopyada yazıldı -->\n```{suffix}\n```\n"
+            )
+            if duplicates is not None:
+                duplicates.append({
+                    "path": rel_posix,
+                    "duplicate_of": original,
+                    "sha1": digest,
+                    "bytes": len(content.encode("utf-8")),
+                })
+            continue
+        if dedupe:
+            seen[digest] = rel_posix
         sink.write(f"{header}\n```{suffix}\n{content}\n```\n")
 
 
@@ -415,6 +474,7 @@ def _flatten_repository_rendergit_v2(
     *,
     exclude: Optional[Sequence[str]] = None,
     include_ext: Optional[Sequence[str]] = None,
+    dedupe: bool = True,
 ) -> Tuple[str, List[Path]]:
     """
     S1/S2 (v2) yolu: ikili dosyalar uzantı listesi **ve** magic-byte sniff ile elenir,
@@ -515,16 +575,17 @@ def _flatten_repository_rendergit_v2(
 
     head = "".join(tree_lines) + "\n\n# File Contents\n\n"
 
+    duplicates: List[Dict[str, Any]] = []
     flattened_text = ""
     if output_file is not None:
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_file, "w", encoding="utf-8") as fh:
+        with open(output_file, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(head)
-            _write_file_blocks(fh, render_files)
+            _write_file_blocks(fh, render_files, dedupe=dedupe, duplicates=duplicates)
     else:
         buffer = io.StringIO()
         buffer.write(head)
-        _write_file_blocks(buffer, render_files)
+        _write_file_blocks(buffer, render_files, dedupe=dedupe, duplicates=duplicates)
         flattened_text = buffer.getvalue()
 
     skipped_path, coverage_path = _rendergit_sidecar_paths(output_file, repo_dir)
@@ -554,6 +615,10 @@ def _flatten_repository_rendergit_v2(
         "by_reason": by_reason,
         "by_ext": by_ext,
         "by_lang": by_lang,
+        # S3: içerik tekrarı — aynı sha1'e sahip sonraki dosyalar içerik taşımaz
+        "files_deduplicated": len(duplicates),
+        "bytes_deduplicated": sum(entry["bytes"] for entry in duplicates),
+        "duplicates": duplicates,
         # Budanan dizinler dosya sayımına girmez (yürüyüşte hiç ziyaret edilmez);
         # izlenebilirlik için ayrı listede tutulur.
         "dirs_skipped": skipped_dirs,
@@ -578,6 +643,7 @@ def flatten_repository_rendergit(
     v2: bool = False,
     exclude: Optional[Sequence[str]] = None,
     include_ext: Optional[Sequence[str]] = None,
+    dedupe: bool = True,
 ) -> Tuple[str, List[Path]]:
     """
     Traverses repository directory, generating a rendergit-style single markdown document.
@@ -589,10 +655,12 @@ def flatten_repository_rendergit(
 
     S2: v2 yolunda ``output_file`` verilirse metin **dosyaya akıtılır** ve boş dize
     döner; metin gerekiyorsa ``output_file=None`` kullanılır (``io.StringIO``).
+    S3: v2 yolunda okuma ``utf-8-sig`` + ``newline=None`` (BOM atılır, CRLF→LF) ve
+    ``dedupe=True`` iken aynı içerik tek kez yazılır (``duplicate_of`` işareti).
     """
     if v2:
         return _flatten_repository_rendergit_v2(
-            repo_dir, output_file, exclude=exclude, include_ext=include_ext
+            repo_dir, output_file, exclude=exclude, include_ext=include_ext, dedupe=dedupe
         )
 
     tree_lines = []
@@ -647,6 +715,10 @@ def flatten_repository_rendergit(
 def init_code_db(db_path: Path):
     """
     Initializes the SQLite database table for storing extracted AST code units.
+
+    S3: ``sha1`` / ``byte_offset`` / ``end_offset`` kolonları eklenir (eski DB'lerde
+    ``ALTER TABLE ... ADD COLUMN`` ile göç edilir; hiçbir kolon silinmez) ve
+    ``(project_id, file_path)`` + ``(project_id, unit_type)`` indeksleri kurulur.
     """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=30.0)
@@ -667,9 +739,31 @@ def init_code_db(db_path: Path):
         code TEXT,
         line_count INTEGER,
         lineno INTEGER,
-        created_at REAL
+        created_at REAL,
+        sha1 TEXT,
+        byte_offset INTEGER,
+        end_offset INTEGER
     )
     """)
+
+    # S3 göçü: mevcut DB'lerde eksik kolonları ekle (kolon silinmez → eski kod çalışır)
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(code_units)")}
+    for column, sql_type in (("sha1", "TEXT"), ("byte_offset", "INTEGER"), ("end_offset", "INTEGER")):
+        if column not in existing_columns:
+            cursor.execute(f"ALTER TABLE code_units ADD COLUMN {column} {sql_type}")
+
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_code_units_project_file ON code_units(project_id, file_path)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_code_units_project_type ON code_units(project_id, unit_type)"
+    )
+    # S3 kabulü "name LIKE < 3 ms": plan iki indeksle bunu karşılamıyordu (ölçüm 25 ms).
+    # NOCASE kolasyonu LIKE önek optimizasyonunu açar → kapsayıcı indeks taraması.
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_code_units_project_name "
+        "ON code_units(project_id, name COLLATE NOCASE)"
+    )
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS synthetic_code_pairs (
@@ -691,53 +785,153 @@ def init_code_db(db_path: Path):
     conn.close()
 
 
+VALID_UNIT_TYPES: Tuple[str, ...] = ("function", "class", "loop")
+
+
+def _normalize_units(units: Any) -> Optional[Set[str]]:
+    """
+    ``--units function,class`` / ``['function']`` → ``{'function','class'}``.
+
+    ``None``/boş → ``None`` (varsayılan: tüm birim tipleri korunur). Tanınmayan tip
+    sessizce yutulmaz, ``ValueError`` yükselir (yanlış filtre üretimi önlenir).
+    """
+    if not units:
+        return None
+    values = [units] if isinstance(units, str) else list(units)
+    out: Set[str] = set()
+    for value in values:
+        for part in str(value).split(","):
+            unit_type = part.strip().lower()
+            if not unit_type:
+                continue
+            if unit_type not in VALID_UNIT_TYPES:
+                raise ValueError(
+                    f"Geçersiz unit_type: {unit_type!r} (geçerli: {', '.join(VALID_UNIT_TYPES)})"
+                )
+            out.add(unit_type)
+    return out or None
+
+
+def _coerce_bool(value: Any) -> bool:
+    """``"0"/"false"/"no"/"off"`` → False; diğer her şey bool()."""
+    if isinstance(value, str):
+        return value.strip().lower() not in ("0", "", "false", "no", "off")
+    return bool(value)
+
+
+def _ast_errors_path(project_id: str, ast_errors_path: Optional[Path] = None) -> Path:
+    if ast_errors_path is not None:
+        return Path(ast_errors_path)
+    return Path("exports") / f"{project_id}_ast_errors.json"
+
+
 def extract_and_store_code_units(
     parsed_files: List[Path],
     repo_dir: Path,
     db_path: Path,
     project_id: str,
-    repo_url: str = ""
+    repo_url: str = "",
+    *,
+    units: Any = None,
+    store_code: Any = True,
+    ast_errors_path: Optional[Path] = None,
 ) -> List[Dict[str, Any]]:
     """
     Parses Python source files using AST, extracts code units, and saves them into SQLite DB.
+
+    S3 davranışı:
+    - Kaynak ``utf-8-sig`` + ``newline=None`` ile okunur (BOM atılır, CRLF→LF).
+    - ``units`` verilirse yalnız o birim tipleri saklanır (varsayılan: hepsi).
+    - ``store_code=False`` (``--store-code 0``) → ``code`` kolonu NULL bırakılır; DB küçülür.
+    - Her satıra ``sha1``, ``byte_offset``, ``end_offset`` yazılır.
+    - Tek transaction + ``executemany``; parse hataları ``<project_id>_ast_errors.json``'a düşer.
     """
     init_code_db(db_path)
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    all_extracted_units = []
+    unit_filter = _normalize_units(units)
+    keep_code = _coerce_bool(store_code)
+    all_extracted_units: List[Dict[str, Any]] = []
+    rows: List[Tuple[Any, ...]] = []
+    ast_errors: List[Dict[str, str]] = []
+    py_files = [p for p in parsed_files if p.suffix.lower() == ".py"]
+    files_parsed = 0
+    created_at = time.time()
 
-    # Clear existing code units for this project_id if re-extracting
-    cursor.execute("DELETE FROM code_units WHERE project_id = ?", (project_id,))
+    try:
+        # Clear existing code units for this project_id if re-extracting
+        cursor.execute("DELETE FROM code_units WHERE project_id = ?", (project_id,))
 
-    for file_path in parsed_files:
-        if file_path.suffix.lower() != ".py":
-            continue
+        for file_path in py_files:
+            rel_path = str(file_path.relative_to(repo_dir))
+            try:
+                source_code = _read_text_normalized(file_path)
+                tree = ast.parse(source_code)
+            except SyntaxError as se:
+                ast_errors.append({"file_path": rel_path, "error": f"SyntaxError: {se}"})
+                print(f"AST SyntaxError in {rel_path}: {se}")
+                continue
+            except Exception as e:
+                ast_errors.append({"file_path": rel_path, "error": f"{type(e).__name__}: {e}"})
+                print(f"Error parsing AST in {rel_path}: {e}")
+                continue
 
-        rel_path = str(file_path.relative_to(repo_dir))
-        try:
-            source_code = file_path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(source_code)
+            files_parsed += 1
             analyzer = CodeAnalyzer(source_code, rel_path)
             analyzer.visit(tree)
 
+            offsets = _line_byte_offsets(source_code)
+            last_index = len(offsets) - 1
+
             for item in analyzer.items:
-                cursor.execute("""
-                INSERT INTO code_units 
-                (project_id, repo_url, file_path, unit_type, name, signature, docstring, code, line_count, lineno, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
+                if unit_filter is not None and item["unit_type"] not in unit_filter:
+                    continue
+
+                lineno = item["lineno"]
+                end_lineno = item.get("end_lineno", lineno)
+                byte_offset = offsets[min(lineno - 1, last_index)]
+                end_offset = offsets[min(max(end_lineno, lineno), last_index)]
+                digest = _sha1_text(item["code"])
+
+                rows.append((
                     project_id, repo_url, rel_path, item["unit_type"], item["name"],
-                    item["signature"], item["docstring"], item["code"], item["line_count"], item["lineno"], time.time()
+                    item["signature"], item["docstring"],
+                    item["code"] if keep_code else None,
+                    item["line_count"], lineno, created_at,
+                    digest, byte_offset, end_offset,
                 ))
                 item["file_path"] = rel_path
+                item["sha1"] = digest
+                item["byte_offset"] = byte_offset
+                item["end_offset"] = end_offset
                 all_extracted_units.append(item)
 
-        except SyntaxError as se:
-            print(f"AST SyntaxError in {rel_path}: {se}")
-        except Exception as e:
-            print(f"Error parsing AST in {rel_path}: {e}")
+        if rows:
+            cursor.executemany("""
+            INSERT INTO code_units
+            (project_id, repo_url, file_path, unit_type, name, signature, docstring, code,
+             line_count, lineno, created_at, sha1, byte_offset, end_offset)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, rows)
+        conn.commit()
+    finally:
+        conn.close()
 
-    conn.commit()
-    conn.close()
+    errors_path = _ast_errors_path(project_id, ast_errors_path)
+    try:
+        errors_path.parent.mkdir(parents=True, exist_ok=True)
+        errors_path.write_text(json.dumps({
+            "project_id": project_id,
+            "files_considered": len(py_files),
+            "files_parsed": files_parsed,
+            "files_with_errors": len(ast_errors),
+            "units_stored": len(rows),
+            "store_code": keep_code,
+            "units_filter": sorted(unit_filter) if unit_filter else sorted(VALID_UNIT_TYPES),
+            "errors": ast_errors,
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except OSError as e:
+        print(f"Uyarı: ast_errors.json yazılamadı ({errors_path}): {e}")
+
     return all_extracted_units
