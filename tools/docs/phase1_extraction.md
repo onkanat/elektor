@@ -49,7 +49,7 @@ graph TD
 | **[`pipeline/code_extractor.py`](../../pipeline/code_extractor.py)** | **`CodeExtractor`**: Git depolarını Andrej Karpathy'nin `rendergit` metodolojisiyle tek bir Markdown dosyasında düzleştirir. Python AST (`ast.parse`) ile `class` ve `def` birimlerini ayırarak `code_units` tablosuna kaydeder. |
 | **[`pipeline/langextract_engine.py`](../../pipeline/langextract_engine.py)** | **`LangExtractEngine`**: Google LangExtract ile metinler içindeki bileşen, formül ve devre parametrelerini tam karakter aralıklarıyla (`start_char`, `end_char`) etiketler ve `langextract_extractions` tablosuna kaydeder. |
 | **[`pipeline/image_optimizer.py`](../../pipeline/image_optimizer.py)** | **`ImageOptimizer`**: Kırpılmış ham PNG dosyalarını maksimum 1024px çözünürlük sınırı ve %85 WebP kalitesiyle sıkıştırarak `exports/<project_id>/images/` altına aktarır. Depolamadan %90 tasarruf sağlar. |
-| **[`pipeline/mcp_tools.py`](../../pipeline/mcp_tools.py) & [`hermes-agent/`](../../hermes-agent/README.md)** | **Hermes Agent & MCP Köprüsü**: Çıkarılan makaleleri, kırpılan şemaları (`inspect-crops --as-document`), Qdrant vektörlerini (`search_vector_rag`) ve SQLite bilgisini (`query_sqlite_knowledge`) `elektor_hermes_cli.py` ve Stdio JSON-RPC 2.0 `elektor_mcp_server.py` üzerinden Nous Research Hermes ajanlarına açar. |
+| **[`pipeline/mcp_tools.py`](../../pipeline/mcp_tools.py) & `elektor-lab` (ayri depo: /mnt/nvme/git_repo/elektor-lab.git)** | **Hermes Agent & MCP Köprüsü**: Çıkarılan makaleleri, kırpılan şemaları (`inspect-crops --as-document`), Qdrant vektörlerini (`search_vector_rag`) ve SQLite bilgisini (`query_sqlite_knowledge`) `elektor_hermes_cli.py` ve Stdio JSON-RPC 2.0 `elektor_mcp_server.py` üzerinden Nous Research Hermes ajanlarına açar. |
 
 ---
 
