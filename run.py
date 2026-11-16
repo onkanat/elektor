@@ -264,6 +264,11 @@ Examples:
     extract_parser = subparsers.add_parser("extract", help="Extract text and metadata from PDFs")
     extract_parser.add_argument("--limit", type=parse_limit, default=None, help="Limit the number of files to process (supports range 'start:end')")
     extract_parser.add_argument("--reset", action="store_true", help="Reset all databases and exported datasets before running")
+    # S2 (rendergit): repo-göreli hariç tutma desenleri ve isteğe bağlı uzantı daraltması
+    extract_parser.add_argument("--exclude", action="append", default=None, metavar="DESEN",
+                                help="rendergit: repo-göreli hariç tutma deseni (tekrarlanabilir, ör. --exclude third_party)")
+    extract_parser.add_argument("--include-ext", type=str, default=None, metavar="UZANTILAR",
+                                help="rendergit: yalnız bu uzantıları işle (virgülle, ör. py,ts,md)")
 
     # Enrich subcommand
     enrich_parser = subparsers.add_parser("enrich", help="Enrich text using local Ollama model (Summary, Q&A, DPO, Turkish)")
@@ -401,7 +406,18 @@ Examples:
 
     if args.command == "extract":
         print("=== Step 1: Extraction & Preprocessing ===")
-        extractor = ArchiveExtractor(config_path=args.config)
+        # S2 (rendergit): --exclude / --include-ext config'e enjekte edilir
+        rendergit_overrides = {}
+        if getattr(args, "exclude", None):
+            rendergit_overrides["rendergit_exclude"] = args.exclude
+        if getattr(args, "include_ext", None):
+            rendergit_overrides["rendergit_include_ext"] = args.include_ext
+        if rendergit_overrides and Path(args.config).is_file():
+            cfg = json.loads(Path(args.config).read_text(encoding="utf-8"))
+            cfg.update(rendergit_overrides)
+            extractor = ArchiveExtractor(config_path=args.config, config_dict=cfg)
+        else:
+            extractor = ArchiveExtractor(config_path=args.config)
         try:
             extractor.process_all_articles(limit=args.limit)
         finally:

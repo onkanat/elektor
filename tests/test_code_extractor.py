@@ -75,9 +75,12 @@ def test_flatten_repository_rendergit():
         out_file = tmp_path / "output_rendergit.md"
         text, parsed_files = flatten_repository_rendergit(tmp_path, output_file=out_file)
 
-        assert "main.py" in text
-        assert "pkg" in text
-        assert "utils.py" in text
+        rendered = out_file.read_text(encoding="utf-8")
+        # legacy (v2=False) yolu metni hem döndürür hem dosyaya yazar
+        assert text == rendered
+        assert "main.py" in rendered
+        assert "pkg" in rendered
+        assert "utils.py" in rendered
         assert len(parsed_files) == 2
         assert out_file.exists()
 
@@ -166,8 +169,9 @@ def test_clean_persona_intros():
 
 def _run_fixture(tmp_path: Path, name: str = "exports/mini_rendergit.md"):
     out = tmp_path / name
-    text, parsed = flatten_repository_rendergit(FIXTURE_REPO, output_file=out, v2=True)
-    return out, text, parsed
+    _text, parsed = flatten_repository_rendergit(FIXTURE_REPO, output_file=out, v2=True)
+    # S2: dosya modunda metin dosyada; testler dosyadan okur
+    return out, out.read_text(encoding="utf-8"), parsed
 
 
 def test_v2_fixture_skipped_jsonl(tmp_path):
@@ -281,3 +285,127 @@ def test_v2_sidecar_fallback_without_output_file(tmp_path, monkeypatch):
     assert "fake.gguf" not in text
     assert (tmp_path / "exports" / "rendergit_mini_skipped.jsonl").exists()
     assert (tmp_path / "exports" / "rendergit_mini_coverage.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# S2 — streaming, determinizm, gitignore/exclude/include-ext, by_lang
+# ---------------------------------------------------------------------------
+
+def _make_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "skipdir").mkdir()
+    (repo / "vendor").mkdir()
+    (repo / "src" / "a.py").write_text("print('a')\n", encoding="utf-8")
+    (repo / "src" / "b.log").write_text("log satiri\n", encoding="utf-8")
+    (repo / "skipdir" / "c.py").write_text("print('c')\n", encoding="utf-8")
+    (repo / "vendor" / "v.py").write_text("print('v')\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("*.log\nskipdir/\n", encoding="utf-8")
+    return repo
+
+
+def _skipped_reasons(path: Path) -> dict:
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return {entry["path"]: entry["reason"] for entry in lines}
+
+
+def test_streaming_file_equals_stringio_text(tmp_path):
+    """Akışlı dosya çıktısı, bellekte toplanan metinle bayt bayt aynı olmalı."""
+    out = tmp_path / "exports/akis_rendergit.md"
+    streamed, streamed_files = flatten_repository_rendergit(FIXTURE_REPO, output_file=out, v2=True)
+    in_memory, memory_files = flatten_repository_rendergit(FIXTURE_REPO, v2=True)
+
+    assert streamed == ""                      # dosya modunda metin tutulmaz
+    assert [p.relative_to(FIXTURE_REPO).as_posix() for p in streamed_files] == \
+           [p.relative_to(FIXTURE_REPO).as_posix() for p in memory_files]
+    assert out.read_text(encoding="utf-8") == in_memory
+
+
+def test_two_runs_byte_identical(tmp_path):
+    import hashlib
+
+    digests = []
+    for index in range(2):
+        out = tmp_path / f"run{index}" / "mini_rendergit.md"
+        flatten_repository_rendergit(FIXTURE_REPO, output_file=out, v2=True)
+        digests.append(hashlib.md5(out.read_bytes()).hexdigest())
+
+    assert digests[0] == digests[1]
+
+
+def test_gitignore_skips_and_records(tmp_path):
+    repo = _make_repo(tmp_path)
+    out = tmp_path / "gi_rendergit.md"
+    _, parsed = flatten_repository_rendergit(repo, output_file=out, v2=True)
+
+    rendered = {p.relative_to(repo).as_posix() for p in parsed}
+    assert "src/a.py" in rendered
+    assert "vendor/v.py" in rendered            # exclude verilmedi
+    assert "src/b.log" not in rendered
+    assert "skipdir/c.py" not in rendered
+
+    body = out.read_text(encoding="utf-8")
+    assert "b.log" not in body
+    assert "skipdir" not in body
+
+    reasons = _skipped_reasons(tmp_path / "gi_skipped.jsonl")
+    assert reasons["src/b.log"] == "gitignore"
+    # dizin deseni yürüyüşte budanır: içindeki dosya ayrıca kaydedilmez
+    assert "skipdir/c.py" not in reasons
+
+
+def test_exclude_patterns(tmp_path):
+    repo = _make_repo(tmp_path)
+    out = tmp_path / "ex_rendergit.md"
+    _, parsed = flatten_repository_rendergit(
+        repo, output_file=out, v2=True, exclude=["vendor", "src/b.log"]
+    )
+
+    rendered = {p.relative_to(repo).as_posix() for p in parsed}
+    assert rendered == {"src/a.py"}              # skipdir/ zaten .gitignore'da
+
+    body = out.read_text(encoding="utf-8")
+    assert "vendor" not in body
+
+    reasons = _skipped_reasons(tmp_path / "ex_skipped.jsonl")
+    assert reasons["src/b.log"] == "exclude"     # dosya düzeyi desen
+
+
+def test_include_ext_narrows(tmp_path):
+    repo = _make_repo(tmp_path)
+    out = tmp_path / "inc_rendergit.md"
+    _, parsed = flatten_repository_rendergit(
+        repo, output_file=out, v2=True, include_ext="py"
+    )
+
+    rendered = {p.relative_to(repo).as_posix() for p in parsed}
+    assert rendered == {"src/a.py", "vendor/v.py"}
+
+    coverage = json.loads((tmp_path / "inc_coverage.json").read_text(encoding="utf-8"))
+    assert coverage["by_reason"]["include_ext"] == 1        # src/b.log
+    assert coverage["files_total"] == coverage["files_rendered"] + coverage["files_skipped"]
+
+
+def test_coverage_by_lang(tmp_path):
+    repo = _make_repo(tmp_path)
+    out = tmp_path / "lang_rendergit.md"
+    _, parsed = flatten_repository_rendergit(repo, output_file=out, v2=True)
+
+    coverage = json.loads((tmp_path / "lang_coverage.json").read_text(encoding="utf-8"))
+    by_lang = coverage["by_lang"]
+    assert set(by_lang) == {".py"}
+    expected = sum(p.stat().st_size for p in parsed)
+    assert by_lang[".py"] == expected
+    assert sum(by_lang.values()) == coverage["bytes_rendered"]
+
+
+
+def test_skipped_dirs_are_recorded(tmp_path):
+    """Budanan dizinler (exclude/gitignore) coverage'da adıyla görünmeli."""
+    repo = _make_repo(tmp_path)
+    out = tmp_path / "dirs_rendergit.md"
+    flatten_repository_rendergit(repo, output_file=out, v2=True, exclude=["vendor"])
+
+    coverage = json.loads((tmp_path / "dirs_coverage.json").read_text(encoding="utf-8"))
+    assert {"path": "vendor/", "reason": "exclude"} in coverage["dirs_skipped"]
+    assert {"path": "skipdir/", "reason": "gitignore"} in coverage["dirs_skipped"]

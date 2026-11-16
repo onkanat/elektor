@@ -1231,7 +1231,16 @@ class ArchiveExtractor:
                 repo_dir = Path(repo_input)
 
             rendergit_out_path = Path("exports") / f"{project_id}_rendergit.md"
-            flattened_text, parsed_files = flatten_repository_rendergit(repo_dir, output_file=rendergit_out_path, v2=True)
+            flattened_text, parsed_files = flatten_repository_rendergit(
+                repo_dir,
+                output_file=rendergit_out_path,
+                v2=True,
+                exclude=self.config.get("rendergit_exclude"),
+                include_ext=self.config.get("rendergit_include_ext"),
+            )
+            # S2: v2 dosya modunda metin dosyaya akıtılır (bellek tavanı) → article satırı için buradan okunur
+            if not flattened_text and rendergit_out_path.exists():
+                flattened_text = rendergit_out_path.read_text(encoding="utf-8")
 
             extracted_units = extract_and_store_code_units(
                 parsed_files=parsed_files,

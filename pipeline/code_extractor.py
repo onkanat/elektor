@@ -1,11 +1,18 @@
+import io
 import os
 import ast
 import json
 import sqlite3
 import subprocess
 import time
+import fnmatch
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+
+try:  # .gitignore için tercih edilen motor; yoksa fnmatch yedeği kullanılır
+    import pathspec  # type: ignore
+except ImportError:  # pragma: no cover - Pi venv'inde pathspec yok
+    pathspec = None
 
 IGNORE_DIRS = {
     ".git", ".venv", "venv", "__pycache__", ".pytest_cache", ".antigravity",
@@ -225,6 +232,142 @@ def _looks_binary(path: Path, sniff: int = SNIFF_BYTES) -> bool:
         return (undecodable / max(1, len(text))) > 0.30
 
 
+def _is_readable(path: Path) -> bool:
+    """Açılabilir mi? (S2 streaming yolunda okuma ikinci geçişte yapıldığı için
+    yalnız erişim hatasını yakalayan ucuz kapı.)"""
+    try:
+        with open(path, "rb") as fh:
+            fh.read(1)
+    except OSError:
+        return False
+    return True
+
+
+def _parse_ignore_rule(raw: str) -> Optional[Tuple[str, bool, bool]]:
+    """``.gitignore`` satırını (desen, negate, yalnız-dizin) üçlüsüne çevirir."""
+    line = raw.rstrip("\r\n")
+    if not line.strip() or line.lstrip().startswith("#"):
+        return None
+    negate = line.startswith("!")
+    if negate:
+        line = line[1:]
+    line = line.strip()
+    if not line:
+        return None
+    dir_only = line.endswith("/")
+    if dir_only:
+        line = line.rstrip("/")
+    return line, negate, dir_only
+
+
+class _IgnoreRules:
+    """
+    ``.gitignore`` / ``--exclude`` desen kümesi.
+
+    ``pathspec`` kuruluysa onun gitwildmatch motoru kullanılır; değilse
+    fnmatch tabanlı minimal uygulama devreye girer (yeni zorunlu bağımlılık yok).
+    Minimal uygulama: son eşleşme kazanır (``!`` negasyonu), eğik çizgisiz desen
+    dosya adıyla her derinlikte eşleşir, ``/`` ile biten desen yalnız dizinleri eler.
+    """
+
+    def __init__(self, label: str = "gitignore") -> None:
+        self.label = label
+        self.backend = "pathspec" if pathspec is not None else "fnmatch"
+        self._specs: List[Any] = []
+        self._rules: List[Tuple[str, str, bool, bool]] = []
+
+    # -- yükleme -----------------------------------------------------------
+    def add_file(self, path: Path, base_rel: str = "") -> None:
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return
+        self.add_patterns(lines, base_rel)
+
+    def add_patterns(self, lines: Sequence[str], base_rel: str = "") -> None:
+        lines = list(lines)
+        if not lines:
+            return
+        if pathspec is not None:
+            prefixed = [p for p in (self._prefix(line, base_rel) for line in lines) if p]
+            if prefixed:
+                try:
+                    self._specs.append(pathspec.PathSpec.from_lines("gitwildmatch", prefixed))
+                    return
+                except Exception:  # bozuk desende fnmatch yedeğine düş
+                    self.backend = "fnmatch"
+        for raw in lines:
+            parsed = _parse_ignore_rule(raw)
+            if parsed:
+                pattern, negate, dir_only = parsed
+                self._rules.append((base_rel, pattern, negate, dir_only))
+
+    @staticmethod
+    def _prefix(line: str, base_rel: str) -> Optional[str]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            return None
+        if not base_rel:
+            return line
+        negate = stripped.startswith("!")
+        body = stripped[1:] if negate else stripped
+        body = body.lstrip("/")
+        return f"{'!' if negate else ''}{base_rel}/{body}"
+
+    # -- sorgu -------------------------------------------------------------
+    def ignored(self, rel_posix: str, is_dir: bool = False) -> bool:
+        if self._specs:
+            target = rel_posix + "/" if is_dir else rel_posix
+            try:
+                if any(spec.match_file(target) for spec in self._specs):
+                    return True
+            except Exception:
+                pass
+        decision = False
+        for base, pattern, negate, dir_only in self._rules:
+            if dir_only and not is_dir:
+                continue
+            if _rule_matches(rel_posix, base, pattern):
+                decision = not negate
+        return decision
+
+
+def _rule_matches(rel_posix: str, base: str, pattern: str) -> bool:
+    target = rel_posix
+    if base:
+        prefix = base.rstrip("/") + "/"
+        if not target.startswith(prefix):
+            return False
+        target = target[len(prefix):]
+    anchored = pattern.startswith("/")
+    if anchored:
+        pattern = pattern[1:]
+    if anchored or "/" in pattern:
+        if fnmatch.fnmatchcase(target, pattern):
+            return True
+        return target.startswith(pattern.rstrip("/") + "/")
+    return fnmatch.fnmatchcase(target.rsplit("/", 1)[-1], pattern)
+
+
+def _normalize_ext(include_ext: Optional[Sequence[str]]) -> Optional[Set[str]]:
+    """``--include-ext py,JS`` / ``['.py', 'js']`` → ``{'.py', '.js'}``."""
+    if not include_ext:
+        return None
+    values = [include_ext] if isinstance(include_ext, str) else list(include_ext)
+    out: Set[str] = set()
+    for value in values:
+        for part in str(value).split(","):
+            ext = part.strip().lower()
+            if not ext:
+                continue
+            out.add(ext if ext.startswith(".") else "." + ext)
+    return out or None
+
+
+def _join_rel(rel_root_posix: str, name: str) -> str:
+    return f"{rel_root_posix}/{name}" if rel_root_posix else name
+
+
 def _rendergit_sidecar_paths(output_file: Optional[Path], repo_dir: Path) -> Tuple[Path, Path]:
     """
     ``exports/<project_id>_skipped.jsonl`` ve ``..._coverage.json`` yollarını üretir.
@@ -244,61 +387,120 @@ def _rendergit_sidecar_paths(output_file: Optional[Path], repo_dir: Path) -> Tup
     return base_dir / f"{stem}_skipped.jsonl", base_dir / f"{stem}_coverage.json"
 
 
-def _flatten_repository_rendergit_v2(repo_dir: Path, output_file: Optional[Path] = None) -> Tuple[str, List[Path]]:
+def _write_file_blocks(sink, render_files: Sequence[Tuple[Path, Path]]) -> None:
     """
-    S1 (v2) yolu: ikili dosyalar uzantı listesi **ve** magic-byte sniff ile elenir,
+    Dosya gövdelerini **akışlı** yazar: içerik listesi biriktirilmez, her dosya
+    okunur, yazılır ve bırakılır (S2 bellek kuralı).
+    """
+    for index, (file_path, rel_file_path) in enumerate(render_files):
+        if index:
+            sink.write("\n")
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+        except (OSError, ValueError) as e:
+            sink.write(f"<!-- Could not read {rel_file_path}: {e} -->\n")
+            continue
+        suffix = file_path.suffix[1:] if file_path.suffix else ""
+        header = (
+            "=" * 80 + "\n"
+            f"FILE: {rel_file_path}\n"
+            + "=" * 80 + "\n"
+        )
+        sink.write(f"{header}\n```{suffix}\n{content}\n```\n")
+
+
+def _flatten_repository_rendergit_v2(
+    repo_dir: Path,
+    output_file: Optional[Path] = None,
+    *,
+    exclude: Optional[Sequence[str]] = None,
+    include_ext: Optional[Sequence[str]] = None,
+) -> Tuple[str, List[Path]]:
+    """
+    S1/S2 (v2) yolu: ikili dosyalar uzantı listesi **ve** magic-byte sniff ile elenir,
+    ``.gitignore`` (varsa ``pathspec``, yoksa fnmatch) ve ``exclude`` desenleri uygulanır,
     atlanan her dosya ``exports/<project_id>_skipped.jsonl`` dosyasına yazılır ve
-    ``exports/<project_id>_coverage.json`` kapsam özeti üretilir.
+    ``exports/<project_id>_coverage.json`` kapsam özeti (``by_lang`` dahil) üretilir.
+
+    Yazma akışlıdır: ``output_file`` verilmişse içerik doğrudan dosyaya yazılır,
+    bellekte ``file_contents`` listesi ve ``"".join`` tutulmaz → bu modda **boş dize**
+    döner. Metnin kendisi gerekiyorsa ``output_file=None`` verilir; o zaman içerik
+    ``io.StringIO`` ile toplanır ve döndürülür (test/API yolu).
     """
+    include_set = _normalize_ext(include_ext)
+    exclude_rules = _IgnoreRules("exclude")
+    exclude_rules.add_patterns(list(exclude or []))
+    gitignore_rules = _IgnoreRules("gitignore")
+
     tree_lines: List[str] = []
-    file_contents: List[str] = []
+    render_files: List[Tuple[Path, Path]] = []
     parsed_files: List[Path] = []
     skipped: List[Dict[str, Any]] = []
+    skipped_dirs: List[Dict[str, str]] = []
     bytes_rendered = 0
 
     tree_lines.append(f"# Repository Structure: {repo_dir.name}\n")
     tree_lines.append("```")
 
     for root, dirs, files in os.walk(repo_dir):
-        dirs[:] = sorted(d for d in dirs if d not in IGNORE_DIRS and not d.startswith("."))
-
         rel_root = Path(root).relative_to(repo_dir)
-        indent = "  " * len(rel_root.parts) if str(rel_root) != "." else ""
+        rel_root_posix = "" if str(rel_root) == "." else rel_root.as_posix()
 
-        if str(rel_root) != ".":
+        gitignore_file = Path(root) / ".gitignore"
+        if gitignore_file.is_file():
+            gitignore_rules.add_file(gitignore_file, rel_root_posix)
+
+        kept_dirs: List[str] = []
+        for d in sorted(dirs):
+            rel_dir = _join_rel(rel_root_posix, d)
+            if d in IGNORE_DIRS or d.startswith("."):
+                continue
+            if exclude_rules.ignored(rel_dir, True):
+                skipped_dirs.append({"path": rel_dir + "/", "reason": "exclude"})
+                continue
+            if gitignore_rules.ignored(rel_dir, True):
+                skipped_dirs.append({"path": rel_dir + "/", "reason": "gitignore"})
+                continue
+            kept_dirs.append(d)
+        dirs[:] = kept_dirs
+        files = sorted(files)
+
+        indent = "  " * len(rel_root.parts) if rel_root_posix else ""
+        if rel_root_posix:
             tree_lines.append(f"{indent}📁 {rel_root.name}/")
 
-        for file in sorted(files):
+        for file in files:
             if file.startswith(".") or file in IGNORE_DIRS:
                 continue
 
             file_path = Path(root) / file
             rel_file_path = file_path.relative_to(repo_dir)
+            rel_posix = rel_file_path.as_posix()
             try:
                 size = file_path.stat().st_size
             except OSError:
                 size = 0
 
             reason: Optional[str] = None
-            if _ignored_extension(file_path):
+            if include_set is not None and file_path.suffix.lower() not in include_set:
+                reason = "include_ext"
+            elif exclude_rules.ignored(rel_posix, False):
+                reason = "exclude"
+            elif gitignore_rules.ignored(rel_posix, False):
+                reason = "gitignore"
+            elif _ignored_extension(file_path):
                 reason = "ext"
             elif _looks_binary(file_path):
                 reason = "sniff"
+            elif not _is_readable(file_path):
+                reason = "unreadable"
 
             if reason is None:
-                try:
-                    content = file_path.read_text(encoding="utf-8", errors="replace")
-                except (OSError, ValueError):
-                    reason = "unreadable"
-                else:
-                    tree_lines.append(f"{indent}  📄 {rel_file_path}")
-                    header = f"================================================================================\n" \
-                             f"FILE: {rel_file_path}\n" \
-                             f"================================================================================\n"
-                    file_contents.append(f"{header}\n```{file_path.suffix[1:] if file_path.suffix else ''}\n{content}\n```\n")
-                    parsed_files.append(file_path)
-                    bytes_rendered += size
-                    continue
+                tree_lines.append(f"{indent}  📄 {rel_file_path}")
+                render_files.append((file_path, rel_file_path))
+                parsed_files.append(file_path)
+                bytes_rendered += size
+                continue
 
             skipped.append({
                 "path": str(rel_file_path),
@@ -309,22 +511,39 @@ def _flatten_repository_rendergit_v2(repo_dir: Path, output_file: Optional[Path]
 
     tree_lines.append("```\n\n")
     if skipped:
-        tree_lines.append(f"<!-- {len(skipped)} dosya atlandı (ikili/okunamaz); ayrıntı: {repo_dir.name}_skipped.jsonl -->\n\n")
+        tree_lines.append(f"<!-- {len(skipped)} dosya atlandı (ikili/okunamaz/gitignore); ayrıntı: {repo_dir.name}_skipped.jsonl -->\n\n")
 
-    flattened_text = "".join(tree_lines) + "\n\n# File Contents\n\n" + "\n".join(file_contents)
+    head = "".join(tree_lines) + "\n\n# File Contents\n\n"
 
-    if output_file:
+    flattened_text = ""
+    if output_file is not None:
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        output_file.write_text(flattened_text, encoding="utf-8")
+        with open(output_file, "w", encoding="utf-8") as fh:
+            fh.write(head)
+            _write_file_blocks(fh, render_files)
+    else:
+        buffer = io.StringIO()
+        buffer.write(head)
+        _write_file_blocks(buffer, render_files)
+        flattened_text = buffer.getvalue()
 
     skipped_path, coverage_path = _rendergit_sidecar_paths(output_file, repo_dir)
     by_reason: Dict[str, int] = {"ext": 0, "sniff": 0, "unreadable": 0}
     by_ext: Dict[str, int] = {}
+    by_lang: Dict[str, int] = {}
     bytes_skipped = 0
     for entry in skipped:
         by_reason[entry["reason"]] = by_reason.get(entry["reason"], 0) + 1
         by_ext[entry["ext"] or "<yok>"] = by_ext.get(entry["ext"] or "<yok>", 0) + 1
         bytes_skipped += entry["bytes"]
+
+    for file_path, _rel_file_path in render_files:
+        key = file_path.suffix.lower() or "<yok>"
+        try:
+            size = file_path.stat().st_size
+        except OSError:
+            size = 0
+        by_lang[key] = by_lang.get(key, 0) + size
 
     coverage = {
         "files_total": len(parsed_files) + len(skipped),
@@ -334,6 +553,10 @@ def _flatten_repository_rendergit_v2(repo_dir: Path, output_file: Optional[Path]
         "bytes_skipped": bytes_skipped,
         "by_reason": by_reason,
         "by_ext": by_ext,
+        "by_lang": by_lang,
+        # Budanan dizinler dosya sayımına girmez (yürüyüşte hiç ziyaret edilmez);
+        # izlenebilirlik için ayrı listede tutulur.
+        "dirs_skipped": skipped_dirs,
     }
 
     try:
@@ -348,16 +571,29 @@ def _flatten_repository_rendergit_v2(repo_dir: Path, output_file: Optional[Path]
     return flattened_text, parsed_files
 
 
-def flatten_repository_rendergit(repo_dir: Path, output_file: Optional[Path] = None, *, v2: bool = False) -> Tuple[str, List[Path]]:
+def flatten_repository_rendergit(
+    repo_dir: Path,
+    output_file: Optional[Path] = None,
+    *,
+    v2: bool = False,
+    exclude: Optional[Sequence[str]] = None,
+    include_ext: Optional[Sequence[str]] = None,
+) -> Tuple[str, List[Path]]:
     """
     Traverses repository directory, generating a rendergit-style single markdown document.
     Returns (flattened_text, list_of_parsed_source_files).
 
     ``v2=True`` ikili dosya kör noktasını kapatan yolu açar (uzantı listesi + sniff +
-    skipped/coverage kaydı). Varsayılan (v2=False) bayt-identik eski davranıştır.
+    skipped/coverage kaydı + ``.gitignore``/``exclude``/``include_ext`` + ``by_lang``).
+    Varsayılan (v2=False) eski davranıştır (yalnız uzantı kapısı, yan dosya yok).
+
+    S2: v2 yolunda ``output_file`` verilirse metin **dosyaya akıtılır** ve boş dize
+    döner; metin gerekiyorsa ``output_file=None`` kullanılır (``io.StringIO``).
     """
     if v2:
-        return _flatten_repository_rendergit_v2(repo_dir, output_file)
+        return _flatten_repository_rendergit_v2(
+            repo_dir, output_file, exclude=exclude, include_ext=include_ext
+        )
 
     tree_lines = []
     file_contents = []
@@ -367,8 +603,8 @@ def flatten_repository_rendergit(repo_dir: Path, output_file: Optional[Path] = N
     tree_lines.append("```")
 
     for root, dirs, files in os.walk(repo_dir):
-        # Filter ignored directories in-place
-        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS and not d.startswith(".")]
+        # Filter ignored directories in-place (S2: determinizm için sıralanır)
+        dirs[:] = sorted(d for d in dirs if d not in IGNORE_DIRS and not d.startswith("."))
 
         rel_root = Path(root).relative_to(repo_dir)
         indent = "  " * len(rel_root.parts) if str(rel_root) != "." else ""
