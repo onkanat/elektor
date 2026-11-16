@@ -37,7 +37,7 @@ flowchart TD
 
 #### 4. Vektörleştirme, İhraç ve Hermes Agent / MCP Erişimi (`python run.py embed` & `python run.py export`)
 - Kitap bölümleri vektörleştirilerek Qdrant veri tabanına yüklenir.
-- Sonuçlar `exports/<project_id>/` dizininde yayınlanmaya hazır JSONL ve Parquet formatlarında ihraç edilir ve [`hermes-agent/`](../../hermes-agent/README.md) altındaki `elektor-ocr-layout` / `elektor-rag-memory` yetenekleri ve Stdio MCP sunucusu (`elektor_mcp_server.py`) üzerinden Hermes ajanlarına açılır.
+- Sonuçlar `exports/<project_id>/` dizininde yayınlanmaya hazır JSONL ve Parquet formatlarında ihraç edilir ve `elektor-lab/` (ayrı depo: /mnt/nvme/git_repo/elektor-lab.git) altındaki `elektor-ocr-layout` / `elektor-rag-memory` yetenekleri ve Stdio MCP sunucusu (`elektor_mcp_server.py`) üzerinden Hermes ajanlarına açılır.
 
 ---
 

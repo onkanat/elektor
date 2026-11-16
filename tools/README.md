@@ -17,9 +17,9 @@ Bu klasör, projenin yardımcı araçlarını, benchmark testlerini ve donanım 
 - **[`tools/docs/LANGEXTRACT_GUIDE.md`](docs/LANGEXTRACT_GUIDE.md)**: Google LangExtract şema şablonları ve grounded karakter çapaları geliştirici rehberi.
 - **[`tools/docs/huggingface_distillation_and_compute_guide.md`](docs/huggingface_distillation_and_compute_guide.md)**: Hugging Face TRL model distilasyonu ve hesaplama gücü rehberi.
 
-## 🤖 Nous Research Hermes Agent & MCP Entegrasyonu (`../hermes-agent/`)
+## 🤖 Nous Research Hermes Agent & MCP Entegrasyonu (`elektor-lab/`)
 
-- **[`hermes-agent/README.md`](../hermes-agent/README.md)**: Hermes Agent (`akillibidik`, `aikonsol`, CLI, Gateway) için 4 modüler veri yeteneği (`elektor-dataset-pipeline`, `elektor-ocr-layout`, `elektor-rag-memory`, `elektor-dataset-curation`).
-- **[`hermes-agent/INSTALLATION.md`](../hermes-agent/INSTALLATION.md)**: `skills.external_dirs`, `install_skills.sh` ve Stdio MCP sunucu kurulum rehberi.
-- **[`hermes-agent/ARCHITECTURE.md`](../hermes-agent/ARCHITECTURE.md)**: Progressive Disclosure (Level 0/1/2), `elektor_hermes_cli.py` ve `elektor_mcp_server.py` mimari eşleşmesi.
+- **`elektor-lab/README.md` (ayrı depo: /mnt/nvme/git_repo/elektor-lab.git)**: Hermes Agent (`akillibidik`, `aikonsol`, CLI, Gateway) için 4 modüler veri yeteneği (`elektor-dataset-pipeline`, `elektor-ocr-layout`, `elektor-rag-memory`, `elektor-dataset-curation`).
+- **`elektor-lab/INSTALLATION.md` (ayrı depo: /mnt/nvme/git_repo/elektor-lab.git)**: `skills.external_dirs`, `install_skills.sh` ve Stdio MCP sunucu kurulum rehberi.
+- **`elektor-lab/ARCHITECTURE.md` (ayrı depo: /mnt/nvme/git_repo/elektor-lab.git)**: Progressive Disclosure (Level 0/1/2), `elektor_hermes_cli.py` ve `elektor_mcp_server.py` mimari eşleşmesi.
 

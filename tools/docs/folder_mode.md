@@ -34,7 +34,7 @@ flowchart TD
 
 #### 3. Vektörleştirme, İhraç ve Hermes Agent / MCP Erişimi (`python run.py embed` & `python run.py export`)
 - İşlenen metinler kelime sınırlarını koruyan parçalarla `nomic-embed-text` modeliyle vektörleştirilerek Qdrant veritabanına yüklenir.
-- Sonuçlar `exports/<project_id>/` altında `sft_dataset.jsonl`, `tr_sft_dataset.jsonl`, `dpo_dataset.jsonl`, `chat_dataset.jsonl` ve `multimodal_visual_dataset.jsonl` biçiminde ihraç edilir ve [`hermes-agent/`](../../hermes-agent/README.md) içindeki Hermes yetenekleri (`elektor-dataset-pipeline`, `elektor-ocr-layout`, `elektor-rag-memory`, `elektor-dataset-curation`) ile Stdio MCP sunucusu üzerinden ajan kullanımına sunulur.
+- Sonuçlar `exports/<project_id>/` altında `sft_dataset.jsonl`, `tr_sft_dataset.jsonl`, `dpo_dataset.jsonl`, `chat_dataset.jsonl` ve `multimodal_visual_dataset.jsonl` biçiminde ihraç edilir ve `elektor-lab/` (ayrı depo: /mnt/nvme/git_repo/elektor-lab.git) içindeki Hermes yetenekleri (`elektor-dataset-pipeline`, `elektor-ocr-layout`, `elektor-rag-memory`, `elektor-dataset-curation`) ile Stdio MCP sunucusu üzerinden ajan kullanımına sunulur.
 
 ---
 
