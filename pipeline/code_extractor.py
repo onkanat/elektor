@@ -167,29 +167,100 @@ class CodeAnalyzer(ast.NodeVisitor):
 
 
 
-def clone_repository(repo_url: str, target_dir: Path) -> Path:
+def safe_rmtree(
+    target: Path,
+    *,
+    repo_dir: Optional[Path] = None,
+    force: bool = False,
+) -> None:
     """
-    Clones a git repository URL into target_dir. If target_dir exists with .git, pulls latest.
-    If target_dir exists without .git (incomplete clone), cleans directory before cloning.
+    S4 guard'lı dizin silme. Amaç: yanlış hedefle çalışma ağacını/ev dizinini silmeyi
+    imkânsız kılmak.
+
+    Reddedilen hedefler (``ValueError``): ``/``, ``$HOME``, ``$HOME`` üst dizini,
+    verilen ``repo_dir`` kökü ve iki bileşenden kısa yollar. ``.git`` içermeyen bir
+    dizin ``force=True`` verilmeden silinmez (yarım klon temizliği bile açık bayrak ister).
     """
     import shutil
+
+    raw = Path(str(target)).expanduser()
+    try:
+        resolved = raw.resolve()
+    except OSError:  # pragma: no cover - bozuk symlink
+        resolved = Path(os.path.abspath(str(raw)))
+
+    home = Path.home().resolve()
+    forbidden = {Path("/"), home, home.parent}
+    if repo_dir is not None:
+        forbidden.add(Path(str(repo_dir)).expanduser().resolve())
+
+    if resolved in forbidden or len(resolved.parts) <= 2:
+        raise ValueError(f"rmtree reddedildi: tehlikeli hedef {resolved}")
+    if not resolved.exists():
+        return
+    if not resolved.is_dir():
+        raise ValueError(f"rmtree reddedildi: dizin değil {resolved}")
+    if not (resolved / ".git").exists() and not force:
+        raise ValueError(
+            f"rmtree reddedildi: {resolved} içinde .git yok (force=True gerekir)"
+        )
+    shutil.rmtree(resolved)
+
+
+def clone_repository(
+    repo_url: str,
+    target_dir: Path,
+    *,
+    return_status: bool = False,
+) -> Any:
+    """
+    Clones a git repository URL into target_dir. Mevcut klonda ``git pull`` yerine
+    ``git fetch --depth 1 origin HEAD && git reset --hard FETCH_HEAD`` çalıştırılır
+    (S4: kirli ağaç/ıraksak dal pull çakışması üretmesin, yerel değişiklik kalmasın).
+
+    Güncelleme başarısız olursa hata **yutulmaz**: uyarı basılır ve ``return_status=True``
+    iken dönen sözlükte ``stale: True`` + ``error`` bulunur (çağıran sessizce eski kodla
+    devam etmez). ``target_dir`` var ama ``.git`` yoksa (yarım klon) guard'lı silme
+    (``safe_rmtree(..., force=True)``) sonrası yeniden klonlanır.
+    """
     target_dir.parent.mkdir(parents=True, exist_ok=True)
-    
+
+    def _status(updated: bool, stale: bool, error: str = "") -> Dict[str, Any]:
+        return {
+            "path": str(target_dir),
+            "repo_url": repo_url,
+            "updated": updated,
+            "stale": stale,
+            "error": error,
+        }
+
     if target_dir.exists():
         if (target_dir / ".git").exists():
-            print(f"Repository '{target_dir.name}' already exists at '{target_dir}'. Pulling latest updates...")
+            print(f"Repository '{target_dir.name}' already exists at '{target_dir}'. Fetch/reset to HEAD...")
             try:
                 subprocess.run(
-                    ["git", "-C", str(target_dir), "pull"],
-                    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120
+                    ["git", "-C", str(target_dir), "fetch", "--depth", "1", "origin", "HEAD"],
+                    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300,
                 )
-                print(f"Git pull completed for '{target_dir.name}'.")
+                subprocess.run(
+                    ["git", "-C", str(target_dir), "reset", "--hard", "FETCH_HEAD"],
+                    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120,
+                )
+                print(f"Git fetch/reset completed for '{target_dir.name}'.")
+                return _status(True, False) if return_status else target_dir
             except Exception as e:
-                print(f"Git pull warning (using existing local repository): {e}")
-            return target_dir
+                detail = str(e)
+                stderr = getattr(e, "stderr", None)
+                if stderr:
+                    detail = f"{detail}: {str(stderr).strip()}"
+                print(
+                    f"UYARI: '{target_dir.name}' güncellenemedi (stale: true) — yerel kopya "
+                    f"kullanılacak, kod eski olabilir: {detail}"
+                )
+                return _status(False, True, detail) if return_status else target_dir
         else:
             print(f"Found incomplete directory '{target_dir}' without .git. Cleaning before cloning...")
-            shutil.rmtree(target_dir, ignore_errors=True)
+            safe_rmtree(target_dir, repo_dir=target_dir.parent, force=True)
 
     print(f"Cloning repository '{repo_url}' into '{target_dir}' (this may take a moment for large repositories)...")
     cmd = ["git", "clone", "--depth", "1", repo_url, str(target_dir)]
@@ -201,7 +272,7 @@ def clone_repository(repo_url: str, target_dir: Path) -> Path:
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"Git clone timed out after 600s for repository '{repo_url}'.")
 
-    return target_dir
+    return _status(True, False) if return_status else target_dir
 
 
 def _ignored_extension(path: Path) -> bool:
@@ -825,6 +896,36 @@ def _ast_errors_path(project_id: str, ast_errors_path: Optional[Path] = None) ->
     return Path("exports") / f"{project_id}_ast_errors.json"
 
 
+def _manifest_path(project_id: str, manifest_path: Optional[Path] = None) -> Path:
+    """``exports/<project_id>_manifest.json`` (S4 artımlı parse defteri)."""
+    if manifest_path is not None:
+        return Path(manifest_path)
+    return Path("exports") / f"{project_id}_manifest.json"
+
+
+def _load_manifest(path: Path) -> Dict[str, Any]:
+    """Manifest dosyasını okur; yoksa/bozuksa boş sözlük (artımlılık kapanır)."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _file_stat(path: Path) -> Tuple[float, int]:
+    """``(mtime, size)`` — artımlılığın hızlı kapısı; okunamazsa ``(0.0, -1)``."""
+    try:
+        st = path.stat()
+    except OSError:
+        return 0.0, -1
+    return round(st.st_mtime, 6), st.st_size
+
+
+def _sha1_file_text(text: str) -> str:
+    """Normalize edilmiş (BOM'suz, LF) metnin sha1'i — dosya baytı değil, içerik izi."""
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
 def extract_and_store_code_units(
     parsed_files: List[Path],
     repo_dir: Path,
@@ -835,6 +936,8 @@ def extract_and_store_code_units(
     units: Any = None,
     store_code: Any = True,
     ast_errors_path: Optional[Path] = None,
+    manifest_path: Optional[Path] = None,
+    incremental: Any = None,
 ) -> List[Dict[str, Any]]:
     """
     Parses Python source files using AST, extracts code units, and saves them into SQLite DB.
@@ -845,6 +948,19 @@ def extract_and_store_code_units(
     - ``store_code=False`` (``--store-code 0``) → ``code`` kolonu NULL bırakılır; DB küçülür.
     - Her satıra ``sha1``, ``byte_offset``, ``end_offset`` yazılır.
     - Tek transaction + ``executemany``; parse hataları ``<project_id>_ast_errors.json``'a düşer.
+
+    S4 (artımlılık):
+    - ``manifest_path`` verilirse (üretimde ``exports/<project_id>_manifest.json``) her
+      koşumda ``{path: {mtime, size, sha1}}`` + ayar imzası yazılır. ``incremental``
+      verilmezse manifest_path varlığına göre açılır (geriye dönük uyum: yol yoksa eski
+      tam-parse davranışı korunur, testler ``exports/`` dizinini kirletmez).
+    - ``incremental=True`` iken manifest'teki ``(mtime, size)`` aynı olan dosya **yeniden
+      parse edilmez**; ``DELETE`` yalnız değişen/yeni dosyalar ve silinmiş dosyalar için
+      ``WHERE project_id AND file_path`` ile çalışır (tam tablo silme yok).
+    - ``units``/``store_code`` değişirse (ayar imzası farklı) tam yeniden parse edilir —
+      eski satırlar yeni şemayla karışmaz.
+    - Dönüş: **bu koşumda** parse edilen birimler (artımlı atlanan dosyaların birimleri
+      DB'de kalır ama listede yer almaz — sayı için ``ast_errors.json`` istatistiklerine bak).
     """
     init_code_db(db_path)
     conn = sqlite3.connect(db_path)
@@ -852,32 +968,78 @@ def extract_and_store_code_units(
 
     unit_filter = _normalize_units(units)
     keep_code = _coerce_bool(store_code)
+    incremental_on = (
+        _coerce_bool(incremental) if incremental is not None else manifest_path is not None
+    )
+    settings = {
+        "units": sorted(unit_filter) if unit_filter else sorted(VALID_UNIT_TYPES),
+        "store_code": keep_code,
+    }
+    manifest_p = _manifest_path(project_id, manifest_path)
+    previous = _load_manifest(manifest_p) if incremental_on else {}
+    prev_files: Dict[str, Any] = previous.get("files") if isinstance(previous.get("files"), dict) else {}
+    prev_settings = previous.get("settings") if isinstance(previous.get("settings"), dict) else None
+    reuse = bool(incremental_on and prev_files and prev_settings == settings)
+
     all_extracted_units: List[Dict[str, Any]] = []
     rows: List[Tuple[Any, ...]] = []
     ast_errors: List[Dict[str, str]] = []
     py_files = [p for p in parsed_files if p.suffix.lower() == ".py"]
     files_parsed = 0
+    files_skipped_unchanged = 0
+    files_changed = 0
+    files_removed = 0
+    new_manifest: Dict[str, Dict[str, Any]] = {}
     created_at = time.time()
 
     try:
-        # Clear existing code units for this project_id if re-extracting
-        cursor.execute("DELETE FROM code_units WHERE project_id = ?", (project_id,))
+        if not reuse:
+            # Tam yeniden parse: ilk koşum, manifest yok ya da ayar imzası değişti
+            cursor.execute("DELETE FROM code_units WHERE project_id = ?", (project_id,))
 
         for file_path in py_files:
             rel_path = str(file_path.relative_to(repo_dir))
+            mtime, size = _file_stat(file_path)
+            entry = prev_files.get(rel_path) if reuse else None
+            if (
+                isinstance(entry, dict)
+                and entry.get("mtime") == mtime
+                and entry.get("size") == size
+            ):
+                new_manifest[rel_path] = {
+                    "mtime": mtime,
+                    "size": size,
+                    "sha1": entry.get("sha1", ""),
+                }
+                files_skipped_unchanged += 1
+                continue
+
+            files_changed += 1
+            # Yalnız bu dosyanın satırları silinir (S4: DELETE kapsamı daraltıldı)
+            cursor.execute(
+                "DELETE FROM code_units WHERE project_id = ? AND file_path = ?",
+                (project_id, rel_path),
+            )
             try:
                 source_code = _read_text_normalized(file_path)
                 tree = ast.parse(source_code)
             except SyntaxError as se:
                 ast_errors.append({"file_path": rel_path, "error": f"SyntaxError: {se}"})
                 print(f"AST SyntaxError in {rel_path}: {se}")
+                new_manifest[rel_path] = {"mtime": mtime, "size": size, "sha1": ""}
                 continue
             except Exception as e:
                 ast_errors.append({"file_path": rel_path, "error": f"{type(e).__name__}: {e}"})
                 print(f"Error parsing AST in {rel_path}: {e}")
+                new_manifest[rel_path] = {"mtime": mtime, "size": size, "sha1": ""}
                 continue
 
             files_parsed += 1
+            new_manifest[rel_path] = {
+                "mtime": mtime,
+                "size": size,
+                "sha1": _sha1_file_text(source_code),
+            }
             analyzer = CodeAnalyzer(source_code, rel_path)
             analyzer.visit(tree)
 
@@ -907,6 +1069,17 @@ def extract_and_store_code_units(
                 item["end_offset"] = end_offset
                 all_extracted_units.append(item)
 
+        if reuse:
+            # Diskten silinen dosyaların birimleri de temizlenir
+            for rel_path in prev_files:
+                if rel_path in new_manifest:
+                    continue
+                cursor.execute(
+                    "DELETE FROM code_units WHERE project_id = ? AND file_path = ?",
+                    (project_id, rel_path),
+                )
+                files_removed += 1
+
         if rows:
             cursor.executemany("""
             INSERT INTO code_units
@@ -919,19 +1092,40 @@ def extract_and_store_code_units(
         conn.close()
 
     errors_path = _ast_errors_path(project_id, ast_errors_path)
+    stats = {
+        "files_considered": len(py_files),
+        "files_parsed": files_parsed,
+        "files_changed": files_changed,
+        "files_skipped_unchanged": files_skipped_unchanged,
+        "files_removed": files_removed,
+        "files_with_errors": len(ast_errors),
+        "units_stored": len(rows),
+        "store_code": keep_code,
+        "units_filter": sorted(unit_filter) if unit_filter else sorted(VALID_UNIT_TYPES),
+        "incremental": reuse,
+    }
     try:
         errors_path.parent.mkdir(parents=True, exist_ok=True)
         errors_path.write_text(json.dumps({
             "project_id": project_id,
-            "files_considered": len(py_files),
-            "files_parsed": files_parsed,
-            "files_with_errors": len(ast_errors),
-            "units_stored": len(rows),
-            "store_code": keep_code,
-            "units_filter": sorted(unit_filter) if unit_filter else sorted(VALID_UNIT_TYPES),
+            **stats,
             "errors": ast_errors,
         }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     except OSError as e:
         print(f"Uyarı: ast_errors.json yazılamadı ({errors_path}): {e}")
+
+    if incremental_on or manifest_path is not None:
+        try:
+            manifest_p.parent.mkdir(parents=True, exist_ok=True)
+            manifest_p.write_text(json.dumps({
+                "project_id": project_id,
+                "repo_url": repo_url,
+                "generated_at": time.time(),
+                "settings": settings,
+                "stats": stats,
+                "files": new_manifest,
+            }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        except OSError as e:
+            print(f"Uyarı: manifest yazılamadı ({manifest_p}): {e}")
 
     return all_extracted_units

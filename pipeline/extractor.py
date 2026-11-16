@@ -1226,7 +1226,13 @@ class ArchiveExtractor:
             if repo_input.startswith("http://") or repo_input.startswith("https://") or repo_input.startswith("git@"):
                 repo_name = repo_input.rstrip("/").split("/")[-1].replace(".git", "")
                 repo_dir = Path("downloads/repos") / repo_name
-                clone_repository(repo_input, repo_dir)
+                # S4: hata yutulmaz — başarısız fetch/reset 'stale' olarak raporlanır
+                repo_status = clone_repository(repo_input, repo_dir, return_status=True)
+                if isinstance(repo_status, dict) and repo_status.get("stale"):
+                    safe_print(
+                        "UYARI: repo güncellenemedi (stale: true) — yerel kopya kullanılıyor, "
+                        f"kod eski olabilir: {repo_status.get('error', '')}"
+                    )
             else:
                 repo_dir = Path(repo_input)
 
@@ -1250,6 +1256,8 @@ class ArchiveExtractor:
                 repo_url=repo_input,
                 units=self.config.get("rendergit_units"),
                 store_code=self.config.get("rendergit_store_code", True),
+                # S4: artımlı parse defteri (değişmeyen dosya yeniden parse edilmez)
+                manifest_path=Path("exports") / f"{project_id}_manifest.json",
             )
 
             # Store flattened repo text as an article entry in SQLite DB

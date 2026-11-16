@@ -583,3 +583,235 @@ def test_s3_ast_errors_counted(tmp_path):
     assert payload["files_with_errors"] == 1
     assert payload["errors"][0]["file_path"] == "bad.py"
     assert [u["name"] for u in units] == ["ok_fn"]
+
+
+# ---------------------------------------------------------------------------
+# S4: artımlı manifest + clone fetch/reset + rmtree guard
+# ---------------------------------------------------------------------------
+
+def _incr_repo(tmp_path) -> Path:
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "a.py").write_text(
+        "def alpha():\n"
+        "    total = 0\n"
+        "    for i in range(3):\n"
+        "        total += i\n"
+        "        total += 1\n"
+        "    return total\n"
+        "\n"
+        "\n"
+        "def alpha_two():\n"
+        "    return 2\n",
+        encoding="utf-8",
+    )
+    (repo / "pkg" / "b.py").write_text(
+        "class Beta:\n    def m(self):\n        return 3\n", encoding="utf-8"
+    )
+    return repo
+
+
+def _row_ids(db: Path) -> dict:
+    conn = sqlite3.connect(db)
+    rows = {r[0]: (r[1], r[2], r[3]) for r in conn.execute(
+        "SELECT id, file_path, unit_type, name FROM code_units ORDER BY id"
+    )}
+    conn.close()
+    return rows
+
+
+def test_s4_second_run_skips_unchanged_and_is_fast(tmp_path):
+    import time
+
+    repo = _incr_repo(tmp_path)
+    files = [repo / "a.py", repo / "pkg" / "b.py"]
+    db = tmp_path / "incr.db"
+    errs = tmp_path / "ast.json"
+    manifest = tmp_path / "s4_manifest.json"
+
+    first = extract_and_store_code_units(
+        files, repo, db, "p1", ast_errors_path=errs, manifest_path=manifest
+    )
+    assert len(first) == 5  # alpha, loop, alpha_two, class Beta, method m
+
+    ids_before = _row_ids(db)
+    started = time.perf_counter()
+    second = extract_and_store_code_units(
+        files, repo, db, "p1", ast_errors_path=errs, manifest_path=manifest
+    )
+    elapsed = time.perf_counter() - started
+
+    assert second == []                     # hiçbir dosya yeniden parse edilmedi
+    assert elapsed < 1.0, elapsed           # kabul: < 1 s
+    assert _row_ids(db) == ids_before       # DB satırları sabit (id'ler dahil)
+
+    payload = json.loads(errs.read_text(encoding="utf-8"))
+    assert payload["files_skipped_unchanged"] == 2
+    assert payload["files_parsed"] == 0
+    assert payload["files_changed"] == 0
+    assert payload["incremental"] is True
+    assert payload["units_stored"] == 0
+
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert set(data["files"]) == {"a.py", "pkg/b.py"}
+    entry = data["files"]["a.py"]
+    assert entry["size"] == (repo / "a.py").stat().st_size
+    assert abs(entry["mtime"] - (repo / "a.py").stat().st_mtime) < 1e-5
+    assert len(entry["sha1"]) == 40
+
+
+def test_s4_only_changed_file_reparsed(tmp_path):
+    repo = _incr_repo(tmp_path)
+    files = [repo / "a.py", repo / "pkg" / "b.py"]
+    db = tmp_path / "incr.db"
+    errs = tmp_path / "ast.json"
+    manifest = tmp_path / "s4_manifest.json"
+
+    extract_and_store_code_units(files, repo, db, "p1", ast_errors_path=errs, manifest_path=manifest)
+    before = _row_ids(db)
+    b_ids_before = {k: v for k, v in before.items() if v[0] == "pkg/b.py"}
+
+    (repo / "a.py").write_text("def gamma():\n    return 9\n", encoding="utf-8")
+    second = extract_and_store_code_units(
+        files, repo, db, "p1", ast_errors_path=errs, manifest_path=manifest
+    )
+    assert [u["name"] for u in second] == ["gamma"]
+
+    after = _row_ids(db)
+    a_rows = {k: v for k, v in after.items() if v[0] == "a.py"}
+    assert [v[2] for v in a_rows.values()] == ["gamma"]       # eski alpha/loop satırları gitti
+    assert {k: v for k, v in after.items() if v[0] == "pkg/b.py"} == b_ids_before  # dokunulmadı
+
+    payload = json.loads(errs.read_text(encoding="utf-8"))
+    assert payload["files_changed"] == 1
+    assert payload["files_skipped_unchanged"] == 1
+
+
+def test_s4_deleted_file_units_removed(tmp_path):
+    repo = _incr_repo(tmp_path)
+    files = [repo / "a.py", repo / "pkg" / "b.py"]
+    db = tmp_path / "incr.db"
+    errs = tmp_path / "ast.json"
+    manifest = tmp_path / "s4_manifest.json"
+
+    extract_and_store_code_units(files, repo, db, "p1", ast_errors_path=errs, manifest_path=manifest)
+    a_ids_before = {k: v for k, v in _row_ids(db).items() if v[0] == "a.py"}
+
+    (repo / "pkg" / "b.py").unlink()
+    third = extract_and_store_code_units(
+        [repo / "a.py"], repo, db, "p1", ast_errors_path=errs, manifest_path=manifest
+    )
+    assert third == []
+
+    after = _row_ids(db)
+    assert [v[0] for v in after.values()] == ["a.py"] * len(after)   # b.py satırları silindi
+    assert {k: v for k, v in after.items() if v[0] == "a.py"} == a_ids_before
+    payload = json.loads(errs.read_text(encoding="utf-8"))
+    assert payload["files_removed"] == 1
+    assert "pkg/b.py" not in json.loads(manifest.read_text(encoding="utf-8"))["files"]
+
+
+def test_s4_settings_change_forces_full_reparse(tmp_path):
+    repo = _incr_repo(tmp_path)
+    files = [repo / "a.py", repo / "pkg" / "b.py"]
+    db = tmp_path / "incr.db"
+    errs = tmp_path / "ast.json"
+    manifest = tmp_path / "s4_manifest.json"
+
+    extract_and_store_code_units(files, repo, db, "p1", ast_errors_path=errs, manifest_path=manifest)
+    conn = sqlite3.connect(db)
+    assert conn.execute("SELECT COUNT(*) FROM code_units WHERE unit_type='loop'").fetchone()[0] == 1
+    conn.close()
+
+    narrowed = extract_and_store_code_units(
+        files, repo, db, "p1", units="function,class",
+        ast_errors_path=errs, manifest_path=manifest,
+    )
+    assert {u["unit_type"] for u in narrowed} == {"function", "class"}   # tam yeniden parse
+    conn = sqlite3.connect(db)
+    assert conn.execute("SELECT COUNT(*) FROM code_units WHERE unit_type='loop'").fetchone()[0] == 0
+    conn.close()
+    payload = json.loads(errs.read_text(encoding="utf-8"))
+    assert payload["incremental"] is False
+    assert payload["files_changed"] == 2
+    assert json.loads(manifest.read_text(encoding="utf-8"))["settings"]["units"] == ["class", "function"]
+
+
+def test_s4_rmtree_guard_rejects_dangerous_targets(tmp_path):
+    from pipeline.code_extractor import safe_rmtree
+
+    with pytest.raises(ValueError):
+        safe_rmtree(Path("/"), repo_dir=Path("/"))
+    with pytest.raises(ValueError):
+        safe_rmtree(Path.home())
+    with pytest.raises(ValueError):
+        safe_rmtree(tmp_path, repo_dir=tmp_path, force=True)   # repo_dir kökü
+
+    plain = tmp_path / "plain_dir"
+    plain.mkdir()
+    (plain / "x.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError):        # .git yok → force şart
+        safe_rmtree(plain, repo_dir=tmp_path)
+    assert plain.exists()
+    safe_rmtree(plain, repo_dir=tmp_path, force=True)
+    assert not plain.exists()
+
+
+def _git(*args, cwd=None):
+    import subprocess
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    ).stdout
+
+
+def test_s4_clone_uses_fetch_reset_and_discards_local_dirt(tmp_path):
+    import shutil
+    from pipeline.code_extractor import clone_repository
+
+    if shutil.which("git") is None:
+        pytest.skip("git yok")
+
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    _git("init", "-q", "-b", "main", cwd=seed)
+    _git("config", "user.email", "t@example.com", cwd=seed)
+    _git("config", "user.name", "t", cwd=seed)
+    (seed / "m.py").write_text("def v1():\n    return 1\n", encoding="utf-8")
+    _git("add", ".", cwd=seed)
+    _git("commit", "-qm", "v1", cwd=seed)
+
+    origin = tmp_path / "origin.git"
+    _git("clone", "-q", "--bare", str(seed), str(origin))
+
+    work = tmp_path / "work"
+    status = clone_repository(str(origin), work, return_status=True)
+    assert status["stale"] is False and status["updated"] is True
+    assert "def v1" in (work / "m.py").read_text(encoding="utf-8")
+
+    (seed / "m.py").write_text("def v2():\n    return 2\n", encoding="utf-8")
+    _git("commit", "-qam", "v2", cwd=seed)
+    _git("push", "-q", str(origin), "main", cwd=seed)
+
+    (work / "m.py").write_text("bozuk yerel değişiklik\n", encoding="utf-8")
+    status2 = clone_repository(str(origin), work, return_status=True)
+    assert status2["stale"] is False
+    assert "def v2" in (work / "m.py").read_text(encoding="utf-8")   # reset --hard temizledi
+
+
+def test_s4_clone_failure_reports_stale_not_swallowed(tmp_path, capsys):
+    import shutil
+    from pipeline.code_extractor import clone_repository
+
+    if shutil.which("git") is None:
+        pytest.skip("git yok")
+
+    work = tmp_path / "broken"
+    work.mkdir()
+    _git("init", "-q", cwd=work)          # .git var, origin yok → fetch başarısız
+
+    status = clone_repository("https://example.invalid/none.git", work, return_status=True)
+    out = capsys.readouterr().out
+    assert status["stale"] is True
+    assert status["updated"] is False
+    assert status["error"]
+    assert "stale" in out.lower()

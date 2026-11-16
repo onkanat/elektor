@@ -1121,13 +1121,21 @@ def clone_and_extract_code(payload: Dict[str, Any] = Body(...)):
     db_path = Path(config.get("db_path", f"database/{project_id}.db"))
 
     # Determine local directory path for cloned repo
+    stale_warning = None  # S4: fetch/reset başarısızsa istemciye taşınan uyarı
     if repo_url.startswith("http://") or repo_url.startswith("https://") or repo_url.startswith("git@"):
         repo_name = repo_url.rstrip("/").split("/")[-1].replace(".git", "")
         repo_dir = Path("downloads/repos") / repo_name
         try:
-            clone_repository(repo_url, repo_dir)
+            status = clone_repository(repo_url, repo_dir, return_status=True)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Git clone error: {str(e)}")
+        if isinstance(status, dict) and status.get("stale"):
+            # S4: hata yutulmaz — istemciye stale uyarısı döner
+            stale_warning = (
+                "repo güncellenemedi (stale: true) — yerel kopya kullanıldı, "
+                f"kod eski olabilir: {status.get('error', '')}"
+            )
+            print(f"UYARI: {stale_warning}")
     else:
         repo_dir = Path(repo_url)
         if not repo_dir.exists() or not repo_dir.is_dir():
@@ -1146,7 +1154,9 @@ def clone_and_extract_code(payload: Dict[str, Any] = Body(...)):
             repo_dir=repo_dir,
             db_path=db_path,
             project_id=project_id,
-            repo_url=repo_url
+            repo_url=repo_url,
+            # S4: artımlı parse defteri — değişmeyen dosya yeniden parse edilmez
+            manifest_path=Path("exports") / f"{project_id}_manifest.json",
         )
 
     # Count categories
@@ -1164,7 +1174,8 @@ def clone_and_extract_code(payload: Dict[str, Any] = Body(...)):
         "rendergit_file": str(rendergit_out_path),
         "parsed_files_count": len(parsed_files),
         "extracted_code_units_count": len(extracted_units),
-        "unit_categories": counts
+        "unit_categories": counts,
+        "stale_warning": stale_warning,
     }
 
 
