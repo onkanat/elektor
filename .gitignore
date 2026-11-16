@@ -50,3 +50,6 @@ frontend/.tmp/
 ORIGINAL_REQUEST.md
 
 .haftalik-*
+.elektor-*.lock
+logs/
+*.bak-*
