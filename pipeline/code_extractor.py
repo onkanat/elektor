@@ -1,6 +1,7 @@
 import io
 import os
 import ast
+import importlib
 import json
 import hashlib
 import sqlite3
@@ -488,6 +489,433 @@ def _line_byte_offsets(text: str) -> List[int]:
     return offsets
 
 
+# ── S5: tree-sitter (opsiyonel ikinci parser) ────────────────────────────────
+# Zorunlu bağımlılık DEĞİL: paket yoksa yalnız Python AST yolu çalışır; varsayılan
+# (``ast_lang="python"``) davranış S5 öncesiyle birebir aynı kalır.
+try:  # paket yok / bozuk derleme aynı kapıdan geçer
+    import tree_sitter as _ts  # type: ignore
+
+    _TS_CORE = True
+except Exception:  # pragma: no cover - paket kurulu olmayan ortam
+    _ts = None
+    _TS_CORE = False
+
+VALID_AST_LANGS: Tuple[str, ...] = ("python", "cpp", "cuda", "metal", "typescript")
+
+# lang -> (modül, attribute). Attribute ``None`` ise modülün ``language()`` çağrılır.
+_TS_MODULES: Dict[str, Tuple[str, Optional[str]]] = {
+    "cpp": ("tree_sitter_cpp", None),
+    "cuda": ("tree_sitter_cuda", None),
+    "metal": ("tree_sitter_metal", None),
+    "typescript": ("tree_sitter_typescript", "language_typescript"),
+    "tsx": ("tree_sitter_typescript", "language_tsx"),
+}
+
+# Gramer paketi yoksa denenecek yedek (Metal C++14 türevi, CUDA C++ üst kümesi)
+_TS_FALLBACK: Dict[str, str] = {"metal": "cpp", "cuda": "cpp"}
+
+_TS_LANG_CACHE: Dict[str, Any] = {}
+_TS_PARSER_CACHE: Dict[str, Any] = {}
+
+# Uzantı -> iç dil anahtarı (yalnız ``--ast-lang`` ile açıldığında kullanılır)
+TS_EXTENSIONS: Dict[str, str] = {
+    ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".c++": "cpp",
+    ".hpp": "cpp", ".hh": "cpp", ".hxx": "cpp", ".h++": "cpp",
+    ".h": "cpp", ".c": "cpp", ".ipp": "cpp", ".inl": "cpp", ".tcc": "cpp",
+    ".cu": "cuda", ".cuh": "cuda",
+    ".metal": "metal",
+    ".ts": "typescript", ".mts": "typescript", ".cts": "typescript",
+    ".tsx": "tsx",
+}
+
+_TS_FUNC_NODES = {
+    "function_definition", "function_declaration", "method_definition",
+    "constructor_declaration", "destructor_declaration",
+    "arrow_function", "generator_function_declaration",
+}
+_TS_CLASS_NODES = {
+    "class_specifier", "struct_specifier", "union_specifier", "enum_specifier",
+    "class_declaration", "abstract_class_declaration", "interface_declaration",
+}
+_TS_LOOP_NODES = {
+    "for_statement", "while_statement", "do_statement",
+    "for_range_loop", "for_in_statement",
+}
+_TS_NAMESPACE_NODES = {"namespace_definition", "internal_module", "module"}
+_TS_MACRO_NODES = {"preproc_def", "preproc_function_def", "macro_definition"}
+_TS_IDENTIFIER_NODES = {
+    "identifier", "field_identifier", "type_identifier", "namespace_identifier",
+    "property_identifier", "operator_name", "destructor_name", "qualified_identifier",
+}
+_TS_OPAQUE_NODES = {
+    "parameter_list", "argument_list", "template_parameter_list",
+    "field_declaration_list", "compound_statement",
+}
+
+
+def treesitter_available() -> bool:
+    """tree-sitter çekirdeği içe aktarılabildi mi? (bayrak/fallback raporu)."""
+    return bool(_TS_CORE)
+
+
+def reset_tree_sitter_cache() -> None:
+    """Dil/parser önbelleğini boşaltır (test ve kurulum sonrası ilk koşum)."""
+    _TS_LANG_CACHE.clear()
+    _TS_PARSER_CACHE.clear()
+
+
+def _ts_language(name: str) -> Any:
+    """
+    Dil nesnesini yükler; yoksa ``None`` döner (istisna yükseltmez).
+
+    Üç paket biçimi de desteklenir: ``Language(capsule)`` (yeni abi3 paketleri),
+    ``Language(int)`` (eski paketler) ve doğrudan ``Language`` döndüren modüller
+    (ör. ``tree_sitter_metal``).
+    """
+    if not _TS_CORE or _ts is None:
+        return None
+    if name in _TS_LANG_CACHE:
+        return _TS_LANG_CACHE[name]
+    language = None
+    spec = _TS_MODULES.get(name)
+    if spec is not None:
+        module_name, attr = spec
+        try:
+            module = importlib.import_module(module_name)
+            factory = getattr(module, attr) if attr else getattr(module, "language", None)
+            if factory is not None:
+                raw = factory()
+                language = raw if isinstance(raw, _ts.Language) else _ts.Language(raw)
+        except Exception:
+            language = None
+    if language is None and name in _TS_FALLBACK:
+        language = _ts_language(_TS_FALLBACK[name])
+    _TS_LANG_CACHE[name] = language
+    return language
+
+
+def _ts_parser(name: str) -> Any:
+    """Dil için parser (önbellekli). Yeni API ``Parser(lang)``, eski API ``set_language``."""
+    if not _TS_CORE or _ts is None:
+        return None
+    if name in _TS_PARSER_CACHE:
+        return _TS_PARSER_CACHE[name]
+    language = _ts_language(name)
+    parser = None
+    if language is not None:
+        try:
+            parser = _ts.Parser(language)
+        except TypeError:  # tree-sitter < 0.22
+            try:
+                parser = _ts.Parser()
+                parser.set_language(language)
+            except Exception:
+                parser = None
+        except Exception:
+            parser = None
+    _TS_PARSER_CACHE[name] = parser
+    return parser
+
+
+def treesitter_languages() -> List[str]:
+    """Yüklenebilen diller (rapor/CLI doğrulaması için)."""
+    return [
+        name for name in ("cpp", "cuda", "metal", "typescript", "tsx")
+        if _ts_language(name) is not None
+    ]
+
+
+def _normalize_ast_lang(ast_lang: Any) -> Tuple[str, ...]:
+    """
+    ``--ast-lang python,cpp`` → ``('python', 'cpp')``.
+
+    ``None``/boş → ``('python',)`` (varsayılan; S5 öncesi davranış korunur).
+    Tanınmayan dil sessizce yutulmaz, ``ValueError`` yükselir.
+    """
+    if not ast_lang:
+        return ("python",)
+    values = [ast_lang] if isinstance(ast_lang, str) else list(ast_lang)
+    out: List[str] = []
+    for value in values:
+        for part in str(value).split(","):
+            lang = part.strip().lower()
+            if not lang:
+                continue
+            if lang in ("py", "python3"):
+                lang = "python"
+            elif lang in ("c++", "cxx", "cc"):
+                lang = "cpp"
+            elif lang in ("ts", "tsx", "javascript"):
+                lang = "typescript"
+            if lang not in VALID_AST_LANGS:
+                raise ValueError(
+                    f"Geçersiz ast_lang: {part.strip()!r} (geçerli: {', '.join(VALID_AST_LANGS)})"
+                )
+            if lang not in out:
+                out.append(lang)
+    return tuple(out or ("python",))
+
+
+def _ts_lang_for_path(path: Path, requested: Sequence[str]) -> Optional[str]:
+    """Uzantıya göre iç dil anahtarı; dil istenmemiş ya da gramer yoksa ``None``."""
+    base = TS_EXTENSIONS.get(path.suffix.lower())
+    if base is None:
+        return None
+    if base == "tsx":
+        if "typescript" not in requested:
+            return None
+        for candidate in ("tsx", "typescript"):
+            if _ts_language(candidate) is not None:
+                return candidate
+        return None
+    if base not in requested:
+        return None
+    if _ts_language(base) is not None:
+        return base
+    fallback = _TS_FALLBACK.get(base)
+    if fallback and _ts_language(fallback) is not None:
+        return fallback
+    return None
+
+
+class TreeSitterAnalyzer:
+    """
+    S5: C++/CUDA/Metal/TS kaynaklarından ``function/class/loop`` birimleri çıkarır.
+
+    ``namespace``/``macro`` birimleri yalnız ``extended=True`` iken toplanır (opt-in).
+    Çıktı sözleşmesi Python yolunun aynısıdır: ``unit_type, name, signature,
+    docstring, code, line_count, lineno, end_lineno``.
+    """
+
+    def __init__(self, source_code: str, file_path: str, language: str, *, extended: bool = False):
+        self.source_code = source_code
+        self.file_path = file_path
+        self.language = language
+        self.extended = extended
+        self.lines = source_code.splitlines()
+        self.items: List[Dict[str, Any]] = []
+        self.has_error = False
+
+    # -- yardımcılar -------------------------------------------------------
+    def _span(self, node: Any) -> Tuple[int, int]:
+        """1-tabanlı (ilk satır, son satır). ``end_point`` dosya sonunda bir satır
+        taşabildiği için satır sayısına kırpılır (IndexError yerine güvenli aralık)."""
+        total = max(1, len(self.lines))
+        start = min(max(1, node.start_point[0] + 1), total)
+        end = min(max(start, node.end_point[0] + 1), total)
+        return start, end
+
+    def _code(self, start: int, end: int) -> str:
+        return "\n".join(self.lines[max(0, start - 1): end])
+
+    @staticmethod
+    def _leftmost_identifier(node: Any) -> str:
+        queue = [node]
+        while queue:
+            current = queue.pop(0)
+            if current.type in _TS_IDENTIFIER_NODES:
+                return current.text.decode("utf-8", "replace").strip()
+            if current.type in _TS_OPAQUE_NODES:
+                continue
+            queue.extend(current.children)
+        return ""
+
+    @classmethod
+    def _node_name(cls, node: Any) -> str:
+        for field in ("declarator", "name"):
+            child = node.child_by_field_name(field)
+            if child is not None:
+                found = cls._leftmost_identifier(child)
+                if found:
+                    return found
+        return cls._leftmost_identifier(node)
+
+    def _signature(self, start: int, end: int) -> str:
+        """Bildirim başlığı: ``{`` / ``;`` / kapanan parantez görülene kadar (en çok 3 satır)."""
+        parts: List[str] = []
+        for index in range(start - 1, min(end, start + 2)):
+            parts.append(self.lines[index].strip())
+            joined = " ".join(parts)
+            if "{" in joined or joined.rstrip().endswith(";") or joined.rstrip().endswith(")"):
+                break
+        return " ".join(parts)[:240]
+
+    @staticmethod
+    def _clean_comment(text: str) -> str:
+        cleaned: List[str] = []
+        for line in text.splitlines():
+            line = line.strip()
+            for marker in ("/**", "/*", "///", "//", "*", "#"):
+                if line.startswith(marker):
+                    line = line[len(marker):].strip()
+                    break
+            if line.endswith("*/"):
+                line = line[: -len("*/")].strip()
+            if line:
+                cleaned.append(line)
+        return "\n".join(cleaned)
+
+    def _docstring(self, node: Any) -> str:
+        sibling = node.prev_sibling
+        while sibling is not None and sibling.type in ("comment", "attribute_declaration"):
+            if sibling.type == "comment":
+                return self._clean_comment(sibling.text.decode("utf-8", "replace"))
+            sibling = sibling.prev_sibling
+        return ""
+
+    @staticmethod
+    def _target(node: Any) -> Any:
+        """``template <...>`` sarmalı varsa şablon satırı da birime dahil edilir."""
+        parent = node.parent
+        if parent is not None and parent.type == "template_declaration":
+            return parent
+        return node
+
+    # -- birim üretimi -----------------------------------------------------
+    def _add(self, node: Any, unit_type: str, *, min_lines: int) -> None:
+        target = self._target(node)
+        start, end = self._span(target)
+        line_count = end - start + 1
+        if line_count < min_lines:
+            return
+        name = self._node_name(node)
+        if unit_type == "function" and node.type == "arrow_function" and node.parent is not None:
+            parent_name = self._node_name(node.parent)
+            name = parent_name or name
+        if unit_type == "macro" and not name:
+            header = self.lines[start - 1] if start - 1 < len(self.lines) else ""
+            name = header.replace("#define", "").strip().split("(")[0].strip()
+        self.items.append({
+            "unit_type": unit_type,
+            "name": name or f"{unit_type}_L{start}",
+            "signature": self._signature(start, end),
+            "docstring": self._docstring(node),
+            "code": self._code(start, end),
+            "line_count": line_count,
+            "lineno": start,
+            "end_lineno": end,
+        })
+
+    def _add_loop(self, node: Any) -> None:
+        start, end = self._span(node)
+        if end - start + 1 < 3:
+            return
+        label = {
+            "while_statement": "while_loop",
+            "do_statement": "do_while_loop",
+        }.get(node.type, "for_loop")
+        self.items.append({
+            "unit_type": "loop",
+            "name": f"{label}_L{start}",
+            "signature": self._signature(start, end),
+            "docstring": "",
+            "code": self._code(start, end),
+            "line_count": end - start + 1,
+            "lineno": start,
+            "end_lineno": end,
+        })
+
+    def _consider(self, node: Any) -> None:
+        node_type = node.type
+        if node_type in _TS_FUNC_NODES:
+            self._add(node, "function", min_lines=2)
+        elif node_type in _TS_CLASS_NODES:
+            self._add(node, "class", min_lines=2)
+        elif node_type in _TS_LOOP_NODES:
+            self._add_loop(node)
+        elif self.extended and node_type in _TS_NAMESPACE_NODES:
+            self._add(node, "namespace", min_lines=2)
+        elif self.extended and node_type in _TS_MACRO_NODES:
+            self._add(node, "macro", min_lines=1)
+
+    def analyze(self) -> List[Dict[str, Any]]:
+        """Kaynağı ayrıştırır ve birimleri döndürür (kısmi ağaçta da döner)."""
+        parser = _ts_parser(self.language)
+        if parser is None:
+            raise ValueError(f"tree-sitter parser yok: {self.language}")
+        tree = parser.parse(self.source_code.encode("utf-8"))
+        root = getattr(tree, "root_node", None)
+        if root is None:
+            raise ValueError("tree-sitter boş ağaç döndü")
+        self.has_error = bool(getattr(root, "has_error", False))
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            self._consider(node)
+            children = node.children
+            if children:
+                stack.extend(reversed(children))
+        return self.items
+
+
+def _merge_spans(spans: Sequence[Tuple[int, int]], max_line: int) -> List[Tuple[int, int]]:
+    """Kesişen satır aralıklarını birleştirir (örtüşen birim baytı bir kez sayılır)."""
+    cleaned = sorted(
+        (max(1, start), min(max(end, start), max_line)) for start, end in spans
+    )
+    merged: List[Tuple[int, int]] = []
+    for start, end in cleaned:
+        if merged and start <= merged[-1][1] + 1:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def ast_byte_coverage(
+    units: Sequence[Dict[str, Any]],
+    repo_dir: Optional[Path] = None,
+    files: Optional[Sequence[Path]] = None,
+) -> Dict[str, Any]:
+    """
+    S5 ölçümü: birimlerin kapladığı **bayt** oranı.
+
+    Payda ``files`` verilmişse o dosyaların boyutları, yoksa birim içeren dosyalar.
+    Pay, her dosyada ``[lineno, end_lineno]`` aralıklarının birleşimidir (iç içe
+    birimler bir kez sayılır); satır sonu baytları dahildir.
+    """
+    by_file: Dict[str, List[Tuple[int, int]]] = {}
+    for unit in units:
+        path = unit.get("file_path")
+        if not path:
+            continue
+        start = int(unit.get("lineno") or 1)
+        end = int(unit.get("end_lineno") or start)
+        by_file.setdefault(str(path), []).append((start, end))
+
+    covered_bytes = 0
+    file_bytes: Dict[str, int] = {}
+    for path, spans in sorted(by_file.items()):
+        full = (Path(repo_dir) / path) if repo_dir is not None else Path(path)
+        try:
+            offsets = _line_byte_offsets(_read_text_normalized(full))
+        except OSError:
+            continue
+        file_bytes[path] = offsets[-1]
+        last = len(offsets) - 1
+        for start, end in _merge_spans(spans, last):
+            covered_bytes += offsets[min(end, last)] - offsets[min(start - 1, last)]
+
+    if files is not None:
+        total_bytes = 0
+        for candidate in files:
+            try:
+                total_bytes += Path(candidate).stat().st_size
+            except OSError:
+                continue
+    else:
+        total_bytes = sum(file_bytes.values())
+
+    return {
+        "bytes_covered": covered_bytes,
+        "bytes_total": total_bytes,
+        "ratio": (covered_bytes / total_bytes) if total_bytes else 0.0,
+        "files_with_units": len(file_bytes),
+        "files_total": len(files) if files is not None else len(file_bytes),
+        "by_file": file_bytes,
+    }
+
+
 def _write_file_blocks(
     sink,
     render_files: Sequence[Tuple[Path, Path]],
@@ -858,6 +1286,9 @@ def init_code_db(db_path: Path):
 
 VALID_UNIT_TYPES: Tuple[str, ...] = ("function", "class", "loop")
 
+# S5: yalnız tree-sitter yolu açıkken üretilen birim tipleri (opt-in)
+EXTENDED_UNIT_TYPES: Tuple[str, ...] = ("namespace", "macro")
+
 
 def _normalize_units(units: Any) -> Optional[Set[str]]:
     """
@@ -875,9 +1306,13 @@ def _normalize_units(units: Any) -> Optional[Set[str]]:
             unit_type = part.strip().lower()
             if not unit_type:
                 continue
-            if unit_type not in VALID_UNIT_TYPES:
+            if unit_type not in VALID_UNIT_TYPES + EXTENDED_UNIT_TYPES:
                 raise ValueError(
-                    f"Geçersiz unit_type: {unit_type!r} (geçerli: {', '.join(VALID_UNIT_TYPES)})"
+                    "Geçersiz unit_type: {!r} (geçerli: {}; S5 uzantısı: {})".format(
+                        unit_type,
+                        ", ".join(VALID_UNIT_TYPES),
+                        ", ".join(EXTENDED_UNIT_TYPES),
+                    )
                 )
             out.add(unit_type)
     return out or None
@@ -938,6 +1373,7 @@ def extract_and_store_code_units(
     ast_errors_path: Optional[Path] = None,
     manifest_path: Optional[Path] = None,
     incremental: Any = None,
+    ast_lang: Any = None,
 ) -> List[Dict[str, Any]]:
     """
     Parses Python source files using AST, extracts code units, and saves them into SQLite DB.
@@ -961,6 +1397,16 @@ def extract_and_store_code_units(
       eski satırlar yeni şemayla karışmaz.
     - Dönüş: **bu koşumda** parse edilen birimler (artımlı atlanan dosyaların birimleri
       DB'de kalır ama listede yer almaz — sayı için ``ast_errors.json`` istatistiklerine bak).
+
+    S5 (tree-sitter, opt-in):
+    - ``ast_lang`` verilmezse ``("python",)`` → S5 öncesi davranış birebir korunur.
+      ``ast_lang="python,cpp"`` (veya ``"cpp,cuda,metal,typescript"``) tree-sitter yolunu
+      açar: ``function/class/loop`` şeması aynı kalır, ``namespace``/``macro`` yalnız bu
+      bayrak açıkken (ve ``units`` filtresi izin veriyorsa) üretilir.
+    - Paket yoksa/gramer eksikse istisna yükseltilmez: o diller atlanır, kalan yollar
+      çalışır (``stats["ast_lang_unavailable"]``).
+    - Dil seti varsayılan dışına çıkarsa manifest ayar imzasına ``ast_lang`` eklenir →
+      sonraki koşumda tam parse; varsayılanda imza değişmez (gece hattı etkilenmez).
     """
     init_code_db(db_path)
     conn = sqlite3.connect(db_path)
@@ -968,6 +1414,29 @@ def extract_and_store_code_units(
 
     unit_filter = _normalize_units(units)
     keep_code = _coerce_bool(store_code)
+    # S5: dil seti. Varsayılan ("python") S5 öncesi davranışı birebir korur.
+    ast_langs = _normalize_ast_lang(ast_lang)
+    ts_langs = tuple(lang for lang in ast_langs if lang != "python")
+    # namespace/macro yalnız tree-sitter yolu açıkken ve filtre izin veriyorsa üretilir
+    emit_extended = bool(ts_langs) and (
+        unit_filter is None or bool(unit_filter & set(EXTENDED_UNIT_TYPES))
+    )
+    ts_unavailable: List[str] = []
+    if ts_langs:
+        if not treesitter_available():
+            ts_unavailable = list(ts_langs)
+            print(
+                "UYARI: --ast-lang içinde {} istendi ama tree-sitter kurulu değil; "
+                "yalnız Python dosyaları ayrıştırılacak.".format(", ".join(ts_langs))
+            )
+        else:
+            ts_unavailable = [lang for lang in ts_langs if _ts_language(lang) is None]
+            if ts_unavailable:
+                print(
+                    "UYARI: gramer paketi yok ({}); bu diller atlanacak.".format(
+                        ", ".join(ts_unavailable)
+                    )
+                )
     incremental_on = (
         _coerce_bool(incremental) if incremental is not None else manifest_path is not None
     )
@@ -975,6 +1444,10 @@ def extract_and_store_code_units(
         "units": sorted(unit_filter) if unit_filter else sorted(VALID_UNIT_TYPES),
         "store_code": keep_code,
     }
+    if ast_langs != ("python",):
+        # Varsayılan dil setinde anahtar EKLENMEZ → S5 öncesi manifest imzası aynı kalır,
+        # gece hattı gereksiz tam parse yapmaz. Dil seti değişince tam parse tetiklenir.
+        settings["ast_lang"] = list(ast_langs)
     manifest_p = _manifest_path(project_id, manifest_path)
     previous = _load_manifest(manifest_p) if incremental_on else {}
     prev_files: Dict[str, Any] = previous.get("files") if isinstance(previous.get("files"), dict) else {}
@@ -984,7 +1457,20 @@ def extract_and_store_code_units(
     all_extracted_units: List[Dict[str, Any]] = []
     rows: List[Tuple[Any, ...]] = []
     ast_errors: List[Dict[str, str]] = []
-    py_files = [p for p in parsed_files if p.suffix.lower() == ".py"]
+    py_files = (
+        [p for p in parsed_files if p.suffix.lower() == ".py"] if "python" in ast_langs else []
+    )
+    # (dosya, dil) çiftleri: python yolu önce, tree-sitter dosyaları sonra (deterministik)
+    parse_plan: List[Tuple[Path, str]] = [(p, "python") for p in py_files]
+    if ts_langs:
+        for candidate in parsed_files:
+            if candidate.suffix.lower() == ".py":
+                continue
+            language = _ts_lang_for_path(candidate, ts_langs)
+            if language is not None:
+                parse_plan.append((candidate, language))
+    files_partial_parse = 0
+    units_by_lang: Dict[str, int] = {}
     files_parsed = 0
     files_skipped_unchanged = 0
     files_changed = 0
@@ -997,7 +1483,7 @@ def extract_and_store_code_units(
             # Tam yeniden parse: ilk koşum, manifest yok ya da ayar imzası değişti
             cursor.execute("DELETE FROM code_units WHERE project_id = ?", (project_id,))
 
-        for file_path in py_files:
+        for file_path, language in parse_plan:
             rel_path = str(file_path.relative_to(repo_dir))
             mtime, size = _file_stat(file_path)
             entry = prev_files.get(rel_path) if reuse else None
@@ -1022,7 +1508,10 @@ def extract_and_store_code_units(
             )
             try:
                 source_code = _read_text_normalized(file_path)
-                tree = ast.parse(source_code)
+                if language == "python":
+                    tree = ast.parse(source_code)
+                else:
+                    tree = None
             except SyntaxError as se:
                 ast_errors.append({"file_path": rel_path, "error": f"SyntaxError: {se}"})
                 print(f"AST SyntaxError in {rel_path}: {se}")
@@ -1040,13 +1529,35 @@ def extract_and_store_code_units(
                 "size": size,
                 "sha1": _sha1_file_text(source_code),
             }
-            analyzer = CodeAnalyzer(source_code, rel_path)
-            analyzer.visit(tree)
+            if language == "python":
+                analyzer = CodeAnalyzer(source_code, rel_path)
+                analyzer.visit(tree)
+                items = analyzer.items
+            else:
+                try:
+                    analyzer = TreeSitterAnalyzer(
+                        source_code, rel_path, language, extended=emit_extended
+                    )
+                    items = analyzer.analyze()
+                except Exception as e:  # bozuk kaynak tüm koşuyu düşürmez
+                    files_parsed -= 1
+                    ast_errors.append({
+                        "file_path": rel_path,
+                        "error": f"TreeSitter {type(e).__name__}: {e}",
+                    })
+                    print(f"Error parsing {language} in {rel_path}: {e}")
+                    new_manifest[rel_path] = {"mtime": mtime, "size": size, "sha1": ""}
+                    continue
+                if getattr(analyzer, "has_error", False):
+                    files_partial_parse += 1
+                units_by_lang[language] = units_by_lang.get(language, 0) + len(items)
 
             offsets = _line_byte_offsets(source_code)
             last_index = len(offsets) - 1
 
-            for item in analyzer.items:
+            for item in items:
+                if item["unit_type"] in EXTENDED_UNIT_TYPES and not emit_extended:
+                    continue
                 if unit_filter is not None and item["unit_type"] not in unit_filter:
                     continue
 
@@ -1093,7 +1604,12 @@ def extract_and_store_code_units(
 
     errors_path = _ast_errors_path(project_id, ast_errors_path)
     stats = {
-        "files_considered": len(py_files),
+        "files_considered": len(parse_plan),
+        "ast_lang": list(ast_langs),
+        "ast_lang_unavailable": ts_unavailable,
+        "treesitter": treesitter_available(),
+        "files_partial_parse": files_partial_parse,
+        "units_by_lang": units_by_lang,
         "files_parsed": files_parsed,
         "files_changed": files_changed,
         "files_skipped_unchanged": files_skipped_unchanged,

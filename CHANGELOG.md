@@ -5,6 +5,20 @@ All notable changes to the **Elektor Universal PDF & Rendergit Code Dataset Gene
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [FAZ-25] - 2026-11-17 — S5: tree-sitter (opt-in) AST
+### Added
+- **C++/CUDA/Metal/TS birim çıkarımı (`pipeline/code_extractor.py`)**: `TreeSitterAnalyzer` + `--ast-lang` bayrağı (`python` varsayılan; `python,cpp,cuda,metal,typescript` açar). `unit_type` şeması `function/class/loop` korunur; `namespace`/`macro` yalnız bayrak açıkken üretilir. Uzantı→gramer eşlemesi: cpp (`.cpp .cc .cxx .hpp .hh .hxx .h .c .ipp .inl .tcc`), cuda (`.cu .cuh`), metal (`.metal`), typescript (`.ts .tsx .mts .cts`); metal/cuda paketi yoksa cpp gramerine düşer.
+- **Ölçüm yardımcısı `ast_byte_coverage()`**: birimlerin kapladığı bayt oranı (iç içe birimler bir kez sayılır) — S5 kabul ölçütünün kanıtı.
+- **`requirements-ast.txt`**: opsiyonel pinler (tree-sitter 0.26.1, -cpp 0.23.4, -cuda 0.21.2, -metal 0.1.1, -typescript 0.23.2).
+- **`tests/test_s5_treesitter.py`**: 9 test (paket yokken geri düşüş, cpp function/class/loop, namespace/macro opt-in, kapsam ölçümü, varsayılan davranış sabitliği, dil normalizasyonu, analyzer sözleşmesi).
+### Changed
+- `extract_and_store_code_units(..., ast_lang=None)`: varsayılan `python`; manifest ayar imzası varsayılanda **değişmez** (anahtar eklenmez) → gece hattı yeniden parse etmez. Dil seti değişince tam parse tetiklenir. `stats` alanları: `ast_lang`, `ast_lang_unavailable`, `treesitter`, `files_partial_parse`, `units_by_lang`.
+- Çağrı yerleri bayrağı geçirir: `pipeline/extractor.py` (`rendergit_ast_lang`), `api_server.py` (`ast_lang` payload alanı), `run.py` (`--ast-lang`).
+### Measured (Strata v0.2.15, 7.091 dosya / 105,4 MB)
+- Varsayılan: **26.792** birim, 10,5 s, DB 39,3 MB — S3 taban çizgisiyle birebir aynı (iki koşu aynı satır sayısı).
+- `python,cpp,cuda,metal,typescript`: **98.164** birim (function 48.621 · loop 31.296 · macro 9.453 · class 6.957 · namespace 1.837), 44,0 s, 3.598 dosya, AST hatası 0.
+- AST dosya bayt kapsamı: **%15,4 → %66,2** (hedef ≥%50); AST'ye giren dosyalarda birim kapsamı %85,1 → %88,0.
+
 ## [FAZ-24] - 2026-11-10 — 2026-11-10
 ### Fixed
 - **Boş kolonlar birleştirilir, başlık adı komşudan alınır (`pipeline/extractor.py`)**: `_table_markdown` tablo markdown'ını üretmeden önce hücre matrisini okur; tamamen boş kolonları atar (yer tutucu `Col2`/`Col4` adları markdown'a sızmaz) ve veri taşıyan adsız kolona komşu birleşik başlık hücresinin adını verir. Ek olarak tablo kayıtları `col_count`/`row_count`/`y0` alanlarını taşır.

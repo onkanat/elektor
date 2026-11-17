@@ -1398,6 +1398,8 @@ class ArchiveExtractor:
                 store_code=self.config.get("rendergit_store_code", True),
                 # S4: artımlı parse defteri (değişmeyen dosya yeniden parse edilmez)
                 manifest_path=Path("exports") / f"{project_id}_manifest.json",
+                # S5: dil seti (varsayılan python → davranış değişmez)
+                ast_lang=self.config.get("rendergit_ast_lang"),
             )
 
             # Store flattened repo text as an article entry in SQLite DB

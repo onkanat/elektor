@@ -274,6 +274,9 @@ Examples:
                                 help="rendergit: code_units filtresi (virgülle; varsayılan function,class,loop)")
     extract_parser.add_argument("--store-code", dest="store_code", type=str, default=None, metavar="0|1",
                                 help="rendergit: code kolonunu sakla (1, varsayılan) veya NULL bırak (0 → DB küçülür)")
+    # S5 (rendergit): tree-sitter ile C++/CUDA/Metal/TS birim çıkarımı (opt-in)
+    extract_parser.add_argument("--ast-lang", dest="ast_lang", type=str, default=None, metavar="DİLLER",
+                                help="rendergit: AST dil seti (virgülle; varsayılan python, ör. python,cpp,cuda,metal,typescript)")
 
     # Enrich subcommand
     enrich_parser = subparsers.add_parser("enrich", help="Enrich text using local Ollama model (Summary, Q&A, DPO, Turkish)")
@@ -421,6 +424,8 @@ Examples:
             rendergit_overrides["rendergit_units"] = args.units
         if getattr(args, "store_code", None) is not None:
             rendergit_overrides["rendergit_store_code"] = args.store_code
+        if getattr(args, "ast_lang", None):
+            rendergit_overrides["rendergit_ast_lang"] = args.ast_lang
         if rendergit_overrides and Path(args.config).is_file():
             cfg = json.loads(Path(args.config).read_text(encoding="utf-8"))
             cfg.update(rendergit_overrides)

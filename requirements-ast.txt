@@ -1,0 +1,8 @@
+# S5 (opsiyonel) — tree-sitter ile C++/CUDA/Metal/TS birim çıkarımı
+# ZORUNLU DEĞİL: kurulmazsa varsayılan Python AST yolu aynen çalışır (--ast-lang python).
+# Kurulum: .venv/bin/pip install -r requirements-ast.txt
+tree-sitter==0.26.1
+tree-sitter-cpp==0.23.4
+tree-sitter-cuda==0.21.2
+tree-sitter-metal==0.1.1
+tree-sitter-typescript==0.23.2

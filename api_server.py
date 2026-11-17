@@ -1113,6 +1113,8 @@ def clone_and_extract_code(payload: Dict[str, Any] = Body(...)):
     repo_url = payload.get("repo_url", "").strip()
     project_id = payload.get("project_id", "").strip() or "git_project"
     extract_ast = payload.get("extract_ast", True)
+    # S5: AST dil seti (varsayılan python; "python,cpp" ile tree-sitter yolu açılır)
+    ast_lang = payload.get("ast_lang", "python")
 
     if not repo_url:
         raise HTTPException(status_code=400, detail="repo_url parameter is required")
@@ -1157,10 +1159,12 @@ def clone_and_extract_code(payload: Dict[str, Any] = Body(...)):
             repo_url=repo_url,
             # S4: artımlı parse defteri — değişmeyen dosya yeniden parse edilmez
             manifest_path=Path("exports") / f"{project_id}_manifest.json",
+            # S5: dil seti (varsayılan python → çıktı değişmez)
+            ast_lang=ast_lang,
         )
 
-    # Count categories
-    counts = {"function": 0, "class": 0, "loop": 0}
+    # Count categories (S5: namespace/macro yalnız ast_lang ile açıldığında dolar)
+    counts = {"function": 0, "class": 0, "loop": 0, "namespace": 0, "macro": 0}
     for u in extracted_units:
         ut = u.get("unit_type")
         if ut in counts:
