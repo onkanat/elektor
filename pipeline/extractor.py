@@ -110,6 +110,105 @@ def stitch_page_texts(pages: list[str]) -> str:
     return result
 
 
+_PLACEHOLDER_COLUMN = re.compile(r"^Col\d+$")
+
+
+def _cell_matrix(tab) -> "list[list] | None":
+    """Markdown-formatted cell matrix, mirroring ``Table.to_markdown`` output.
+
+    ``Table.to_markdown`` writes bold markers and ``<br>`` breaks through the
+    semi-private ``extract_cells`` helper; this is the only way to obtain the
+    identical cell strings, hence the defensive import. Returns None when the
+    helper is unavailable so callers can fall back to the plain markdown.
+    """
+    try:
+        from pymupdf.table import extract_cells
+    except Exception:
+        try:
+            from fitz.table import extract_cells  # older PyMuPDF layouts
+        except Exception:
+            return None
+    textpage = getattr(tab, "textpage", None)
+    if textpage is None:
+        return None
+    matrix = []
+    for row in tab.rows:
+        matrix.append([
+            extract_cells(textpage, cell, markdown=True) if cell is not None else None
+            for cell in row.cells
+        ])
+    return matrix
+
+
+def _table_markdown(tab) -> str:
+    """GitHub Markdown for a detected table, without PyMuPDF column placeholders.
+
+    ``Table.to_markdown`` names every column whose header cell is empty
+    ``Col<N>`` and keeps columns that carry no data at all. Vertical rules that
+    do not separate real content (double rules, the frames of a merged header
+    cell) then leak into the output as ``|Bits|Col2|Name|Col4|Reset|``, while
+    datasheet register tables must read ``| Bits | Name | Description |`` and
+    match their top-left headers (USER_GUIDE 20.1).
+
+    So: columns that stay empty for the whole table are dropped, and a column
+    that keeps data but has an unnamed header borrows the name of the merged
+    cell next to it. Tables that need neither treatment are emitted verbatim by
+    ``Table.to_markdown`` (padding/merge filler included).
+    """
+    raw = tab.to_markdown().strip()
+    matrix = _cell_matrix(tab)
+    if not matrix:
+        return raw
+    col_count = len(matrix[0])
+    if col_count < 2 or any(len(row) != col_count for row in matrix):
+        return raw
+
+    names = [str(n).strip() if n else "" for n in list(getattr(tab.header, "names", []) or [])]
+    if len(names) != col_count:
+        return raw
+
+    body = matrix if getattr(tab.header, "external", False) else matrix[1:]
+    if not body:
+        return raw
+
+    def _is_placeholder(name: str) -> bool:
+        # PyMuPDF fabricates "Col3" for a header cell without text.
+        return (not name) or bool(_PLACEHOLDER_COLUMN.match(name))
+
+    empty_column = [
+        all(not (row[j] or "").strip() for row in body)
+        for j in range(col_count)
+    ]
+    drop = [empty_column[j] and _is_placeholder(names[j]) for j in range(col_count)]
+    kept = [j for j in range(col_count) if not drop[j]]
+    if not kept:
+        return raw
+
+    def _neighbour_name(j: int) -> str:
+        for k in range(j - 1, -1, -1):
+            if k in kept and not _is_placeholder(names[k]):
+                return names[k]
+        for k in range(j + 1, col_count):
+            if k in kept and not _is_placeholder(names[k]):
+                return names[k]
+        return ""
+
+    unnamed = [j for j in kept if _is_placeholder(names[j])]
+    if not any(drop) and not unnamed:
+        return raw
+
+    header = "|" + "|".join(
+        (_neighbour_name(j) if _is_placeholder(names[j]) else names[j]).replace("\n", "<br>")
+        for j in kept
+    ) + "|"
+    separator = "|" + "|".join("---" for _ in kept) + "|"
+    rows = [
+        "|" + "|".join((row[j] or "").strip() for j in kept) + "|"
+        for row in body
+    ]
+    return "\n".join([header, separator] + rows)
+
+
 def _detect_tables(page: "fitz.Page") -> list:
     """Line-based table detection that is NOT gated by the layout analyzer.
 
@@ -200,13 +299,15 @@ def extract_page_layout(page: fitz.Page) -> PageLayoutResult:
                 curr_y = b[3]
             caption_text = " ".join(" ".join(caption_parts).split())
 
-        md = tab.to_markdown().strip()
+        md = _table_markdown(tab)
         formatted_md = f"### {caption_text}\n\n{md}" if caption_text else md
         extracted_tables.append({
             "bbox": t_mask,
             "markdown": formatted_md,
             "caption": caption_text,
-            "y0": ty0 if not caption_text else min(ty0, blocks[start_idx][1])
+            "y0": ty0 if not caption_text else min(ty0, blocks[start_idx][1]),
+            "col_count": tab.col_count,
+            "row_count": tab.row_count
         })
 
     # 2. Extract spans via dict, filter header/footer and table regions
@@ -437,7 +538,17 @@ def extract_page_layout(page: fitz.Page) -> PageLayoutResult:
     full_text = "\n\n".join(md_chunks).strip()
     return PageLayoutResult(
         text=full_text,
-        tables=[{"bbox": t["bbox"], "markdown": t["markdown"], "caption": t["caption"]} for t in extracted_tables],
+        tables=[
+            {
+                "bbox": t["bbox"],
+                "markdown": t["markdown"],
+                "caption": t["caption"],
+                "y0": t["y0"],
+                "col_count": t.get("col_count", 0),
+                "row_count": t.get("row_count", 0),
+            }
+            for t in extracted_tables
+        ],
         table_masks=table_masks,
         code_blocks=[{"bbox": cb["bbox"], "code": cb["code"], "language": cb["language"]} for cb in extracted_code_blocks]
     )
