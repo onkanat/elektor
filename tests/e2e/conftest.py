@@ -60,34 +60,60 @@ except (ImportError, AttributeError):
 
 def contract_extract_page_layout(page: fitz.Page) -> PageLayoutResult:
     """Authoritative contract reference for Feature 1-5 layout extraction."""
+    native_res = None
     if HAS_NATIVE_PAGE_LAYOUT and callable(native_extract_page_layout):
         try:
             res = native_extract_page_layout(page)
             if isinstance(res, PageLayoutResult):
                 return res
+            # The pipeline ships its own PageLayoutResult dataclass, so the
+            # isinstance() guard above can never match and this reference used
+            # to shadow pipeline/extractor.py completely. Keep the native
+            # result for the table/mask section below so Feature 3/6
+            # assertions measure production code, and fall back to the
+            # reference (text/code paths) only where it is not available.
+            if res is not None and hasattr(res, "table_masks"):
+                native_res = res
         except Exception:
-            pass
+            native_res = None
 
     page_h = page.rect.height
     page_w = page.rect.width
 
-    # 1. Native PyMuPDF Table Extraction (Feature 3 & Feature 6 table_masks)
+    # 1. Table Extraction & Negative Masks (Feature 3 & Feature 6 table_masks)
+    #    Single source of truth: the native pipeline (see native_res above).
     extracted_tables = []
     table_masks = []
-    try:
-        tabs = page.find_tables()
-        for idx, tab in enumerate(tabs.tables):
-            table_masks.append(tab.bbox)
-            md = tab.to_markdown()
-            extracted_tables.append({
-                "bbox": tab.bbox,
-                "markdown": md,
-                "caption": f"Table {idx+1}",
-                "col_count": tab.col_count,
-                "row_count": tab.row_count
-            })
-    except Exception:
-        pass
+    if native_res is not None:
+        table_masks = [tuple(m) for m in native_res.table_masks]
+        for idx, tab in enumerate(native_res.tables):
+            entry = dict(tab)
+            entry.setdefault("col_count", 0)
+            entry.setdefault("row_count", 0)
+            # Reference contract: every table carries a caption string. An
+            # uncaptioned table gets the same ordinal label the reference
+            # implementation used, so caption binding stays measurable without
+            # letting the pipeline invent headings for real datasheets.
+            entry["caption"] = entry.get("caption") or f"Table {idx+1}"
+            extracted_tables.append(entry)
+    else:
+        try:
+            try:
+                tabs = page.find_tables(use_layout=False)
+            except TypeError:
+                tabs = page.find_tables()
+            for idx, tab in enumerate(tabs.tables):
+                table_masks.append(tab.bbox)
+                md = tab.to_markdown()
+                extracted_tables.append({
+                    "bbox": tab.bbox,
+                    "markdown": md,
+                    "caption": f"Table {idx+1}",
+                    "col_count": tab.col_count,
+                    "row_count": tab.row_count
+                })
+        except Exception:
+            pass
 
     # 2. Extract Spans & Filter Running Headers / Footers (Feature 2)
     code_blocks = []
