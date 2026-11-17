@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [FAZ-24] - 2026-11-10 — 2026-11-10
+### Fixed
+- **Tablo maskesi genişletme sonrası da uygulanır (`pipeline/layout_analyzer.py`, `pipeline/extractor.py`)**: Kırpma kutusu hesaplandıktan sonra tablo maskeleri yeniden yürürlüğe girer (`_enforce_table_masks`) — küme çekirdeği maskedeyse aday düşürülür, değilse kutu maskesiz en büyük banda kırpılır. Maske kaynağı da tamamlandı: tablo tespiti `use_layout=False` ile kapısız çalışır, böylece PyMuPDF'in yerleşim kapısı tek satırlık register tablolarını düşürmüyor ve tablo bbox'ını kırpmıyor. RP2040 s.100–125 sahte kırpma: 11 → 1 (kalan: gerçek Figure 14, s.123). s.120 Table 150 maskesi `(118.0, 735.6, 489.5, 759.1)` → `(115.0, 730.4, 539.3, 766.4)`.
 ### Added
 - **Token katmanı (Atropos'tan)**: Atropos arşivli **(04.07.2026)** — yalnız token-seviyesi veri hazırlama parçası alındı: `pipeline/token_layer.py` (vendor `atroposlib/utils/tokenize_for_trainer.py` @ `296a0bc5`, MIT — Nous Research) + `run.py tokens --project <id> --tokenizer <hf-id> [--max-len]` alt komutu; ihracatlar yanına `exports/<id>/dataset.tokens.jsonl` üretir (len(tokens)==len(loss_mask), mask {0,1}, DPO iki satır, kesme sondan `truncated` bayrağı). Testler: `tests/test_token_layer.py` (6 test, EXIT=0). Bağımlılıklar pinli: transformers==5.22.2, tokenizers==0.23.3, jinja2==3.1.6. RL katmanı (GRPO/PPO/advantages) ALINMADI.
 

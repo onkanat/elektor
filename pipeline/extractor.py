@@ -110,6 +110,34 @@ def stitch_page_texts(pages: list[str]) -> str:
     return result
 
 
+def _detect_tables(page: "fitz.Page") -> list:
+    """Line-based table detection that is NOT gated by the layout analyzer.
+
+    PyMuPDF >= 1.26 runs ``find_tables()`` with ``use_layout=True`` by default:
+    the line grid is then restricted/completed by ``page.get_layout()`` table
+    boxes. That gate has two measured side effects on datasheet pages:
+
+    * it truncates the reported ``Table.bbox`` to the layout region (RP2040
+      p.120, Table 150: (118.0, 735.6, 489.5, 759.1) instead of the drawn grid
+      (115.0, 730.4, 539.3, 766.4)) and drops single-row register tables
+      entirely (p.115: 2 of 6 tables), so the grid lines are never masked;
+    * it fabricates phantom tables out of aligned text columns (a two-column
+      text page without a single vector path is reported as a 50x2 table),
+      which then swallows the body text into a bogus markdown table.
+
+    The masks handed to ``DocumentLayoutAnalyzer`` must cover the *drawn* grid
+    (USER_GUIDE 20.2: table rules and corners are never cropped as figures),
+    so detection runs ungated. Older PyMuPDF builds without the keyword fall
+    back to the default call.
+    """
+    if not hasattr(page, "find_tables"):
+        return []
+    try:
+        return page.find_tables(use_layout=False).tables
+    except TypeError:
+        return page.find_tables().tables
+
+
 def extract_page_layout(page: fitz.Page) -> PageLayoutResult:
     """Extracts text, tables, and exclusion masks from a PDF page using PyMuPDF layout analysis."""
     if not hasattr(page, "find_tables"):
@@ -121,7 +149,8 @@ def extract_page_layout(page: fitz.Page) -> PageLayoutResult:
     height = float(rect.height)
 
     # 1. Native PyMuPDF table extraction & left-margin / top caption binding
-    tabs = page.find_tables().tables
+    #    (ungated line detection: see `_detect_tables` for why)
+    tabs = _detect_tables(page)
     table_masks: list[tuple[float, float, float, float]] = []
     extracted_tables: list[dict] = []
     consumed_line_bboxes: list[tuple[float, float, float, float]] = []

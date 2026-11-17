@@ -215,6 +215,18 @@ class DocumentLayoutAnalyzer:
             if final_rect.is_empty or final_rect.width <= 0 or final_rect.height <= 0:
                 continue
 
+            # Feature 6b: Table masks are re-applied AFTER boundary expansion.
+            # The mask check above only clears the *raw* drawing paths; word
+            # absorption (15 pt) and the 8 pt safety padding then grow the crop
+            # box, which lets it reach into a table region whose rules were
+            # already filtered out (RP2040 p.120: Table 150 at y=735.6-759.1
+            # ended up inside a (81.7, 706.4, 548.3, 775.4) "figure" crop).
+            # Masks therefore stay authoritative after expansion (USER_GUIDE
+            # 20.2: table inner rules/corners are never cropped as schematics).
+            final_rect = self._enforce_table_masks(final_rect, m_rect, expanded_masks)
+            if final_rect is None:
+                continue
+
             crop_id = f"p{page.number + 1}_fig_{idx+1}"
             crop_path = self.output_img_dir / f"{crop_id}.png"
 
@@ -248,6 +260,81 @@ class DocumentLayoutAnalyzer:
 
         # Feature 10: Non-Overlapping Figure Deduplication (IoU / Non-Maximum Suppression)
         return self._deduplicate_crops(candidates)
+
+    def _enforce_table_masks(
+        self,
+        final_rect: fitz.Rect,
+        core_rect: fitz.Rect,
+        masks: List[fitz.Rect],
+        min_side_pt: float = 36.0,
+        min_area_ratio: float = 0.25,
+    ) -> Optional[fitz.Rect]:
+        """Clips an expanded crop box so that it never intrudes into a table mask.
+
+        ``core_rect`` is the merged drawing cluster the candidate was built from;
+        ``final_rect`` is that cluster after word absorption + padding. Three
+        outcomes:
+
+        * no mask overlap -> ``final_rect`` unchanged (nothing to do);
+        * the cluster core itself sits inside a mask -> the cluster IS table
+          furniture (grid rules, cell frames), so the candidate is dropped
+          (returns ``None``) instead of producing a table-shard crop;
+        * the expansion merely touched a table -> the crop is trimmed back to
+          the largest free band that still contains the cluster core; a band
+          thinner than ``min_side_pt`` or keeping less than ``min_area_ratio``
+          of the request is discarded as a sliver and the candidate dropped.
+        """
+        if not masks:
+            return final_rect
+        rect = fitz.Rect(final_rect)
+        core = fitz.Rect(core_rect)
+        core_area = max(core.width * core.height, 1.0)
+        core_center = fitz.Point((core.x0 + core.x1) / 2.0, (core.y0 + core.y1) / 2.0)
+
+        # At most 4 trims: each pass removes one blocked band, and a box cannot
+        # be trimmed on the same side twice without becoming empty.
+        for _ in range(4):
+            hits = [m for m in masks if self._rect_overlap(rect, m) > 0.0]
+            if not hits:
+                return rect
+
+            blocked = hits[0]
+            for m in hits[1:]:
+                blocked = blocked | m
+
+            # Cluster inside the table region -> not a figure at all.
+            if blocked.contains(core_center):
+                return None
+
+            bands = [
+                fitz.Rect(rect.x0, rect.y0, rect.x1, blocked.y0),   # above
+                fitz.Rect(rect.x0, blocked.y1, rect.x1, rect.y1),   # below
+                fitz.Rect(rect.x0, rect.y0, blocked.x0, rect.y1),   # left
+                fitz.Rect(blocked.x1, rect.y0, rect.x1, rect.y1),   # right
+            ]
+            kept = [
+                b for b in bands
+                if not b.is_empty and b.width >= min_side_pt and b.height >= min_side_pt
+                and b.contains(core_center)
+            ]
+            if not kept:
+                return None
+            best = max(kept, key=lambda b: b.get_area())
+            if best.get_area() < min_area_ratio * (rect.width * rect.height):
+                return None
+            if best.get_area() < min_area_ratio * core_area:
+                return None
+            rect = best
+
+        return None
+
+    @staticmethod
+    def _rect_overlap(r1: fitz.Rect, r2: fitz.Rect) -> float:
+        """Area of the intersection of two rects (0.0 when disjoint)."""
+        inter = r1 & r2
+        if inter.is_empty or inter.width <= 0 or inter.height <= 0:
+            return 0.0
+        return inter.width * inter.height
 
     def _merge_rects(self, rects: List[fitz.Rect], threshold: float = 30.0) -> List[fitz.Rect]:
         if not rects:
