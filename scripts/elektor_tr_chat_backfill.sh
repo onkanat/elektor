@@ -13,7 +13,7 @@ LOCK="$ROOT/.elektor-nightly.lock"
 STRATA_URL="http://192.168.1.105:8080/v1/models"
 
 START="${1:-0}"
-END="${2:-1296}"
+END="${2:-1301}"
 BATCH="${3:-25}"
 
 mkdir -p "$LOG_DIR"

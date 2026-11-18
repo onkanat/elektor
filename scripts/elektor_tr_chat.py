@@ -64,7 +64,9 @@ def main():
     finally:
         analyzer.close()
     print(json.dumps({"ok": ok, "failed": failed, "missing_text": missing_text}, ensure_ascii=False))
-    return 0 if failed == 0 else 1
+    # A single low-content article must not stop the whole backfill. Stop only
+    # when the batch produced no rows at all despite having candidates.
+    return 0 if (failed == 0 or ok > 0) else 1
 
 
 if __name__ == "__main__":
