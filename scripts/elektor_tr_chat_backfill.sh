@@ -53,7 +53,7 @@ echo "--- chat rows complete; exporting at $(date '+%F %T') ---"
 RC=$?
 if [ "$RC" -ne 0 ]; then echo "export failed rc=$RC"; exit "$RC"; fi
 echo "--- tokenizing at $(date '+%F %T') ---"
-"$PY" run.py --config "$CONFIG" tokens
+"$PY" run.py tokens --project macair-teknik --tokenizer Qwen/Qwen2.5-0.5B-Instruct --max-len 8192
 RC=$?
 if [ "$RC" -ne 0 ]; then echo "tokenization failed rc=$RC"; exit "$RC"; fi
 echo "===== $(date '+%F %T %z') Turkish chat complete ====="
