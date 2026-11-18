@@ -1,16 +1,16 @@
 {
-  "active_project_id": "macair-pilot-gnu",
+  "active_project_id": "macair-teknik",
   "projects": {
     "rp01": {
       "project_id": "rp01",
-      "project_name": "rp-pico",
+      "project_name": "rp_pico",
       "config_file": "projects_rp01.json",
       "created_at": 1790193058.5006561,
       "last_accessed": 1793879089.8077707
     },
     "macair-teknik-pilot": {
       "project_id": "macair-teknik-pilot",
-      "project_name": "macair-teknik-pilot",
+      "project_name": "macair_teknik_pilot",
       "config_file": "projects_macair-teknik-pilot.json",
       "created_at": 1794477672.8707752,
       "last_accessed": 1795040469.040232
@@ -20,46 +20,46 @@
       "project_name": "macair_teknik",
       "config_file": "projects_macair-teknik.json",
       "created_at": 1794483201.7140753,
-      "last_accessed": 1795040459.9781992
+      "last_accessed": 1795041622.0218415
     },
     "macair-teknik-nightly": {
       "project_id": "macair-teknik-nightly",
-      "project_name": "macair_teknik",
+      "project_name": "macair_teknik_nightly",
       "config_file": "projects_macair-teknik-nightly.json",
       "created_at": 1794483201.7139945,
       "last_accessed": 1795040448.3064222
     },
     "macair-pilot-gnu": {
       "project_id": "macair-pilot-gnu",
-      "project_name": "macair_teknik_pilot",
+      "project_name": "macair_teknik_pilot_gnu",
       "config_file": "projects_macair-pilot-gnu.json",
       "created_at": 1794483201.7130525,
       "last_accessed": 1795040516.1140122
     },
     "macair-pilot-fms": {
       "project_id": "macair-pilot-fms",
-      "project_name": "macair_teknik_pilot",
+      "project_name": "macair_teknik_pilot_fms",
       "config_file": "projects_macair-pilot-fms.json",
       "created_at": 1794483201.7133152,
       "last_accessed": 1794483201.7133152
     },
     "macair-pilot-octave": {
       "project_id": "macair-pilot-octave",
-      "project_name": "macair_teknik_pilot",
+      "project_name": "macair_teknik_pilot_octave",
       "config_file": "projects_macair-pilot-octave.json",
       "created_at": 1794483201.7135293,
       "last_accessed": 1794483201.7135293
     },
     "macair-pilot-pico": {
       "project_id": "macair-pilot-pico",
-      "project_name": "macair_teknik_pilot",
+      "project_name": "macair_teknik_pilot_pico",
       "config_file": "projects_macair-pilot-pico.json",
       "created_at": 1794483201.7137215,
       "last_accessed": 1794483201.7137215
     },
     "kindi-0.6.0-full-retry": {
       "project_id": "kindi-0.6.0-full-retry",
-      "project_name": "kindi_0_6_0_full",
+      "project_name": "kindi_0_6_0_full_retry",
       "config_file": "projects_kindi-0.6.0-full-retry.json",
       "created_at": 1794570676.6223936,
       "last_accessed": 1794570676.6223936
