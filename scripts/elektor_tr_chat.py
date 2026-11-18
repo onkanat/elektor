@@ -7,6 +7,11 @@ Only updates enrichments.tr_multi_turn_chat; other fields are untouched.
 import argparse
 import json
 import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from pipeline.analyzer import ArchiveAnalyzer
 
