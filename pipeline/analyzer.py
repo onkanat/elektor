@@ -562,6 +562,69 @@ class ArchiveAnalyzer:
             "multi_turn_chat": json.dumps(result.get("multi_turn_chat", []), ensure_ascii=False)
         }
 
+    def generate_turkish_multi_turn_chat(self, article_id, title, text, tr_sft_qa=None):
+        """Generate a grounded, 4-turn Turkish technical dialogue for one article."""
+        print(f"Generating Turkish multi-turn chat [{article_id}]: {title}...")
+        truncated_text = text[:self.analyzer_max_chars] if len(text) > self.analyzer_max_chars else text
+
+        sft_block = ""
+        try:
+            items = json.loads(tr_sft_qa) if isinstance(tr_sft_qa, str) else (tr_sft_qa or [])
+            if isinstance(items, list):
+                chunks = []
+                for i, item in enumerate(items[:3], 1):
+                    if not isinstance(item, dict):
+                        continue
+                    q = str(item.get("question", "")).strip()
+                    a = str(item.get("answer", "")).strip()
+                    if q and a:
+                        chunks.append(f"Soru {i}: {q}\nCevap {i}: {a}")
+                sft_block = "\n\n".join(chunks)
+        except Exception:
+            sft_block = ""
+
+        system_prompt = (
+            "Sen kıdemli bir Türkçe teknik eğitmen ve veri seti mimarısın. "
+            "Yalnızca geçerli JSON üretirsin; JSON dışında açıklama yazmazsın. "
+            "Teknik terimleri, yazmaç adlarını, protokolleri, birimleri ve LaTeX formüllerini korursun."
+        )
+        user_prompt = (
+            f"Makale başlığı: {title}\n"
+            f"Kaynak metin:\n{truncated_text}\n\n"
+            f"Mevcut Türkçe soru-cevap bağlamı:\n{sft_block}\n\n"
+            "Görev: Bu kaynağa dayanan, gerçek bir Türkçe teknik destek diyalogu üret. "
+            "Diyalog tam olarak 4 tur olmalı ve sırasıyla user, assistant, user, assistant rollerini içermelidir. "
+            "İlk kullanıcı somut bir mühendislik problemi sorsun; asistan kaynağa dayalı yönlendirme yapsın; "
+            "ikinci kullanıcı ayrıntılı bir takip sorusu/ölçüm sonucu versin; son asistan çözümü ve gerekçesini açıklasın. "
+            "Tüm içerik doğal ve akıcı Türkçe olmalı; İngilizce cümle kullanma. "
+            "Lisans, telif, garanti, künye veya içindekiler hakkında konuşma. "
+            "Uydurma teknik değer ekleme; kaynakta yoksa varsayım olduğunu açıkça belirt. "
+            "Çıktı yalnızca şu JSON nesnesi olsun:\n"
+            "{\"multi_turn_chat\":["
+            "{\"role\":\"user\",\"content\":\"...\"},"
+            "{\"role\":\"assistant\",\"content\":\"...\"},"
+            "{\"role\":\"user\",\"content\":\"...\"},"
+            "{\"role\":\"assistant\",\"content\":\"...\"}]}"
+        )
+
+        result = self.call_ollama_json(
+            system_prompt, user_prompt,
+            model=self.model_name,
+            num_predict=self.analyzer_max_tokens,
+        )
+        if not isinstance(result, dict):
+            return ""
+        chat = result.get("multi_turn_chat") or result.get("tr_multi_turn_chat") or []
+        if not isinstance(chat, list) or len(chat) < 4:
+            return ""
+        chat = chat[:4]
+        expected_roles = ["user", "assistant", "user", "assistant"]
+        if [str(t.get("role", "")) for t in chat if isinstance(t, dict)] != expected_roles:
+            return ""
+        if any(not isinstance(t, dict) or not str(t.get("content", "")).strip() for t in chat):
+            return ""
+        return json.dumps(chat, ensure_ascii=False)
+
     def translate_enrichments_to_turkish(self, title, summary, sft_qa_raw, dpo_pairs_raw):
         """Translates title, summary, 10 Q&A pairs, and DPO pairs into Turkish using TranslateGemma with technical term preservation"""
         import re
@@ -608,7 +671,7 @@ class ArchiveAnalyzer:
         for idx, item in enumerate(dpo_pairs_list):
             if isinstance(item, dict):
                 q_txt = item.get('question', '')
-                c_txt = item.get('chosen', '')
+                c_txt = item.get('chosen', item.get('answer', ''))
                 r_txt = item.get('rejected', '')
             else:
                 q_txt = str(item)
@@ -723,8 +786,13 @@ class ArchiveAnalyzer:
                     "rejected": cleaned_dr
                 })
             else:
-                # Fallback
-                tr_dpo_pairs.append(dpo_pairs_list[i-1])
+                # Fallback: normalize legacy DPO rows that used `answer`
+                # instead of `chosen`, so the exporter can consume them.
+                orig = dpo_pairs_list[i-1]
+                if isinstance(orig, dict) and "chosen" not in orig and "answer" in orig:
+                    orig = dict(orig)
+                    orig["chosen"] = orig["answer"]
+                tr_dpo_pairs.append(orig)
         
         # Check if we parsed anything at all. If empty, trigger fallback
         if not tr_sft_qa:
