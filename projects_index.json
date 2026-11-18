@@ -1,5 +1,5 @@
 {
-  "active_project_id": "macair-teknik-pilot",
+  "active_project_id": "macair-pilot-gnu",
   "projects": {
     "rp01": {
       "project_id": "rp01",
@@ -13,28 +13,28 @@
       "project_name": "macair-teknik-pilot",
       "config_file": "projects_macair-teknik-pilot.json",
       "created_at": 1794477672.8707752,
-      "last_accessed": 1794477672.8707762
+      "last_accessed": 1795040469.040232
     },
     "macair-teknik": {
       "project_id": "macair-teknik",
-      "project_name": "macair-teknik",
-      "config_file": "projects_macair-teknik-nightly.json",
+      "project_name": "macair_teknik",
+      "config_file": "projects_macair-teknik.json",
       "created_at": 1794483201.7140753,
-      "last_accessed": 1794483201.714076
+      "last_accessed": 1795040459.9781992
     },
     "macair-teknik-nightly": {
       "project_id": "macair-teknik-nightly",
       "project_name": "macair_teknik",
       "config_file": "projects_macair-teknik-nightly.json",
       "created_at": 1794483201.7139945,
-      "last_accessed": 1794483201.7139945
+      "last_accessed": 1795040448.3064222
     },
     "macair-pilot-gnu": {
       "project_id": "macair-pilot-gnu",
       "project_name": "macair_teknik_pilot",
       "config_file": "projects_macair-pilot-gnu.json",
       "created_at": 1794483201.7130525,
-      "last_accessed": 1794483201.7130525
+      "last_accessed": 1795040516.1140122
     },
     "macair-pilot-fms": {
       "project_id": "macair-pilot-fms",

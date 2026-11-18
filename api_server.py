@@ -127,54 +127,91 @@ def list_projects():
 
 @app.post("/api/projects/select")
 def select_project(payload: Dict[str, Any] = Body(...)):
-    project_id = payload.get("project_id")
+    """Select a project by its registry id.
+
+    The registry entry's `config_file` is authoritative.  Project configs may
+    legitimately have a different internal `project_id` (for example a nightly
+    alias), so never derive a filename or overwrite db/qdrant paths from the
+    registry key alone.  Silent path rewriting previously made the UI point at
+    non-existent databases such as database/macair-teknik-nightly.db.
+    """
+    project_id = str(payload.get("project_id", "")).strip()
     if not project_id:
         raise HTTPException(status_code=400, detail="project_id required")
-        
+
     registry = get_projects_registry()
     projects = registry.get("projects", {})
-    if project_id not in projects:
+    entry = projects.get(project_id)
+    if not entry:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
 
-    # Update active project and timestamp
-    registry["active_project_id"] = project_id
-    projects[project_id]["last_accessed"] = time.time()
-    save_projects_registry(registry)
-
-    # Load project's specific config if saved under projects_<project_id>.json
-    proj_config_path = Path(f"projects_{project_id}.json")
-    proj_config = {}
-    if proj_config_path.exists():
-        try:
-            with open(proj_config_path, "r", encoding="utf-8") as f:
-                proj_config = json.load(f)
-        except Exception:
-            pass
+    # Load exactly the config registered for this project.  Do not guess
+    # projects_<registry_id>.json: many projects use a filename that differs
+    # from their registry key.
+    config_file = str(entry.get("config_file") or f"projects_{project_id}.json")
+    proj_config_path = Path(config_file)
+    if not proj_config_path.exists():
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Project config file is missing",
+                "project_id": project_id,
+                "config_file": config_file,
+            },
+        )
+    try:
+        with open(proj_config_path, "r", encoding="utf-8") as f:
+            proj_config = json.load(f)
+    except Exception as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": f"Project config could not be read: {e}", "config_file": config_file},
+        )
 
     current_config = get_config()
     target_config = dict(current_config)
     target_config.update(proj_config)
 
-    # Force sync project_id, database path, and qdrant paths for selected project
-    target_config["project_id"] = project_id
-    target_config["dataset_name"] = projects[project_id].get("project_name", target_config.get("dataset_name", project_id))
-    
-    expected_db = f"database/{project_id}.db"
-    if not target_config.get("db_path") or not target_config["db_path"].endswith(f"{project_id}.db"):
-        target_config["db_path"] = expected_db
-        
-    if not target_config.get("qdrant_db_path") or project_id not in target_config["qdrant_db_path"]:
-        target_config["qdrant_db_path"] = f"qdrant_{project_id}"
+    # Project config is the source of truth.  Only supply defaults when a
+    # legacy/partial config omits a field; never replace an existing path.
+    # The project file's own id wins; if it omits one, fall back to the
+    # registry key.  Never inherit the previously active project's id.
+    config_project_id = str(proj_config.get("project_id") or project_id)
+    target_config["project_id"] = config_project_id
+    target_config.setdefault("dataset_name", entry.get("project_name") or config_project_id)
+    target_config.setdefault("dataset_name_tr", f"{target_config['dataset_name']}_tr")
+    target_config.setdefault("db_path", f"database/{config_project_id}.db")
+    target_config.setdefault("qdrant_db_path", f"qdrant_{config_project_id}")
+    target_config.setdefault("qdrant_collection_name", f"{config_project_id}_articles")
 
-    if not target_config.get("qdrant_collection_name") or project_id not in target_config["qdrant_collection_name"]:
-        target_config["qdrant_collection_name"] = f"{project_id}_articles"
+    warnings = []
+    db_file = Path(str(target_config["db_path"]))
+    qdrant_dir = Path(str(target_config["qdrant_db_path"]))
+    if not db_file.exists():
+        warnings.append(f"SQLite file not found: {db_file}")
+    if not qdrant_dir.exists():
+        warnings.append(f"Qdrant directory not found: {qdrant_dir}")
+    if config_project_id != project_id:
+        warnings.append(
+            f"Registry id '{project_id}' maps to config project_id '{config_project_id}' (config_file={config_file})"
+        )
 
-    # Save to config.json AND projects_<project_id>.json
+    # Commit the active selection only after the config has been validated and
+    # loaded.  Do not rewrite the project config file on selection; that was
+    # the source of path corruption.
+    registry["active_project_id"] = project_id
+    projects[project_id]["last_accessed"] = time.time()
+    save_projects_registry(registry)
     save_config(target_config)
-    with open(proj_config_path, "w", encoding="utf-8") as f:
-        json.dump(target_config, f, indent=2, ensure_ascii=False)
 
-    return {"status": "success", "active_project_id": project_id, "config": target_config}
+    return {
+        "status": "success",
+        "active_project_id": project_id,
+        "config_project_id": config_project_id,
+        "config_file": config_file,
+        "warnings": warnings,
+        "config": target_config,
+    }
 
 @app.post("/api/projects/create")
 def create_project(payload: Dict[str, Any] = Body(...)):
